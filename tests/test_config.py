@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from executiveai.config import Settings
+from koda2.config import Settings
 
 
 class TestSettings:
@@ -16,25 +16,25 @@ class TestSettings:
     def test_default_values(self) -> None:
         """Settings loads with sane defaults."""
         s = Settings(
-            executiveai_env="test",
+            koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
-            executiveai_log_level="INFO",
+            koda2_log_level="INFO",
         )
-        assert s.executiveai_env == "test"
+        assert s.koda2_env == "test"
         assert s.api_port == 8000
-        assert s.executiveai_log_level == "INFO"
+        assert s.koda2_log_level == "INFO"
         assert s.llm_default_provider == "openai"
 
     def test_data_dir_creation(self, tmp_path) -> None:
         """data_dir property creates the directory."""
-        s = Settings(executiveai_env="test", database_url="sqlite+aiosqlite:///:memory:")
+        s = Settings(koda2_env="test", database_url="sqlite+aiosqlite:///:memory:")
         path = s.data_dir
         assert path.exists()
 
     def test_allowed_telegram_ids_parsing(self) -> None:
         """Telegram IDs are parsed from comma-separated string."""
         s = Settings(
-            executiveai_env="test",
+            koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
             telegram_allowed_user_ids="123, 456, 789",
         )
@@ -43,7 +43,7 @@ class TestSettings:
     def test_allowed_telegram_ids_empty(self) -> None:
         """Empty telegram IDs returns empty list."""
         s = Settings(
-            executiveai_env="test",
+            koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
             telegram_allowed_user_ids="",
         )
@@ -52,7 +52,7 @@ class TestSettings:
     def test_has_provider(self) -> None:
         """has_provider checks for API key presence."""
         s = Settings(
-            executiveai_env="test",
+            koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
             openai_api_key="sk-test-key",
         )
@@ -63,8 +63,8 @@ class TestSettings:
     def test_encryption_key_empty(self) -> None:
         """Empty encryption key is allowed (ephemeral key generated at runtime)."""
         s = Settings(
-            executiveai_env="test",
+            koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
-            executiveai_encryption_key="",
+            koda2_encryption_key="",
         )
-        assert s.executiveai_encryption_key == ""
+        assert s.koda2_encryption_key == ""

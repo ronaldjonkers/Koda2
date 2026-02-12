@@ -12,14 +12,14 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-os.environ.setdefault("EXECUTIVEAI_ENV", "test")
+os.environ.setdefault("KODA2_ENV", "test")
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///:memory:")
-os.environ.setdefault("CHROMA_PERSIST_DIR", "/tmp/executiveai_test_chroma")
-os.environ.setdefault("EXECUTIVEAI_SECRET_KEY", "test-secret-key-do-not-use")
-os.environ.setdefault("EXECUTIVEAI_LOG_LEVEL", "WARNING")
+os.environ.setdefault("CHROMA_PERSIST_DIR", "/tmp/koda2_test_chroma")
+os.environ.setdefault("KODA2_SECRET_KEY", "test-secret-key-do-not-use")
+os.environ.setdefault("KODA2_LOG_LEVEL", "WARNING")
 
-from executiveai.config import Settings, get_settings
-from executiveai.database import Base
+from koda2.config import Settings, get_settings
+from koda2.database import Base
 
 
 @pytest.fixture(scope="session")
@@ -34,11 +34,11 @@ def event_loop():
 def settings() -> Settings:
     """Return test settings."""
     return Settings(
-        executiveai_env="test",
+        koda2_env="test",
         database_url="sqlite+aiosqlite:///:memory:",
-        chroma_persist_dir="/tmp/executiveai_test_chroma",
-        executiveai_secret_key="test-secret-key",
-        executiveai_log_level="WARNING",
+        chroma_persist_dir="/tmp/koda2_test_chroma",
+        koda2_secret_key="test-secret-key",
+        koda2_log_level="WARNING",
     )
 
 

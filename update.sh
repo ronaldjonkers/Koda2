@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-# ExecutiveAI — Update Script
+# Koda2 — Update Script
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -18,7 +18,7 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}       ExecutiveAI — Update                        ${NC}"
+echo -e "${BLUE}       Koda2 — Update                        ${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -52,7 +52,7 @@ ok "Dependencies updated"
 info "Updating database..."
 python -c "
 import asyncio
-from executiveai.database import init_db
+from koda2.database import init_db
 asyncio.run(init_db())
 " 2>/dev/null && ok "Database updated" || warn "Database update skipped"
 
@@ -90,6 +90,6 @@ fi
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}       ExecutiveAI updated successfully!           ${NC}"
+echo -e "${GREEN}       Koda2 updated successfully!           ${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""

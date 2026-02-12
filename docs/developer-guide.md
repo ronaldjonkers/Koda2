@@ -1,10 +1,10 @@
-# ExecutiveAI Developer Guide
+# Koda2 Developer Guide
 
 ## Project Structure
 
 ```
 Koda2/
-├── executiveai/           # Main package
+├── koda2/           # Main package
 │   ├── api/               # FastAPI route definitions
 │   ├── modules/           # Functional modules (1-10)
 │   │   ├── memory/        # Vector DB + structured user profiles
@@ -46,17 +46,17 @@ module/
 
 ## Adding a New Module
 
-1. Create directory under `executiveai/modules/`
+1. Create directory under `koda2/modules/`
 2. Implement `__init__.py` with public exports
 3. Create `service.py` with the main service class
 4. Wire into `orchestrator.py`
-5. Add API routes in `executiveai/api/routes.py`
+5. Add API routes in `koda2/api/routes.py`
 6. Create tests in `tests/test_<module>.py`
 7. Update documentation
 
 ## Creating Plugins
 
-Plugins extend ExecutiveAI dynamically. Place `.py` files in the `plugins/` directory.
+Plugins extend Koda2 dynamically. Place `.py` files in the `plugins/` directory.
 
 ```python
 class MyPlugin:

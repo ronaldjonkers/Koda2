@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from executiveai.modules.memory.vector_store import VectorMemory
+from koda2.modules.memory.vector_store import VectorMemory
 
 
 class TestVectorMemory:
@@ -15,10 +15,10 @@ class TestVectorMemory:
     @pytest.fixture
     def vector_memory(self, tmp_path) -> VectorMemory:
         """Create a VectorMemory instance with a temp directory."""
-        with patch("executiveai.modules.memory.vector_store.get_settings") as mock:
+        with patch("koda2.modules.memory.vector_store.get_settings") as mock:
             mock.return_value = MagicMock(chroma_persist_dir=str(tmp_path / "chroma"))
             # Reset the client singleton
-            import executiveai.modules.memory.vector_store as vs
+            import koda2.modules.memory.vector_store as vs
             vs._client = None
             return VectorMemory(collection_name="test_memory")
 

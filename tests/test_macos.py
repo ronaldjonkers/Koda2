@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from executiveai.modules.macos.service import MacOSService
+from koda2.modules.macos.service import MacOSService
 
 
 class TestMacOSService:
@@ -60,9 +60,9 @@ class TestMacOSService:
     async def test_read_file(self, macos: MacOSService, tmp_path: Path) -> None:
         """read_file returns file contents."""
         test_file = tmp_path / "test.txt"
-        test_file.write_text("Hello, ExecutiveAI!")
+        test_file.write_text("Hello, Koda2!")
         content = await macos.read_file(str(test_file))
-        assert content == "Hello, ExecutiveAI!"
+        assert content == "Hello, Koda2!"
 
     @pytest.mark.asyncio
     async def test_read_file_not_found(self, macos: MacOSService) -> None:

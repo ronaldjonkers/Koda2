@@ -6,7 +6,7 @@ import datetime as dt
 
 import pytest
 
-from executiveai.modules.calendar.models import (
+from koda2.modules.calendar.models import (
     Attendee,
     CalendarEvent,
     CalendarProvider,

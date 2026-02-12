@@ -1,1 +1,1 @@
-"""ExecutiveAI test suite."""
+"""Koda2 test suite."""

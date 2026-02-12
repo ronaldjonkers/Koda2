@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from executiveai.modules.self_improve.service import SelfImproveService
+from koda2.modules.self_improve.service import SelfImproveService
 
 
 class TestSelfImproveService:

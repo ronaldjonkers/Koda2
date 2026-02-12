@@ -7,7 +7,7 @@ Accepted
 2026-02-12
 
 ## Context
-ExecutiveAI requires integration with AI/LLM providers, calendar systems (EWS, Google, Graph API, CalDAV), email (IMAP/SMTP, Gmail API), messaging platforms (Telegram, WhatsApp), document generation, image generation, macOS system integration, and a self-improvement engine. The stack must support all modules efficiently.
+Koda2 requires integration with AI/LLM providers, calendar systems (EWS, Google, Graph API, CalDAV), email (IMAP/SMTP, Gmail API), messaging platforms (Telegram, WhatsApp), document generation, image generation, macOS system integration, and a self-improvement engine. The stack must support all modules efficiently.
 
 ## Decision
 **Primary Language: Python 3.12+**

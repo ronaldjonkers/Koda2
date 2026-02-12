@@ -1,8 +1,8 @@
-# ExecutiveAI
+# Koda2
 
 **Professional AI Executive Assistant — Fully Automated Director-Level Secretary**
 
-ExecutiveAI is a modular, scalable, and self-improving AI assistant that manages calendars, emails, tasks, documents, and communications across multiple platforms.
+Koda2 is a modular, scalable, and self-improving AI assistant that manages calendars, emails, tasks, documents, and communications across multiple platforms.
 
 ## Features
 
@@ -22,7 +22,7 @@ ExecutiveAI is a modular, scalable, and self-improving AI assistant that manages
 ## Architecture
 
 ```
-executiveai/
+koda2/
 ├── api/              # FastAPI routes
 ├── modules/
 │   ├── memory/       # Module 1: User profile + vector memory
@@ -61,7 +61,7 @@ python setup_wizard.py
 
 ```bash
 source .venv/bin/activate
-executiveai
+koda2
 ```
 
 ### Docker
@@ -109,7 +109,7 @@ See `.env.example` for all available configuration options.
 ### Via API
 
 ```bash
-# Chat with ExecutiveAI
+# Chat with Koda2
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "Schedule a meeting with John next Tuesday at 10am", "user_id": "ronald"}'
@@ -135,7 +135,7 @@ curl -X POST http://localhost:8000/api/documents/generate \
 ```bash
 source .venv/bin/activate
 pytest                              # Run all tests
-pytest --cov=executiveai            # With coverage report
+pytest --cov=koda2            # With coverage report
 pytest tests/test_calendar.py -v    # Single module
 ```
 

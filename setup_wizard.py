@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ExecutiveAI — Interactive configuration wizard for first-time setup."""
+"""Koda2 — Interactive configuration wizard for first-time setup."""
 
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ def main() -> None:
     """Run the interactive setup wizard."""
     env_path = Path(".env")
 
-    print_header("ExecutiveAI — Setup Wizard")
-    print("  This wizard will help you configure ExecutiveAI.")
+    print_header("Koda2 — Setup Wizard")
+    print("  This wizard will help you configure Koda2.")
     print("  Press Enter to keep defaults. Press Ctrl+C to cancel.\n")
 
     config: dict[str, str] = {}
@@ -63,18 +63,18 @@ def main() -> None:
 
     # ── General ──────────────────────────────────────────────────
     print_header("General Settings")
-    config["EXECUTIVEAI_ENV"] = ask("Environment", config.get("EXECUTIVEAI_ENV", "development"))
-    config["EXECUTIVEAI_LOG_LEVEL"] = ask("Log level", config.get("EXECUTIVEAI_LOG_LEVEL", "INFO"))
+    config["KODA2_ENV"] = ask("Environment", config.get("KODA2_ENV", "development"))
+    config["KODA2_LOG_LEVEL"] = ask("Log level", config.get("KODA2_LOG_LEVEL", "INFO"))
     config["API_PORT"] = ask("API port", config.get("API_PORT", "8000"))
 
     # Generate keys if missing
-    if not config.get("EXECUTIVEAI_SECRET_KEY") or config["EXECUTIVEAI_SECRET_KEY"] == "change-me":
+    if not config.get("KODA2_SECRET_KEY") or config["KODA2_SECRET_KEY"] == "change-me":
         import secrets
-        config["EXECUTIVEAI_SECRET_KEY"] = secrets.token_urlsafe(32)
+        config["KODA2_SECRET_KEY"] = secrets.token_urlsafe(32)
         print("  Secret key: auto-generated ✓")
 
-    if not config.get("EXECUTIVEAI_ENCRYPTION_KEY"):
-        config["EXECUTIVEAI_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
+    if not config.get("KODA2_ENCRYPTION_KEY"):
+        config["KODA2_ENCRYPTION_KEY"] = base64.urlsafe_b64encode(os.urandom(32)).decode()
         print("  Encryption key: auto-generated ✓")
 
     # ── LLM Providers ────────────────────────────────────────────
@@ -178,7 +178,7 @@ def main() -> None:
     print("\n  Initializing database...")
     try:
         import asyncio
-        from executiveai.database import init_db
+        from koda2.database import init_db
         asyncio.run(init_db())
         print("  Database initialized ✓")
     except Exception as e:
@@ -186,9 +186,9 @@ def main() -> None:
 
     # ── Summary ──────────────────────────────────────────────────
     print_header("Setup Complete!")
-    print("  Start ExecutiveAI:")
+    print("  Start Koda2:")
     print("    source .venv/bin/activate")
-    print("    executiveai")
+    print("    koda2")
     print("")
     print("  Or with Docker:")
     print("    docker compose up -d")

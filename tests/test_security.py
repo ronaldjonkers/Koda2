@@ -8,8 +8,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from executiveai.security.encryption import encrypt, decrypt, _get_cipher
-from executiveai.security.rbac import Permission, Role, ROLE_PERMISSIONS, UserIdentity
+from koda2.security.encryption import encrypt, decrypt, _get_cipher
+from koda2.security.rbac import Permission, Role, ROLE_PERMISSIONS, UserIdentity
 
 
 class TestEncryption:
@@ -18,7 +18,7 @@ class TestEncryption:
     @pytest.fixture(autouse=True)
     def reset_cipher(self):
         """Reset the global cipher before each test."""
-        import executiveai.security.encryption as enc
+        import koda2.security.encryption as enc
         enc._cipher = None
         yield
         enc._cipher = None
@@ -26,9 +26,9 @@ class TestEncryption:
     def test_encrypt_decrypt_roundtrip(self) -> None:
         """Encrypting then decrypting returns original text."""
         key = base64.urlsafe_b64encode(os.urandom(32)).decode()
-        with patch("executiveai.security.encryption.get_settings") as mock:
-            mock.return_value = MagicMock(executiveai_encryption_key=key)
-            plaintext = "Hello, ExecutiveAI!"
+        with patch("koda2.security.encryption.get_settings") as mock:
+            mock.return_value = MagicMock(koda2_encryption_key=key)
+            plaintext = "Hello, Koda2!"
             encrypted = encrypt(plaintext)
             assert encrypted != plaintext
             decrypted = decrypt(encrypted)
@@ -37,11 +37,11 @@ class TestEncryption:
     def test_encrypt_produces_different_ciphertexts(self) -> None:
         """Same plaintext produces different ciphertexts due to random nonce."""
         key = base64.urlsafe_b64encode(os.urandom(32)).decode()
-        with patch("executiveai.security.encryption.get_settings") as mock:
-            mock.return_value = MagicMock(executiveai_encryption_key=key)
+        with patch("koda2.security.encryption.get_settings") as mock:
+            mock.return_value = MagicMock(koda2_encryption_key=key)
             plaintext = "Test data"
             ct1 = encrypt(plaintext)
-            import executiveai.security.encryption as enc
+            import koda2.security.encryption as enc
             enc._cipher = None
             ct2 = encrypt(plaintext)
             assert ct1 != ct2
@@ -50,22 +50,22 @@ class TestEncryption:
         """Decryption with wrong key raises an error."""
         key1 = base64.urlsafe_b64encode(os.urandom(32)).decode()
         key2 = base64.urlsafe_b64encode(os.urandom(32)).decode()
-        import executiveai.security.encryption as enc
+        import koda2.security.encryption as enc
 
-        with patch("executiveai.security.encryption.get_settings") as mock:
-            mock.return_value = MagicMock(executiveai_encryption_key=key1)
+        with patch("koda2.security.encryption.get_settings") as mock:
+            mock.return_value = MagicMock(koda2_encryption_key=key1)
             encrypted = encrypt("secret data")
 
         enc._cipher = None
-        with patch("executiveai.security.encryption.get_settings") as mock:
-            mock.return_value = MagicMock(executiveai_encryption_key=key2)
+        with patch("koda2.security.encryption.get_settings") as mock:
+            mock.return_value = MagicMock(koda2_encryption_key=key2)
             with pytest.raises(Exception):
                 decrypt(encrypted)
 
     def test_ephemeral_key_generated_when_empty(self) -> None:
         """When no key is configured, an ephemeral key is generated."""
-        with patch("executiveai.security.encryption.get_settings") as mock:
-            mock.return_value = MagicMock(executiveai_encryption_key="")
+        with patch("koda2.security.encryption.get_settings") as mock:
+            mock.return_value = MagicMock(koda2_encryption_key="")
             cipher = _get_cipher()
             assert cipher is not None
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from executiveai.modules.email.models import (
+from koda2.modules.email.models import (
     EmailAttachment,
     EmailFilter,
     EmailMessage,
@@ -81,13 +81,13 @@ class TestEmailService:
         """Emails are sorted by priority heuristics."""
         from unittest.mock import MagicMock, patch
 
-        with patch("executiveai.modules.email.service.get_settings") as mock:
+        with patch("koda2.modules.email.service.get_settings") as mock:
             mock.return_value = MagicMock(
                 imap_server="", imap_username="",
                 smtp_server="", smtp_username="",
                 google_credentials_file="nonexistent.json",
             )
-            from executiveai.modules.email.service import EmailService
+            from koda2.modules.email.service import EmailService
             service = EmailService()
 
             emails = [
@@ -106,13 +106,13 @@ class TestEmailService:
         """Email templates are rendered with Jinja2."""
         from unittest.mock import MagicMock, patch
 
-        with patch("executiveai.modules.email.service.get_settings") as mock:
+        with patch("koda2.modules.email.service.get_settings") as mock:
             mock.return_value = MagicMock(
                 imap_server="", imap_username="",
                 smtp_server="", smtp_username="",
                 google_credentials_file="nonexistent.json",
             )
-            from executiveai.modules.email.service import EmailService
+            from koda2.modules.email.service import EmailService
             service = EmailService()
 
             tmpl = EmailTemplate(
@@ -129,13 +129,13 @@ class TestEmailService:
         """Rendering a missing template raises ValueError."""
         from unittest.mock import MagicMock, patch
 
-        with patch("executiveai.modules.email.service.get_settings") as mock:
+        with patch("koda2.modules.email.service.get_settings") as mock:
             mock.return_value = MagicMock(
                 imap_server="", imap_username="",
                 smtp_server="", smtp_username="",
                 google_credentials_file="nonexistent.json",
             )
-            from executiveai.modules.email.service import EmailService
+            from koda2.modules.email.service import EmailService
             service = EmailService()
 
             with pytest.raises(ValueError, match="Template not found"):

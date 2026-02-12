@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-# ExecutiveAI — One-command installer (macOS / Linux)
+# Koda2 — One-command installer (macOS / Linux)
 # Idempotent: safe to run multiple times.
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -21,7 +21,7 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}       ExecutiveAI — Installation                  ${NC}"
+echo -e "${BLUE}       Koda2 — Installation                  ${NC}"
 echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -80,7 +80,7 @@ info "Upgrading pip..."
 pip install --upgrade pip --quiet
 
 # ── 5. Install dependencies ─────────────────────────────────────────
-info "Installing ExecutiveAI and dependencies..."
+info "Installing Koda2 and dependencies..."
 pip install -e ".[dev]" --quiet
 ok "Dependencies installed"
 
@@ -99,24 +99,24 @@ else
 fi
 
 # ── 8. Generate encryption key if not set ────────────────────────────
-if ! grep -q "EXECUTIVEAI_ENCRYPTION_KEY=." .env 2>/dev/null; then
+if ! grep -q "KODA2_ENCRYPTION_KEY=." .env 2>/dev/null; then
     ENC_KEY=$(python -c "
 import base64, os
 print(base64.urlsafe_b64encode(os.urandom(32)).decode())
 ")
-    if grep -q "EXECUTIVEAI_ENCRYPTION_KEY=" .env; then
-        sed -i.bak "s|EXECUTIVEAI_ENCRYPTION_KEY=.*|EXECUTIVEAI_ENCRYPTION_KEY=$ENC_KEY|" .env
+    if grep -q "KODA2_ENCRYPTION_KEY=" .env; then
+        sed -i.bak "s|KODA2_ENCRYPTION_KEY=.*|KODA2_ENCRYPTION_KEY=$ENC_KEY|" .env
         rm -f .env.bak
     else
-        echo "EXECUTIVEAI_ENCRYPTION_KEY=$ENC_KEY" >> .env
+        echo "KODA2_ENCRYPTION_KEY=$ENC_KEY" >> .env
     fi
     ok "Encryption key generated"
 fi
 
 # ── 9. Generate secret key if not set ────────────────────────────────
-if grep -q "EXECUTIVEAI_SECRET_KEY=change-me" .env 2>/dev/null; then
+if grep -q "KODA2_SECRET_KEY=change-me" .env 2>/dev/null; then
     SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-    sed -i.bak "s|EXECUTIVEAI_SECRET_KEY=change-me|EXECUTIVEAI_SECRET_KEY=$SECRET|" .env
+    sed -i.bak "s|KODA2_SECRET_KEY=change-me|KODA2_SECRET_KEY=$SECRET|" .env
     rm -f .env.bak
     ok "Secret key generated"
 fi
@@ -125,7 +125,7 @@ fi
 info "Initializing database..."
 python -c "
 import asyncio
-from executiveai.database import init_db
+from koda2.database import init_db
 asyncio.run(init_db())
 " 2>/dev/null && ok "Database initialized" || warn "Database init skipped (run manually if needed)"
 
@@ -153,21 +153,21 @@ fi
 # ── 13. Run quick tests ─────────────────────────────────────────────
 info "Running smoke tests..."
 python -c "
-from executiveai.config import get_settings
+from koda2.config import get_settings
 s = get_settings()
-print(f'  Environment: {s.executiveai_env}')
-print(f'  Log level: {s.executiveai_log_level}')
+print(f'  Environment: {s.koda2_env}')
+print(f'  Log level: {s.koda2_log_level}')
 " && ok "Config loads successfully"
 
 echo ""
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}       ExecutiveAI installed successfully!         ${NC}"
+echo -e "${GREEN}       Koda2 installed successfully!         ${NC}"
 echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
 echo ""
 echo "Next steps:"
 echo "  1. Edit .env with your API keys (at minimum one LLM provider)"
 echo "  2. Run the interactive setup:  python setup_wizard.py"
-echo "  3. Start the server:           source .venv/bin/activate && executiveai"
+echo "  3. Start the server:           source .venv/bin/activate && koda2"
 echo "  4. Or via Docker:              docker compose up -d"
 echo ""
 echo "API docs will be at: http://localhost:8000/docs"

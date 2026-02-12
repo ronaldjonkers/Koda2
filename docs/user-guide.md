@@ -1,4 +1,4 @@
-# ExecutiveAI User Guide
+# Koda2 User Guide
 
 ## Getting Started
 
@@ -12,19 +12,19 @@
 ```bash
 ./install.sh
 python setup_wizard.py    # Interactive API key configuration
-executiveai        # Start the server
+koda2        # Start the server
 ```
 
-## Using ExecutiveAI
+## Using Koda2
 
 ### Via Telegram Bot
 
-The most natural way to interact with ExecutiveAI. Set up your Telegram bot:
+The most natural way to interact with Koda2. Set up your Telegram bot:
 
 1. Create a bot via [@BotFather](https://t.me/botfather)
 2. Add the token to your `.env` file
 3. Add your Telegram user ID to `TELEGRAM_ALLOWED_USER_IDS`
-4. Restart ExecutiveAI
+4. Restart Koda2
 
 **Commands:**
 - `/start` — Initialize the bot
@@ -45,7 +45,7 @@ The most natural way to interact with ExecutiveAI. Set up your Telegram bot:
 Full API documentation at `http://localhost:8000/docs` (Swagger UI).
 
 ```bash
-# Ask ExecutiveAI anything
+# Ask Koda2 anything
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "What meetings do I have today?", "user_id": "ronald"}'
@@ -53,7 +53,7 @@ curl -X POST http://localhost:8000/api/chat \
 
 ## Calendar Integration
 
-ExecutiveAI supports multiple calendar backends simultaneously:
+Koda2 supports multiple calendar backends simultaneously:
 
 - **Exchange (EWS):** On-premises Exchange 2013/2016/2019
 - **Google Calendar:** Google Workspace
@@ -83,7 +83,7 @@ Generate professional documents from natural language:
 
 ## Self-Improvement
 
-When you request something ExecutiveAI can't do yet, it will:
+When you request something Koda2 can't do yet, it will:
 1. Detect the missing capability
 2. Auto-generate a plugin module
 3. Write tests for the new code

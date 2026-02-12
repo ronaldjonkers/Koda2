@@ -6,15 +6,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from executiveai.modules.llm.models import (
+from koda2.modules.llm.models import (
     ChatMessage,
     LLMProvider,
     LLMRequest,
     LLMResponse,
     TASK_MODEL_MAP,
 )
-from executiveai.modules.llm.providers import OpenAIProvider, AnthropicProvider
-from executiveai.modules.llm.router import LLMRouter
+from koda2.modules.llm.providers import OpenAIProvider, AnthropicProvider
+from koda2.modules.llm.router import LLMRouter
 
 
 class TestLLMModels:
@@ -67,14 +67,14 @@ class TestOpenAIProvider:
 
     def test_is_available_with_key(self) -> None:
         """Provider reports available when API key is set."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock:
+        with patch("koda2.modules.llm.providers.get_settings") as mock:
             mock.return_value = MagicMock(openai_api_key="sk-test")
             provider = OpenAIProvider()
             assert provider.is_available() is True
 
     def test_is_not_available_without_key(self) -> None:
         """Provider reports unavailable when API key is empty."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock:
+        with patch("koda2.modules.llm.providers.get_settings") as mock:
             mock.return_value = MagicMock(openai_api_key="")
             provider = OpenAIProvider()
             assert provider.is_available() is False
@@ -82,7 +82,7 @@ class TestOpenAIProvider:
     @pytest.mark.asyncio
     async def test_complete(self, mock_openai) -> None:
         """OpenAI completion returns proper LLMResponse."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock_settings:
+        with patch("koda2.modules.llm.providers.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(openai_api_key="sk-test")
             provider = OpenAIProvider()
             response = await provider.complete(
@@ -99,7 +99,7 @@ class TestAnthropicProvider:
 
     def test_is_available_with_key(self) -> None:
         """Provider reports available when API key is set."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock:
+        with patch("koda2.modules.llm.providers.get_settings") as mock:
             mock.return_value = MagicMock(anthropic_api_key="sk-ant-test")
             provider = AnthropicProvider()
             assert provider.is_available() is True
@@ -107,7 +107,7 @@ class TestAnthropicProvider:
     @pytest.mark.asyncio
     async def test_complete(self, mock_anthropic) -> None:
         """Anthropic completion returns proper LLMResponse."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock_settings:
+        with patch("koda2.modules.llm.providers.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(anthropic_api_key="sk-ant-test")
             provider = AnthropicProvider()
             response = await provider.complete(
@@ -123,7 +123,7 @@ class TestLLMRouter:
 
     def test_available_providers(self) -> None:
         """Router lists only providers with valid keys."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock:
+        with patch("koda2.modules.llm.providers.get_settings") as mock:
             mock.return_value = MagicMock(
                 openai_api_key="sk-test",
                 anthropic_api_key="",
@@ -139,7 +139,7 @@ class TestLLMRouter:
 
     def test_select_model(self) -> None:
         """select_model returns appropriate model for complexity."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock:
+        with patch("koda2.modules.llm.providers.get_settings") as mock:
             mock.return_value = MagicMock(
                 openai_api_key="sk-test",
                 anthropic_api_key="",
@@ -157,7 +157,7 @@ class TestLLMRouter:
     @pytest.mark.asyncio
     async def test_complete_with_fallback(self, mock_openai) -> None:
         """Router falls back to next provider on failure."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock_settings:
+        with patch("koda2.modules.llm.providers.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(
                 openai_api_key="sk-test",
                 anthropic_api_key="",
@@ -174,7 +174,7 @@ class TestLLMRouter:
     @pytest.mark.asyncio
     async def test_quick_method(self, mock_openai) -> None:
         """Quick convenience method works."""
-        with patch("executiveai.modules.llm.providers.get_settings") as mock_settings:
+        with patch("koda2.modules.llm.providers.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(
                 openai_api_key="sk-test",
                 anthropic_api_key="",

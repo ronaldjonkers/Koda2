@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from executiveai.api.routes import set_orchestrator
+from koda2.api.routes import set_orchestrator
 
 
 @pytest.fixture
@@ -75,7 +75,7 @@ def mock_orchestrator():
 def client(mock_orchestrator):
     """Create a test client with mock orchestrator."""
     set_orchestrator(mock_orchestrator)
-    from executiveai.main import app
+    from koda2.main import app
     return TestClient(app)
 
 

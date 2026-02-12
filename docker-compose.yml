@@ -1,11 +1,11 @@
 version: "3.9"
 
 services:
-  executiveai:
+  koda2:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: executiveai
+    container_name: koda2
     restart: unless-stopped
     ports:
       - "${API_PORT:-8000}:8000"
@@ -21,7 +21,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: executiveai-redis
+    container_name: koda2-redis
     restart: unless-stopped
     ports:
       - "6379:6379"

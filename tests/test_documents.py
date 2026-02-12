@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from executiveai.modules.documents.service import DocumentService
+from koda2.modules.documents.service import DocumentService
 
 
 class TestDocumentService:

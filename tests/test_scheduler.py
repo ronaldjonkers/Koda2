@@ -7,7 +7,7 @@ import datetime as dt
 
 import pytest
 
-from executiveai.modules.scheduler.service import SchedulerService
+from koda2.modules.scheduler.service import SchedulerService
 
 
 class TestSchedulerService:

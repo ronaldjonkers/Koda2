@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-# ExecutiveAI — Complete Uninstaller
+# Koda2 — Complete Uninstaller
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -14,11 +14,11 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo -e "${RED}═══════════════════════════════════════════════════${NC}"
-echo -e "${RED}       ExecutiveAI — Uninstall                     ${NC}"
+echo -e "${RED}       Koda2 — Uninstall                     ${NC}"
 echo -e "${RED}═══════════════════════════════════════════════════${NC}"
 echo ""
 
-read -p "This will remove all ExecutiveAI data, venv, and caches. Continue? [y/N] " -n 1 -r
+read -p "This will remove all Koda2 data, venv, and caches. Continue? [y/N] " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Cancelled."
@@ -47,13 +47,13 @@ done
 
 # Remove generated files
 rm -f .coverage
-rm -rf executiveai.egg-info
+rm -rf koda2.egg-info
 rm -rf build dist
 
 # Remove config secrets (but keep templates)
 rm -f config/google_token.json
 
 echo ""
-echo -e "${GREEN}ExecutiveAI uninstalled.${NC}"
+echo -e "${GREEN}Koda2 uninstalled.${NC}"
 echo "Note: .env and source code were preserved. Remove manually if desired."
 echo ""
