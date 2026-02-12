@@ -12,7 +12,15 @@
 
 ## Installation
 
-### Option 1: PowerShell Script (Recommended)
+### Option 1: One-Line Installer (Recommended)
+
+```powershell
+irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | iex
+```
+
+This single command installs **everything**: Git, Python 3.12+, Node.js 18+ (via winget), clones Koda2, and runs the full setup.
+
+### Option 2: Manual PowerShell Script
 
 ```powershell
 # Clone the repository

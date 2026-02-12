@@ -8,18 +8,24 @@
 - Node.js 18+ (for WhatsApp integration)
 - At least one LLM API key (OpenAI, Anthropic, Google, or OpenRouter)
 
-### Installation
+### Installation — One Line
 
 **macOS / Linux:**
 ```bash
-./install.sh
-python setup_wizard.py    # Interactive API key configuration
-koda2                     # Start the server
+curl -fsSL https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash
 ```
 
-**Windows:**
+**Windows (PowerShell):**
 ```powershell
-powershell -ExecutionPolicy Bypass -File install.ps1
+irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | iex
+```
+
+These install **everything** automatically (Homebrew, Python, Node.js, Git, all dependencies) and launch the setup wizard.
+
+**Manual install (if you prefer):**
+```bash
+git clone https://github.com/ronaldjonkers/Koda2.git && cd Koda2
+chmod +x install.sh && ./install.sh
 python setup_wizard.py
 koda2
 ```

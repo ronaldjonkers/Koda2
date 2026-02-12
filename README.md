@@ -42,38 +42,46 @@ koda2/
 └── main.py           # FastAPI application entry point
 ```
 
-## Quick Start
+## Install — One Line
 
-### macOS / Linux
+**macOS / Linux (single line, installs everything):**
 
 ```bash
-git clone <repository-url> && cd Koda2
-chmod +x install.sh && ./install.sh
+curl -fsSL https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash
 ```
 
-The installer automatically installs Homebrew (macOS), Python 3.12+, Node.js 18+, and all dependencies. It supports Ubuntu/Debian, Fedora/RHEL, Arch, openSUSE, Alpine, and macOS (Intel + Apple Silicon).
+Or with `wget`:
 
-### Windows
+```bash
+wget -qO- https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash
+```
+
+**Windows (PowerShell, single line):**
 
 ```powershell
-git clone <repository-url>; cd Koda2
-powershell -ExecutionPolicy Bypass -File install.ps1
+irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | iex
 ```
 
-See `docs/windows-install.md` for detailed Windows instructions.
+These one-liners automatically install **all** prerequisites (Homebrew, Python 3.12+, Node.js 18+, Git) and set up Koda2 completely. Supports macOS (Intel + Apple Silicon), Ubuntu/Debian, Fedora/RHEL/CentOS, Arch/Manjaro, openSUSE, Alpine, and Windows 10/11.
 
-### Interactive Setup
+### Custom install location
 
 ```bash
+KODA2_INSTALL_DIR=/opt/koda2 curl -fsSL https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash
+```
+
+### Manual install (if you prefer)
+
+```bash
+git clone https://github.com/ronaldjonkers/Koda2.git && cd Koda2
+chmod +x install.sh && ./install.sh
 python setup_wizard.py
 ```
 
-### Start the Server
+### Start Koda2
 
 ```bash
-source .venv/bin/activate   # Linux/macOS
-# .venv\Scripts\activate    # Windows
-koda2
+cd ~/Koda2 && source .venv/bin/activate && koda2
 ```
 
 ### Run as a Service (auto-start on boot)
