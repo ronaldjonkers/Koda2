@@ -939,6 +939,9 @@ async def set_default_account(account_id: str) -> AccountResponse:
 GOOGLE_SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 GOOGLE_CREDS_PATH = Path("config/google_credentials.json")
 GOOGLE_TOKEN_PATH = Path("config/google_token.json")
@@ -987,7 +990,6 @@ async def get_google_auth_url() -> dict[str, Any]:
         )
         auth_url, state = flow.authorization_url(
             access_type="offline",
-            include_granted_scopes="true",
             prompt="consent",
         )
         return {"auth_url": auth_url, "state": state}
@@ -1005,6 +1007,11 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
 
     try:
         from google_auth_oauthlib.flow import Flow
+        import os
+
+        # Allow scope changes — Google may return additional scopes
+        # (e.g. openid, userinfo.email) beyond what we requested.
+        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
 
         flow = Flow.from_client_secrets_file(
             str(GOOGLE_CREDS_PATH),

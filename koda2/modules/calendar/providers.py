@@ -190,6 +190,9 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         SCOPES = [
             "https://www.googleapis.com/auth/calendar",
             "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/drive.file",
         ]
         creds = None
         token_path = Path(self._token_file)

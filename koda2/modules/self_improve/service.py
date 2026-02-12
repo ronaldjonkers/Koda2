@@ -48,6 +48,7 @@ class SelfImproveService:
             "analyze_image": "images",
             "send_telegram": "messaging",
             "send_whatsapp": "messaging",
+            "send_file": "documents",
             "run_shell": "macos",
             "get_contacts": "macos",
             "create_reminder": "macos",
