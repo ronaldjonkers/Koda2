@@ -295,6 +295,122 @@ app.post('/logout', async (req, res) => {
     }
 });
 
+// ── Media Download ──────────────────────────────────────────────────
+
+app.post('/download', async (req, res) => {
+    if (!clientReady) {
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
+    
+    const { message_id, media_url, filename } = req.body;
+    
+    try {
+        // If message_id is provided, fetch media from that message
+        if (message_id) {
+            const msg = await client.getMessageById(message_id);
+            if (!msg.hasMedia) {
+                return res.status(400).json({ error: 'Message has no media' });
+            }
+            
+            const media = await msg.downloadMedia();
+            if (!media) {
+                return res.status(500).json({ error: 'Failed to download media' });
+            }
+            
+            // Generate filename if not provided
+            let ext = '';
+            if (media.mimetype) {
+                const mimeToExt = {
+                    'image/jpeg': '.jpg',
+                    'image/png': '.png',
+                    'image/gif': '.gif',
+                    'image/webp': '.webp',
+                    'video/mp4': '.mp4',
+                    'video/ogg': '.ogv',
+                    'audio/ogg': '.ogg',
+                    'audio/mpeg': '.mp3',
+                    'audio/mp4': '.m4a',
+                    'application/pdf': '.pdf',
+                };
+                ext = mimeToExt[media.mimetype] || '.bin';
+            }
+            const finalFilename = filename || `media_${Date.now()}${ext}`;
+            
+            // Save to downloads directory
+            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_downloads');
+            fs.mkdirSync(downloadDir, { recursive: true });
+            const filePath = path.join(downloadDir, finalFilename);
+            fs.writeFileSync(filePath, media.data, 'base64');
+            
+            console.log(`[WhatsApp] Media downloaded: ${filePath}`);
+            return res.json({
+                success: true,
+                filename: finalFilename,
+                path: filePath,
+                mimetype: media.mimetype,
+                size: media.data.length,
+            });
+        }
+        
+        // If media_url is provided (for external URLs)
+        if (media_url) {
+            const { MessageMedia } = require('whatsapp-web.js');
+            const media = await MessageMedia.fromUrl(media_url);
+            
+            let ext = '';
+            if (media.mimetype) {
+                const mimeToExt = {
+                    'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+                    'image/webp': '.webp', 'video/mp4': '.mp4', 'application/pdf': '.pdf',
+                };
+                ext = mimeToExt[media.mimetype] || '.bin';
+            }
+            const finalFilename = filename || `download_${Date.now()}${ext}`;
+            
+            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_downloads');
+            fs.mkdirSync(downloadDir, { recursive: true });
+            const filePath = path.join(downloadDir, finalFilename);
+            fs.writeFileSync(filePath, media.data, 'base64');
+            
+            return res.json({
+                success: true,
+                filename: finalFilename,
+                path: filePath,
+                mimetype: media.mimetype,
+            });
+        }
+        
+        res.status(400).json({ error: 'Missing message_id or media_url' });
+    } catch (err) {
+        console.error('[WhatsApp] Download error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Enhanced webhook with media info
+app.get('/media-info/:messageId', async (req, res) => {
+    if (!clientReady) {
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
+    
+    try {
+        const msg = await client.getMessageById(req.params.messageId);
+        if (!msg.hasMedia) {
+            return res.json({ hasMedia: false });
+        }
+        
+        res.json({
+            hasMedia: true,
+            type: msg.type,
+            mimetype: msg.mimetype,
+            filename: msg.filename || null,
+            body: msg.body,  // caption
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // ── Initialization with retry ────────────────────────────────────────
 
 function setupClientEvents(c) {

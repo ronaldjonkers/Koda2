@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import email as email_lib
 import email.mime.multipart
 import email.mime.text
 import email.mime.base
 import email.encoders
 import imaplib
+import os
 import smtplib
 from email.header import decode_header
 from pathlib import Path
 from typing import Optional, Any
 
+import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from koda2.config import get_settings
@@ -642,3 +645,389 @@ class EmailService:
         # Sort by date (newest first)
         all_emails.sort(key=lambda e: e.date, reverse=True)
         return all_emails[:limit]
+
+    # ── Attachment Operations ────────────────────────────────────────
+
+    async def download_attachment(
+        self,
+        message_id: str,
+        attachment_filename: str,
+        account_id: Optional[str] = None,
+        output_dir: str = "data/attachments",
+    ) -> Optional[str]:
+        """Download an email attachment to disk.
+        
+        Returns:
+            Path to downloaded file, or None if failed.
+        """
+        if not self._account_service:
+            return None
+
+        account = await self._account_service.get_account(account_id) if account_id else None
+        if not account:
+            accounts = await self._get_email_accounts()
+            account = next((a for a in accounts if a.provider == ProviderType.IMAP.value), None)
+
+        if not account:
+            logger.error("no_account_for_attachment_download")
+            return None
+
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            def _download():
+                conn = self._connect_imap(
+                    credentials["server"],
+                    credentials.get("port", 993),
+                    credentials["username"],
+                    credentials["password"],
+                    credentials.get("use_ssl", True),
+                )
+                try:
+                    conn.select("INBOX")
+                    _, data = conn.fetch(message_id, "(RFC822)")
+                    if not data or not data[0]:
+                        return None
+
+                    raw = data[0][1]
+                    msg = email_lib.message_from_bytes(raw)
+
+                    for part in msg.walk():
+                        cd = str(part.get("Content-Disposition", ""))
+                        if "attachment" in cd:
+                            filename = part.get_filename()
+                            if filename == attachment_filename:
+                                file_path = output_path / filename
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    file_path.write_bytes(payload)
+                                    return str(file_path)
+                    return None
+                finally:
+                    conn.logout()
+
+            result = await asyncio.to_thread(_download)
+            if result:
+                logger.info("attachment_downloaded", path=result, filename=attachment_filename)
+            return result
+
+        except Exception as exc:
+            logger.error("download_attachment_failed", error=str(exc))
+            return None
+
+    async def download_attachment_msgraph(
+        self,
+        message_id: str,
+        attachment_id: str,
+        filename: str,
+        account_id: Optional[str] = None,
+        output_dir: str = "data/attachments",
+    ) -> Optional[str]:
+        """Download an attachment using Microsoft Graph API."""
+        if not self._account_service:
+            return None
+
+        account = await self._account_service.get_account(account_id) if account_id else None
+        if not account:
+            accounts = await self._get_email_accounts()
+            account = next((a for a in accounts if a.provider == ProviderType.MSGRAPH.value), None)
+
+        if not account:
+            logger.error("no_msgraph_account_for_attachment")
+            return None
+
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            # Get token
+            token_url = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
+            async with httpx.AsyncClient() as client:
+                token_resp = await client.post(token_url, data={
+                    "client_id": credentials["client_id"],
+                    "client_secret": credentials["client_secret"],
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials",
+                })
+                token_resp.raise_for_status()
+                token = token_resp.json()["access_token"]
+
+                # Download attachment
+                url = f"https://graph.microsoft.com/v1.0/me/messages/{message_id}/attachments/{attachment_id}"
+                resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+                resp.raise_for_status()
+                data = resp.json()
+
+                content = base64.b64decode(data.get("contentBytes", ""))
+                file_path = output_path / filename
+                file_path.write_bytes(content)
+                logger.info("msgraph_attachment_downloaded", path=str(file_path))
+                return str(file_path)
+
+        except Exception as exc:
+            logger.error("msgraph_download_attachment_failed", error=str(exc))
+            return None
+
+    async def download_attachment_gmail(
+        self,
+        message_id: str,
+        attachment_id: str,
+        filename: str,
+        account_id: Optional[str] = None,
+        output_dir: str = "data/attachments",
+    ) -> Optional[str]:
+        """Download an attachment using Gmail API."""
+        if not self._account_service:
+            return None
+
+        account = await self._account_service.get_account(account_id) if account_id else None
+        if not account:
+            accounts = await self._get_email_accounts()
+            account = next((a for a in accounts if a.provider == ProviderType.GOOGLE.value), None)
+
+        if not account:
+            logger.error("no_gmail_account_for_attachment")
+            return None
+
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            def _download():
+                creds = Credentials.from_authorized_user_file(credentials["credentials_file"])
+                service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+                attachment = service.users().messages().attachments().get(
+                    userId="me",
+                    messageId=message_id,
+                    id=attachment_id,
+                ).execute()
+
+                data = base64.urlsafe_b64decode(attachment["data"])
+                file_path = output_path / filename
+                file_path.write_bytes(data)
+                return str(file_path)
+
+            result = await asyncio.to_thread(_download)
+            logger.info("gmail_attachment_downloaded", path=result)
+            return result
+
+        except Exception as exc:
+            logger.error("gmail_download_attachment_failed", error=str(exc))
+            return None
+
+    async def send_email_with_attachments(
+        self,
+        to: list[str],
+        subject: str,
+        body_text: str = "",
+        body_html: str = "",
+        attachment_paths: Optional[list[str]] = None,
+        cc: Optional[list[str]] = None,
+        bcc: Optional[list[str]] = None,
+        account_id: Optional[str] = None,
+    ) -> bool:
+        """Send an email with file attachments (convenience method).
+        
+        Args:
+            to: List of recipient email addresses
+            subject: Email subject
+            body_text: Plain text body
+            body_html: HTML body (optional)
+            attachment_paths: List of file paths to attach
+            cc: CC recipients
+            bcc: BCC recipients
+            account_id: Specific account to use (or default)
+            
+        Returns:
+            True if sent successfully
+        """
+        attachments = []
+        if attachment_paths:
+            for path_str in attachment_paths:
+                path = Path(path_str)
+                if path.exists():
+                    attachments.append(EmailAttachment(
+                        filename=path.name,
+                        content_type=self._guess_mime_type(path.name),
+                        size=path.stat().st_size,
+                        data=path.read_bytes(),
+                    ))
+                else:
+                    logger.warning("attachment_not_found", path=path_str)
+
+        account = None
+        if account_id:
+            account = await self._account_service.get_account(account_id) if self._account_service else None
+        else:
+            accounts = await self._get_email_accounts()
+            account = next((a for a in accounts), None)
+
+        if not account:
+            logger.error("no_account_for_send")
+            return False
+
+        message = EmailMessage(
+            subject=subject,
+            recipients=to,
+            body_text=body_text,
+            body_html=body_html,
+            cc=cc or [],
+            bcc=bcc or [],
+            attachments=attachments,
+        )
+
+        # Route to correct sender based on provider
+        if account.provider == ProviderType.MSGRAPH.value:
+            return await self._send_email_msgraph_with_attachments(message, account)
+        elif account.provider == ProviderType.GOOGLE.value:
+            return await self._send_email_gmail_with_attachments(message, account)
+        else:
+            # IMAP/SMTP
+            return await self.send_email(message, account.id)
+
+    def _guess_mime_type(self, filename: str) -> str:
+        """Guess MIME type from filename."""
+        ext = Path(filename).suffix.lower()
+        mime_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls": "application/vnd.ms-excel",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".txt": "text/plain",
+            ".zip": "application/zip",
+        }
+        return mime_types.get(ext, "application/octet-stream")
+
+    async def _send_email_msgraph_with_attachments(
+        self,
+        message: EmailMessage,
+        account,
+    ) -> bool:
+        """Send email with attachments via MS Graph."""
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+
+            # Get token
+            token_url = f"https://login.microsoftonline.com/{credentials['tenant_id']}/oauth2/v2.0/token"
+            async with httpx.AsyncClient() as client:
+                token_resp = await client.post(token_url, data={
+                    "client_id": credentials["client_id"],
+                    "client_secret": credentials["client_secret"],
+                    "scope": "https://graph.microsoft.com/.default",
+                    "grant_type": "client_credentials",
+                })
+                token_resp.raise_for_status()
+                token = token_resp.json()["access_token"]
+
+                # Build email with attachments
+                email_data = {
+                    "message": {
+                        "subject": message.subject,
+                        "body": {
+                            "contentType": "HTML" if message.body_html else "Text",
+                            "content": message.body_html or message.body_text,
+                        },
+                        "toRecipients": [
+                            {"emailAddress": {"address": addr}}
+                            for addr in message.recipients
+                        ],
+                    },
+                    "saveToSentItems": True,
+                }
+
+                if message.cc:
+                    email_data["message"]["ccRecipients"] = [
+                        {"emailAddress": {"address": addr}}
+                        for addr in message.cc
+                    ]
+
+                if message.attachments:
+                    email_data["message"]["attachments"] = [
+                        {
+                            "@odata.type": "#microsoft.graph.fileAttachment",
+                            "name": att.filename,
+                            "contentType": att.content_type,
+                            "contentBytes": base64.b64encode(att.data).decode(),
+                        }
+                        for att in message.attachments
+                    ]
+
+                resp = await client.post(
+                    "https://graph.microsoft.com/v1.0/me/sendMail",
+                    json=email_data,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                logger.info("msgraph_email_with_attachments_sent", subject=message.subject)
+                return True
+
+        except Exception as exc:
+            logger.error("msgraph_send_with_attachments_failed", error=str(exc))
+            return False
+
+    async def _send_email_gmail_with_attachments(
+        self,
+        message: EmailMessage,
+        account,
+    ) -> bool:
+        """Send email with attachments via Gmail API."""
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+
+            def _send():
+                creds = Credentials.from_authorized_user_file(credentials["credentials_file"])
+                service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+
+                # Build MIME message
+                mime_msg = email.mime.multipart.MIMEMultipart("mixed")
+                mime_msg["Subject"] = message.subject
+                mime_msg["To"] = ", ".join(message.recipients)
+                if message.cc:
+                    mime_msg["Cc"] = ", ".join(message.cc)
+
+                # Body
+                body_part = email.mime.multipart.MIMEMultipart("alternative")
+                if message.body_text:
+                    body_part.attach(email.mime.text.MIMEText(message.body_text, "plain"))
+                if message.body_html:
+                    body_part.attach(email.mime.text.MIMEText(message.body_html, "html"))
+                mime_msg.attach(body_part)
+
+                # Attachments
+                for att in message.attachments:
+                    part = email.mime.base.MIMEBase(*att.content_type.split("/", 1))
+                    part.set_payload(att.data)
+                    email.encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", f'attachment; filename="{att.filename}"')
+                    mime_msg.attach(part)
+
+                # Encode and send
+                raw = base64.urlsafe_b64encode(mime_msg.as_bytes()).decode()
+                service.users().messages().send(userId="me", body={"raw": raw}).execute()
+                return True
+
+            result = await asyncio.to_thread(_send)
+            logger.info("gmail_email_with_attachments_sent", subject=message.subject)
+            return result
+
+        except Exception as exc:
+            logger.error("gmail_send_with_attachments_failed", error=str(exc))
+            return False

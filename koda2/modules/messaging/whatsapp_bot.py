@@ -493,3 +493,104 @@ class WhatsAppBot:
                 return resp.json()
         except Exception as exc:
             return {"error": str(exc)}
+
+    # ── Media Download ───────────────────────────────────────────────
+
+    async def download_media(
+        self,
+        media_url: str,
+        output_dir: str = "data/whatsapp_media",
+        filename: Optional[str] = None,
+    ) -> Optional[str]:
+        """Download WhatsApp media (image, video, document, audio).
+        
+        Args:
+            media_url: URL or path identifier from webhook payload
+            output_dir: Directory to save the file
+            filename: Optional filename (auto-generated if not provided)
+            
+        Returns:
+            Path to downloaded file, or None if failed
+        """
+        if not self.is_configured:
+            logger.warning("whatsapp_not_configured_for_media_download")
+            return None
+
+        try:
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+
+            async with httpx.AsyncClient() as client:
+                # First try to get via bridge download endpoint
+                resp = await client.post(
+                    f"{self._bridge_url}/download",
+                    json={"media_url": media_url, "filename": filename},
+                    timeout=60,
+                )
+                
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success"):
+                        file_path = output_path / data["filename"]
+                        # The bridge returns base64 encoded content
+                        if "content" in data:
+                            import base64
+                            content = base64.b64decode(data["content"])
+                            file_path.write_bytes(content)
+                            logger.info("whatsapp_media_downloaded", path=str(file_path))
+                            return str(file_path)
+                        elif "path" in data:
+                            # Bridge saved directly
+                            return data["path"]
+                
+                logger.warning("whatsapp_media_download_failed", status=resp.status_code)
+                return None
+
+        except Exception as exc:
+            logger.error("whatsapp_media_download_error", error=str(exc))
+            return None
+
+    async def process_webhook_with_media(
+        self,
+        payload: dict[str, Any],
+        auto_download_media: bool = True,
+    ) -> Optional[dict[str, Any]]:
+        """Process webhook and optionally auto-download media.
+        
+        This extends process_webhook with automatic media download support.
+        """
+        result = await self.process_webhook(payload)
+        if result and result.get("has_media") and auto_download_media:
+            media_info = payload.get("media", {})
+            media_url = media_info.get("url") or payload.get("mediaUrl")
+            mimetype = media_info.get("mimetype", "application/octet-stream")
+            
+            # Generate filename from mimetype
+            ext = self._mime_to_extension(mimetype)
+            filename = f"whatsapp_{payload.get('timestamp', '0')}{ext}"
+            
+            download_path = await self.download_media(media_url, filename=filename)
+            if download_path:
+                result["downloaded_media_path"] = download_path
+                result["media_mimetype"] = mimetype
+        
+        return result
+
+    def _mime_to_extension(self, mimetype: str) -> str:
+        """Convert MIME type to file extension."""
+        mapping = {
+            "image/jpeg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "image/webp": ".webp",
+            "video/mp4": ".mp4",
+            "video/ogg": ".ogv",
+            "audio/ogg": ".ogg",
+            "audio/mpeg": ".mp3",
+            "audio/mp4": ".m4a",
+            "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
+        }
+        return mapping.get(mimetype, ".bin")
