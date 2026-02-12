@@ -813,60 +813,15 @@ async def setup_general_settings(wizard: AccountSetupWizard, is_first_run: bool)
         if config["OPENROUTER_API_KEY"]:
             providers_configured.append("openrouter")
             
-            # Fetch popular models from OpenRouter
-            print_info("Fetching popular models from OpenRouter...")
-            try:
-                import httpx
-                
-                async def fetch_openrouter_models():
-                    async with httpx.AsyncClient() as client:
-                        resp = await client.get(
-                            "https://openrouter.ai/api/v1/models",
-                            headers={"Authorization": f"Bearer {config['OPENROUTER_API_KEY']}"},
-                            timeout=30,
-                        )
-                        resp.raise_for_status()
-                        data = resp.json()
-                        
-                        # Sort by context length (popularity indicator) and get top 10
-                        models = data.get("data", [])
-                        # Filter for models with pricing info (active models)
-                        active_models = [m for m in models if m.get("pricing", {}).get("prompt", 0) > 0]
-                        # Sort by context length (descending)
-                        active_models.sort(key=lambda x: x.get("context_length", 0), reverse=True)
-                        return active_models[:10]
-                
-                top_models = await fetch_openrouter_models()
-                
-                if top_models:
-                    print("\n  Top 10 Popular OpenRouter Models:")
-                    for i, model in enumerate(top_models, 1):
-                        name = model.get("name", model.get("id", "Unknown"))
-                        ctx = model.get("context_length", 0) // 1000
-                        print(f"    {i}. {name} ({ctx}k context)")
-                    print("    C. Custom model (enter manually)")
-                    print()
-                    
-                    model_choice = ask("Select model (1-10 or C)", "1")
-                    if model_choice.lower() == "c":
-                        config["OPENROUTER_MODEL"] = ask("Enter model ID", "openai/gpt-4o")
-                    else:
-                        try:
-                            idx = int(model_choice) - 1
-                            if 0 <= idx < len(top_models):
-                                config["OPENROUTER_MODEL"] = top_models[idx]["id"]
-                                print_success(f"Selected: {top_models[idx].get('name', config['OPENROUTER_MODEL'])}")
-                            else:
-                                config["OPENROUTER_MODEL"] = "openai/gpt-4o"
-                        except ValueError:
-                            config["OPENROUTER_MODEL"] = "openai/gpt-4o"
-                else:
-                    print_warning("Could not fetch models. Using default.")
-                    config["OPENROUTER_MODEL"] = ask("OpenRouter model", config.get("OPENROUTER_MODEL", "openai/gpt-4o"))
-                    
-            except Exception as e:
-                print_warning(f"Could not fetch models: {e}")
-                config["OPENROUTER_MODEL"] = ask("OpenRouter model", config.get("OPENROUTER_MODEL", "openai/gpt-4o"))
+            # Ask for model (fetching from API can be unreliable)
+            print("\n  Common OpenRouter models:")
+            print("    - openai/gpt-4o")
+            print("    - anthropic/claude-3.5-sonnet")
+            print("    - anthropic/claude-3-opus")
+            print("    - google/gemini-pro")
+            print("    - meta-llama/llama-3.1-70b-instruct")
+            print()
+            config["OPENROUTER_MODEL"] = ask("OpenRouter model", config.get("OPENROUTER_MODEL", "openai/gpt-4o"))
     
     # Set default provider
     if providers_configured:
