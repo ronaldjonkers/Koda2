@@ -83,17 +83,15 @@ async def validate_ews_credentials(
             from exchangelib.transport import AUTH_TYPE_MAP
             import requests.auth
 
-            for auth_type_name in ("basic", "NTLM", None):
+            last_error = None
+            for auth_type_name in ("NTLM", "basic", None):
                 try:
                     config_kwargs = {
                         "server": hostname,
                         "credentials": creds,
                     }
-                    if auth_type_name == "basic":
-                        config_kwargs["auth_type"] = "basic"
-                    elif auth_type_name == "NTLM":
-                        config_kwargs["auth_type"] = "NTLM"
-                    # else: let exchangelib auto-detect
+                    if auth_type_name:
+                        config_kwargs["auth_type"] = auth_type_name
 
                     config = Configuration(**config_kwargs)
                     account = Account(
@@ -105,17 +103,14 @@ async def validate_ews_credentials(
                     print(f"[EWS] Connection successful with auth_type={auth_type_name or 'auto'}")
                     return True
                 except Exception as exc:
+                    last_error = exc
                     print(f"[EWS] Auth type {auth_type_name or 'auto'} failed: {exc}")
-                    # If it's an auth error (401), try next auth type
-                    exc_str = str(exc).lower()
-                    if any(k in exc_str for k in ("unauthorized", "401", "timeout", "none")):
-                        continue
-                    # For other errors, re-raise
-                    raise
-            # All auth types failed
-            raise RuntimeError(
+                    # Always try the next auth type — don't re-raise
+                    continue
+            # All auth types failed — raise the last error
+            raise last_error or RuntimeError(
                 f"Could not authenticate to {hostname}. "
-                "Tried BASIC and NTLM auth. Check username/password."
+                "Tried NTLM and basic auth. Check username/password."
             )
 
         # Run blocking EWS operations in thread
