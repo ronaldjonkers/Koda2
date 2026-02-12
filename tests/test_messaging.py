@@ -23,11 +23,13 @@ class TestTelegramBot:
             )
             return TelegramBot()
 
-    def test_is_configured(self, telegram) -> None:
+    @pytest.mark.asyncio
+    async def test_is_configured(self, telegram) -> None:
         """Bot reports configured when token is set."""
-        assert telegram.is_configured is True
+        assert await telegram.is_configured() is True
 
-    def test_not_configured_without_token(self) -> None:
+    @pytest.mark.asyncio
+    async def test_not_configured_without_token(self) -> None:
         """Bot reports not configured without token."""
         with patch("koda2.modules.messaging.telegram_bot.get_settings") as mock:
             mock.return_value = MagicMock(
@@ -35,7 +37,7 @@ class TestTelegramBot:
                 allowed_telegram_ids=[],
             )
             bot = TelegramBot()
-            assert bot.is_configured is False
+            assert await bot.is_configured() is False
 
     def test_check_user_allowed(self, telegram) -> None:
         """Allowed user IDs are checked correctly."""

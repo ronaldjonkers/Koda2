@@ -156,6 +156,19 @@ class MetricsService:
                 logger.error("metrics_collection_error", error=str(exc))
                 await asyncio.sleep(self.collection_interval)
                 
+    @staticmethod
+    def _safe_thread_count() -> int:
+        """Safely count total threads across all processes."""
+        total = 0
+        for p in psutil.process_iter(['num_threads']):
+            try:
+                nt = p.info.get('num_threads')
+                if nt:
+                    total += nt
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass
+        return total
+
     def collect_system_metrics(self) -> SystemMetrics:
         """Collect current system metrics."""
         try:
@@ -199,7 +212,7 @@ class MetricsService:
                 net_io_sent_mb=net_io.bytes_sent / (1024**2),
                 net_io_recv_mb=net_io.bytes_recv / (1024**2),
                 process_count=len(psutil.pids()),
-                thread_count=sum(p.num_threads() for p in psutil.process_iter(['num_threads'])),
+                thread_count=self._safe_thread_count(),
                 hostname=socket.gethostname(),
                 platform=f"{platform.system()} {platform.release()}",
                 python_version=platform.python_version(),

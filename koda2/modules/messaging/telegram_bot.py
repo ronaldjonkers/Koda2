@@ -39,17 +39,16 @@ class TelegramBot:
                         return response
                     self.register_command(cmd, wrapper)
 
-    @property
-    def is_configured(self) -> bool:
-        # Check if there's an active Telegram account in the database
+    async def is_configured(self) -> bool:
+        """Check if Telegram is configured (async — must be awaited)."""
         if self._account_service:
-            import asyncio
             try:
-                accounts = asyncio.run(self._account_service.get_accounts(
+                accounts = await self._account_service.get_accounts(
                     account_type="messaging",
                     provider="telegram",
-                ))
-                return len(accounts) > 0
+                )
+                if len(accounts) > 0:
+                    return True
             except Exception:
                 pass
         # Fallback to settings
@@ -71,7 +70,7 @@ class TelegramBot:
 
     async def start(self) -> None:
         """Start the Telegram bot polling loop."""
-        if not self.is_configured:
+        if not await self.is_configured():
             logger.warning("telegram_not_configured")
             return
 

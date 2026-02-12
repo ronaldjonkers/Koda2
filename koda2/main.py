@@ -68,11 +68,11 @@ def _print_banner(settings) -> None:
 async def _print_status(settings, orch: Orchestrator) -> None:
     """Print the system status after startup."""
     llm = ", ".join(str(p) for p in orch.llm.available_providers) or "none"
-    cal_providers = await orch.calendar.active_providers
+    cal_providers = await orch.calendar.active_providers()
     cal = ", ".join(str(p) for p in cal_providers) or "none"
     plugins = len(orch.self_improve.list_plugins())
     tasks = len(orch.scheduler.list_tasks())
-    tg_configured = await orch.telegram.is_configured
+    tg_configured = await orch.telegram.is_configured()
     tg = "✔ enabled" if tg_configured else "✘ disabled"
     wa = "✔ enabled" if orch.whatsapp.is_configured else "✘ disabled"
 
@@ -147,7 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not getattr(main, '_no_browser', False):
         await _open_browser(settings)
     
-    cal_providers = await _orchestrator.calendar.active_providers
+    cal_providers = await _orchestrator.calendar.active_providers()
     logger.info(
         "koda2_ready",
         version=__version__,

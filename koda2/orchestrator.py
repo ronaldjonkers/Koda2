@@ -304,7 +304,7 @@ class Orchestrator:
 
     async def setup_telegram(self) -> None:
         """Configure and start the Telegram bot with command routing."""
-        if not self.telegram.is_configured:
+        if not await self.telegram.is_configured():
             logger.info("telegram_not_configured_skipping")
             return
 
@@ -325,14 +325,16 @@ class Orchestrator:
             return result["response"]
 
         async def handle_status(user_id: str, args: str, **kwargs: Any) -> str:
-            providers = self.calendar.active_providers
+            providers = await self.calendar.active_providers()
             plugins = self.self_improve.list_plugins()
             tasks = self.scheduler.list_tasks()
+            imap = await self.email.imap_configured()
+            smtp = await self.email.smtp_configured()
             return (
                 f"*Koda2 Status*\n"
                 f"Calendar providers: {', '.join(str(p) for p in providers) or 'none'}\n"
-                f"Email: {'IMAP ✓' if self.email.imap_configured else 'IMAP ✗'} / "
-                f"{'SMTP ✓' if self.email.smtp_configured else 'SMTP ✗'}\n"
+                f"Email: {'IMAP ✓' if imap else 'IMAP ✗'} / "
+                f"{'SMTP ✓' if smtp else 'SMTP ✗'}\n"
                 f"LLM providers: {', '.join(str(p) for p in self.llm.available_providers) or 'none'}\n"
                 f"Plugins loaded: {len(plugins)}\n"
                 f"Scheduled tasks: {len(tasks)}"

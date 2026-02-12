@@ -101,13 +101,11 @@ class CalendarService:
             active_only=active_only,
         )
 
-    @property
     async def active_accounts(self) -> list:
         """List active calendar account names."""
         accounts = await self.get_accounts()
         return [acc.name for acc in accounts]
 
-    @property
     async def active_providers(self) -> list[str]:
         """List active provider types."""
         accounts = await self.get_accounts()

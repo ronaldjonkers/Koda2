@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -35,25 +35,19 @@ class TestValidateTelegramCredentials:
         """Valid token returns success."""
         from koda2.modules.account.validators import validate_telegram_credentials
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = MagicMock()
-            mock_client_class.return_value.__aenter__ = MagicMock(return_value=mock_client)
-            mock_client_class.return_value.__aexit__ = MagicMock(return_value=None)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "ok": True,
+            "result": {"id": 123456, "username": "test_bot"},
+        }
 
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "ok": True,
-                "result": {"id": 123456, "username": "test_bot"},
-            }
-            mock_client.get = MagicMock(return_value=mock_response)
-            mock_client.get.return_value.__await__ = lambda: iter([mock_response])
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
 
-            # Actually need to properly mock async method
-            async def mock_get(*args, **kwargs):
-                return mock_response
-
-            mock_client.get = mock_get
+        with patch("koda2.modules.account.validators.httpx.AsyncClient") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
 
             result = await validate_telegram_credentials("123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11")
             assert result == (True, "")

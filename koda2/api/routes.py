@@ -117,10 +117,10 @@ def get_orchestrator():
 async def health_check() -> dict[str, Any]:
     """System health check."""
     orch = get_orchestrator()
-    cal_providers = await orch.calendar.active_providers
-    imap_configured = await orch.email.imap_configured
-    smtp_configured = await orch.email.smtp_configured
-    tg_configured = await orch.telegram.is_configured
+    cal_providers = await orch.calendar.active_providers()
+    imap_configured = await orch.email.imap_configured()
+    smtp_configured = await orch.email.smtp_configured()
+    tg_configured = await orch.telegram.is_configured()
     return {
         "status": "healthy",
         "calendar_providers": [str(p) for p in cal_providers],

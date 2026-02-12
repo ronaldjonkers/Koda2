@@ -145,16 +145,18 @@ class CommonCommands:
     
     async def handle_status(self, user_id: str, **kwargs: Any) -> str:
         """Show system status."""
-        providers = self._orch.calendar.active_providers
+        providers = await self._orch.calendar.active_providers()
         plugins = self._orch.self_improve.list_plugins()
         tasks = self._orch.scheduler.list_tasks()
+        imap = await self._orch.email.imap_configured()
+        smtp = await self._orch.email.smtp_configured()
         
         return (
             f"*Koda2 Status*\n"
             f"Version: {self._orch.__dict__.get('_version', 'unknown')}\n"
             f"Calendar providers: {', '.join(str(p) for p in providers) or 'none'}\n"
-            f"Email: {'IMAP ✓' if self._orch.email.imap_configured else 'IMAP ✗'} / "
-            f"{'SMTP ✓' if self._orch.email.smtp_configured else 'SMTP ✗'}\n"
+            f"Email: {'IMAP ✓' if imap else 'IMAP ✗'} / "
+            f"{'SMTP ✓' if smtp else 'SMTP ✗'}\n"
             f"LLM providers: {', '.join(str(p) for p in self._orch.llm.available_providers) or 'none'}\n"
             f"Plugins loaded: {len(plugins)}\n"
             f"Scheduled tasks: {len(tasks)}"
@@ -223,7 +225,7 @@ class CommonCommands:
                 f"Environment: {self._orch._settings.koda2_env}\n"
                 f"Log level: {self._orch._settings.koda2_log_level}\n"
                 f"Default LLM: {self._orch._settings.llm_default_provider}\n"
-                f"Calendar providers: {len(self._orch.calendar.active_providers)}\n"
+                f"Calendar providers: {len(await self._orch.calendar.active_providers())}\n"
                 f"Git auto-commit: {'enabled' if self._orch._settings.git_auto_commit else 'disabled'}"
             )
         elif subcmd == "set" and len(parts) > 1:

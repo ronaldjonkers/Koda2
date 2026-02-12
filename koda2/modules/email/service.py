@@ -54,25 +54,21 @@ class EmailService:
             return None
         return await self._account_service.get_default_account(AccountType.EMAIL)
 
-    @property
     async def imap_configured(self) -> bool:
         """Check if any IMAP account is configured."""
         accounts = await self._get_email_accounts()
         return any(acc.provider == ProviderType.IMAP.value for acc in accounts)
 
-    @property
     async def smtp_configured(self) -> bool:
         """Check if any SMTP account is configured."""
         accounts = await self._get_email_accounts()
         return any(acc.provider == ProviderType.SMTP.value for acc in accounts)
 
-    @property
     async def msgraph_configured(self) -> bool:
         """Check if any MS Graph account is configured."""
         accounts = await self._get_email_accounts()
         return any(acc.provider == ProviderType.MSGRAPH.value for acc in accounts)
 
-    @property
     async def gmail_configured(self) -> bool:
         """Check if any Gmail account is configured."""
         accounts = await self._get_email_accounts()

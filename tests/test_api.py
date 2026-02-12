@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from koda2.api.routes import set_orchestrator
 
 
+
 @pytest.fixture
 def mock_orchestrator():
     """Create a mock orchestrator with all required services."""
@@ -26,7 +27,7 @@ def mock_orchestrator():
     })
 
     # Mock calendar
-    orch.calendar.active_providers = []
+    orch.calendar.active_providers = AsyncMock(return_value=[])
     orch.calendar.list_events = AsyncMock(return_value=[])
     orch.calendar.list_all_calendars = AsyncMock(return_value={})
     orch.calendar.schedule_with_prep = AsyncMock(return_value=(
@@ -35,8 +36,8 @@ def mock_orchestrator():
     ))
 
     # Mock email
-    orch.email.imap_configured = False
-    orch.email.smtp_configured = False
+    orch.email.imap_configured = AsyncMock(return_value=False)
+    orch.email.smtp_configured = AsyncMock(return_value=False)
     orch.email.fetch_emails = AsyncMock(return_value=[])
     orch.email.send_email = AsyncMock(return_value=True)
 
@@ -44,7 +45,7 @@ def mock_orchestrator():
     orch.llm.available_providers = []
 
     # Mock telegram / whatsapp
-    orch.telegram.is_configured = False
+    orch.telegram.is_configured = AsyncMock(return_value=False)
     orch.whatsapp.is_configured = False
 
     # Mock self-improve
