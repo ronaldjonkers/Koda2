@@ -231,3 +231,35 @@ class MacOSService:
         if p.stat().st_size > 10 * 1024 * 1024:
             raise ValueError("File too large (>10MB)")
         return p.read_text(encoding="utf-8", errors="replace")
+
+    async def write_file(self, path: str, content: str, mkdir: bool = True) -> str:
+        """Write content to a text file safely.
+
+        Args:
+            path: Target file path (~ expanded, resolved to absolute).
+            content: Text content to write.
+            mkdir: Create parent directories if they don't exist.
+
+        Returns:
+            Absolute path of the written file.
+        """
+        p = Path(path).expanduser().resolve()
+        if mkdir:
+            p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+        logger.info("file_written", path=str(p), size=len(content))
+        return str(p)
+
+    async def file_exists(self, path: str) -> dict[str, Any]:
+        """Check if a file or directory exists and return info."""
+        p = Path(path).expanduser().resolve()
+        if not p.exists():
+            return {"exists": False, "path": str(p)}
+        stat = p.stat()
+        return {
+            "exists": True,
+            "path": str(p),
+            "type": "directory" if p.is_dir() else "file",
+            "size": stat.st_size if p.is_file() else None,
+            "modified": stat.st_mtime,
+        }

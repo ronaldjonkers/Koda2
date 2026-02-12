@@ -36,20 +36,37 @@ director-level secretary. You help manage calendars, emails, tasks, documents, a
 Your capabilities include:
 - Calendar management (Google Calendar, Exchange, Office 365, CalDAV)
 - Email (Gmail, Exchange, IMAP/SMTP) — read, send, and manage emails
-- File sharing — you can send files and documents via Google Drive and email attachments
-- Document creation (DOCX, XLSX, PDF, presentations)
+- File system access — read, write, list files and directories on the computer
+- File sharing — send files via WhatsApp (media) or email (attachments)
+- Document creation (DOCX, XLSX, PDF, presentations) — saved to data/generated/
 - Image generation (DALL-E, Stability AI) and image analysis (vision)
 - Messaging (WhatsApp, Telegram) — send messages and files
+- Shell commands (macOS) — run terminal commands safely
 - Task scheduling and reminders
 - Contact lookup (macOS Contacts)
-- Shell commands (macOS)
 - Memory — you remember previous conversations and can search them
+
+Available actions and their parameters:
+- run_shell: {"command": "...", "cwd": "/optional/path", "timeout": 30}
+- list_directory: {"path": "/some/path"}
+- read_file: {"path": "/some/file.txt"}
+- write_file: {"path": "/some/file.txt", "content": "..."}
+- file_exists: {"path": "/some/path"}
+- send_file: {"path": "/file.pdf", "channel": "whatsapp|email", "to": "recipient", "caption": "..."}
+- send_email: {"to": ["email@example.com"], "subject": "...", "body": "..."}
+- check_calendar: {"start": "ISO datetime", "end": "ISO datetime"}
+- schedule_meeting: {"title": "...", "start": "...", "end": "...", "location": "..."}
+- generate_document: {"type": "docx|xlsx|pdf", "filename": "...", "title": "...", "content": [...]}
+- generate_image: {"prompt": "..."}
+- search_memory: {"query": "..."}
+- find_contact: {"name": "..."}
+- create_reminder: {"title": "...", "notes": "..."}
 
 When the user gives you a request, determine the intent and required actions. Respond in JSON format:
 {
     "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document, 
               generate_image, analyze_image, create_reminder, find_contact, search_memory, 
-              send_file, run_command, general_chat, unknown",
+              send_file, run_command, read_file, write_file, list_directory, general_chat, unknown",
     "entities": {
         "any extracted entities like names, dates, times, subjects, etc."
     },
@@ -313,6 +330,54 @@ class Orchestrator:
         elif action_name == "search_memory":
             results = self.memory.recall(params.get("query", ""), user_id=user_id)
             return results
+
+        elif action_name == "run_shell":
+            result = await self.macos.run_shell(
+                params.get("command", ""),
+                cwd=params.get("cwd"),
+                timeout=params.get("timeout", 30),
+            )
+            return result
+
+        elif action_name == "list_directory":
+            entries = await self.macos.list_directory(params.get("path", "."))
+            return entries
+
+        elif action_name == "read_file":
+            content = await self.macos.read_file(params.get("path", ""))
+            return {"content": content}
+
+        elif action_name == "write_file":
+            written_path = await self.macos.write_file(
+                params.get("path", ""),
+                params.get("content", ""),
+            )
+            return {"path": written_path, "status": "written"}
+
+        elif action_name == "file_exists":
+            info = await self.macos.file_exists(params.get("path", ""))
+            return info
+
+        elif action_name == "send_file":
+            file_path = params.get("path", "")
+            channel = params.get("channel", "whatsapp")
+            to = params.get("to", "")
+            caption = params.get("caption", "")
+            if channel == "whatsapp" and to:
+                result = await self.whatsapp.send_media(
+                    to, f"file://{file_path}", caption=caption,
+                )
+                return result
+            elif channel == "email":
+                msg = EmailMessage(
+                    subject=params.get("subject", "File from Koda2"),
+                    recipients=params.get("to_email", [to]) if to else [],
+                    body_text=caption or "See attached file.",
+                    attachments=[file_path],
+                )
+                success = await self.email.send_email(msg)
+                return {"sent": success}
+            return {"status": "no_channel", "path": file_path}
 
         elif action_name == "build_capability":
             capability = params.get("capability", "")
