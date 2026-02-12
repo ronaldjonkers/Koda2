@@ -348,6 +348,11 @@ async def whatsapp_send(to: str, message: str) -> dict[str, Any]:
 @router.post("/whatsapp/webhook")
 async def whatsapp_webhook(payload: dict[str, Any]) -> dict[str, Any]:
     """Receive incoming WhatsApp messages from the bridge."""
+    from_me = payload.get("fromMe", False)
+    is_self = payload.get("isToSelf", False)
+    body = payload.get("body", "")
+    sender = payload.get("from", "unknown")
+    print(f"[WhatsApp webhook] from={sender} fromMe={from_me} isToSelf={is_self}: {body[:80]}")
     orch = get_orchestrator()
     response = await orch.handle_whatsapp_message(payload)
     return {"processed": response is not None, "response": response}

@@ -445,6 +445,7 @@ class WhatsAppBot:
                     from_me=from_me,
                     is_self=is_self,
                 )
+                print(f"[WhatsApp] Ignored (not self-message): fromMe={from_me} isToSelf={is_self}")
                 return None
 
             result = {
