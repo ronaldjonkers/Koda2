@@ -66,15 +66,57 @@ async def validate_ews_credentials(
         return (False, "Server hostname is required.")
     
     try:
-        from exchangelib import Account, Configuration, Credentials
+        from exchangelib import (
+            Account, Configuration, Credentials, DELEGATE,
+            Build, Version,
+        )
+        from exchangelib.protocol import BaseProtocol
+
+        # Use a shorter timeout for the underlying requests session
+        BaseProtocol.TIMEOUT = 30
 
         def _test_connection() -> bool:
             creds = Credentials(username, password)
-            config = Configuration(server=hostname, credentials=creds)
-            account = Account(email, config=config, autodiscover=False)
-            # Try to access the calendar to validate credentials
-            _ = account.calendar
-            return True
+            # Try with explicit auth_type settings.
+            # Many Exchange servers (especially behind proxies/load balancers)
+            # don't support NTLM. We try multiple auth types.
+            from exchangelib.transport import AUTH_TYPE_MAP
+            import requests.auth
+
+            for auth_type_name in ("BASIC", "NTLM", None):
+                try:
+                    config_kwargs = {
+                        "server": hostname,
+                        "credentials": creds,
+                    }
+                    if auth_type_name == "BASIC":
+                        config_kwargs["auth_type"] = "BASIC"
+                    elif auth_type_name == "NTLM":
+                        config_kwargs["auth_type"] = "NTLM"
+                    # else: let exchangelib auto-detect
+
+                    config = Configuration(**config_kwargs)
+                    account = Account(
+                        email, config=config,
+                        autodiscover=False, access_type=DELEGATE,
+                    )
+                    # Try to access the calendar to validate credentials
+                    _ = account.calendar
+                    print(f"[EWS] Connection successful with auth_type={auth_type_name or 'auto'}")
+                    return True
+                except Exception as exc:
+                    print(f"[EWS] Auth type {auth_type_name or 'auto'} failed: {exc}")
+                    # If it's an auth error (401), try next auth type
+                    exc_str = str(exc).lower()
+                    if any(k in exc_str for k in ("unauthorized", "401", "timeout", "none")):
+                        continue
+                    # For other errors, re-raise
+                    raise
+            # All auth types failed
+            raise RuntimeError(
+                f"Could not authenticate to {hostname}. "
+                "Tried BASIC and NTLM auth. Check username/password."
+            )
 
         # Run blocking EWS operations in thread
         result = await asyncio.wait_for(
@@ -84,7 +126,7 @@ async def validate_ews_credentials(
         return (True, "")
 
     except asyncio.TimeoutError:
-        return (False, "Connection timed out. Check server URL and network access.")
+        return (False, "Connection timed out. Check server hostname and network access.")
     except ImportError:
         return (False, "exchangelib library not installed.")
     except Exception as e:
@@ -92,9 +134,9 @@ async def validate_ews_credentials(
         if "unauthorized" in error_msg or "401" in error_msg:
             return (False, "Invalid username or password.")
         elif "could not connect" in error_msg or "connection refused" in error_msg:
-            return (False, f"Could not connect to server '{server}'. Check server URL.")
+            return (False, f"Could not connect to server '{hostname}'. Check server hostname.")
         elif "dns" in error_msg or "name resolution" in error_msg:
-            return (False, f"Could not resolve server hostname '{server}'.")
+            return (False, f"Could not resolve server hostname '{hostname}'.")
         else:
             return (False, f"EWS connection failed: {e}")
 
