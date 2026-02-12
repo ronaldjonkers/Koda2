@@ -1,539 +1,743 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Koda2 Dashboard</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <style>
-        /* ── Design tokens ─────────────────────────────────────────── */
-        :root {
-            --bg-0: #09090b; --bg-1: #111113; --bg-2: #18181b; --bg-3: #222225;
-            --bg-4: #2c2c30; --bg-glass: rgba(17,17,19,.72);
-            --tx-0: #fafafa; --tx-1: #a1a1aa; --tx-2: #71717a; --tx-3: #52525b;
-            --accent: #6366f1; --accent-h: #818cf8; --accent-dim: rgba(99,102,241,.15);
-            --green: #22c55e; --green-dim: rgba(34,197,94,.15);
-            --amber: #f59e0b; --amber-dim: rgba(245,158,11,.15);
-            --red: #ef4444; --red-dim: rgba(239,68,68,.15);
-            --blue: #3b82f6; --blue-dim: rgba(59,130,246,.15);
-            --border: rgba(255,255,255,.06);
-            --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 20px;
-            --shadow: 0 1px 3px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25);
-            --transition: .15s cubic-bezier(.4,0,.2,1);
-        }
-        *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif; background:var(--bg-0); color:var(--tx-0); line-height:1.5; min-height:100vh; -webkit-font-smoothing:antialiased; }
-        button { font-family:inherit; cursor:pointer; }
-        input, textarea { font-family:inherit; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Koda2 Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg-0:#09090b;--bg-1:#111113;--bg-2:#18181b;--bg-3:#222225;--bg-4:#2c2c30;
+  --tx-0:#fafafa;--tx-1:#a1a1aa;--tx-2:#71717a;--tx-3:#52525b;
+  --accent:#6366f1;--accent-h:#818cf8;--accent-dim:rgba(99,102,241,.12);
+  --green:#22c55e;--green-dim:rgba(34,197,94,.12);
+  --amber:#f59e0b;--amber-dim:rgba(245,158,11,.12);
+  --red:#ef4444;--red-dim:rgba(239,68,68,.12);
+  --blue:#3b82f6;--blue-dim:rgba(59,130,246,.12);
+  --border:rgba(255,255,255,.07);
+  --r-sm:8px;--r-md:12px;--r-lg:16px;
+  --tr:.15s cubic-bezier(.4,0,.2,1);
+}
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg-0);color:var(--tx-0);line-height:1.5;min-height:100vh;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer}input,textarea,select{font-family:inherit}
+a{color:var(--accent-h);text-decoration:none}
+code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3);padding:2px 6px;border-radius:4px}
 
-        /* ── Layout ────────────────────────────────────────────────── */
-        .app { display:grid; grid-template-columns:240px 1fr; min-height:100vh; }
+/* ── Layout ─────────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
 
-        /* ── Sidebar ───────────────────────────────────────────────── */
-        .sidebar { background:var(--bg-1); border-right:1px solid var(--border); display:flex; flex-direction:column; position:fixed; width:240px; height:100vh; overflow-y:auto; z-index:100; }
-        .sidebar-top { padding:20px 16px 16px; }
-        .logo { display:flex; align-items:center; gap:10px; padding:0 8px 20px; }
-        .logo-mark { width:34px; height:34px; background:linear-gradient(135deg,var(--accent),#a78bfa); border-radius:var(--r-sm); display:grid; place-items:center; font-size:17px; flex-shrink:0; }
-        .logo h1 { font-size:19px; font-weight:700; letter-spacing:-.3px; }
-        .logo span { font-size:11px; color:var(--tx-2); font-weight:400; margin-left:4px; }
+/* ── Sidebar ────────────────────────────────────────────── */
+.sidebar{background:var(--bg-1);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;width:220px;height:100vh;z-index:100}
+.sidebar-top{flex:1;overflow-y:auto;padding:16px 10px 10px}
+.logo{display:flex;align-items:center;gap:10px;padding:4px 8px 18px}
+.logo-mark{width:30px;height:30px;background:linear-gradient(135deg,var(--accent),#a78bfa);border-radius:var(--r-sm);display:grid;place-items:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0}
+.logo h1{font-size:17px;font-weight:700;letter-spacing:-.3px}
+.logo small{font-size:10px;color:var(--tx-3);font-weight:400;margin-left:3px}
+.nav-group{margin-bottom:14px}
+.nav-group-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--tx-3);padding:0 10px;margin-bottom:4px}
+.nav-item{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:var(--r-sm);color:var(--tx-1);font-size:12.5px;font-weight:500;transition:all var(--tr);border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:var(--bg-2);color:var(--tx-0)}
+.nav-item.active{background:var(--accent-dim);color:var(--accent-h)}
+.nav-item .ic{width:16px;text-align:center;font-size:13px;flex-shrink:0}
+.nav-badge{margin-left:auto;background:var(--red);color:#fff;font-size:9px;font-weight:700;padding:1px 6px;border-radius:10px;line-height:14px}
+.sidebar-bottom{padding:10px 12px;border-top:1px solid var(--border);flex-shrink:0}
+.conn-row{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--tx-2);padding:3px 0}
+.conn-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 5px var(--green)}
+.conn-dot.off{background:var(--red);box-shadow:0 0 5px var(--red)}
 
-        nav { flex:1; padding:0 8px; display:flex; flex-direction:column; gap:2px; }
-        .nav-group { margin-bottom:16px; }
-        .nav-group-label { font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.8px; color:var(--tx-3); padding:0 10px; margin-bottom:6px; }
-        .nav-item { display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:var(--r-sm); color:var(--tx-1); font-size:13px; font-weight:500; transition:all var(--transition); border:none; background:none; width:100%; text-align:left; }
-        .nav-item:hover { background:var(--bg-2); color:var(--tx-0); }
-        .nav-item.active { background:var(--accent-dim); color:var(--accent-h); }
-        .nav-item .icon { width:18px; text-align:center; font-size:15px; flex-shrink:0; }
-        .nav-badge { margin-left:auto; background:var(--red); color:#fff; font-size:10px; font-weight:700; padding:1px 7px; border-radius:10px; line-height:16px; }
+/* ── Main ───────────────────────────────────────────────── */
+.main{margin-left:220px;padding:24px 28px 28px;min-height:100vh}
+.page-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:8px}
+.page-head h2{font-size:20px;font-weight:700;letter-spacing:-.3px}
 
-        .sidebar-bottom { padding:12px 16px; border-top:1px solid var(--border); }
-        .conn-row { display:flex; align-items:center; justify-content:space-between; font-size:11px; color:var(--tx-2); padding:4px 0; }
-        .conn-dot { width:7px; height:7px; border-radius:50%; background:var(--green); box-shadow:0 0 6px var(--green); }
-        .conn-dot.off { background:var(--red); box-shadow:0 0 6px var(--red); }
+/* ── Buttons ────────────────────────────────────────────── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 14px;border-radius:var(--r-sm);font-size:12px;font-weight:500;border:none;transition:all var(--tr);white-space:nowrap}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:var(--accent-h)}
+.btn-ghost{background:var(--bg-2);color:var(--tx-1);border:1px solid var(--border)}.btn-ghost:hover{background:var(--bg-3);color:var(--tx-0)}
+.btn-sm{padding:5px 10px;font-size:11px}
 
-        /* ── Main ──────────────────────────────────────────────────── */
-        .main { margin-left:240px; padding:28px 32px 32px; min-height:100vh; }
-        .page-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-        .page-head h2 { font-size:22px; font-weight:700; letter-spacing:-.3px; }
+/* ── Stats ──────────────────────────────────────────────── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.stat{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);padding:16px 18px;position:relative;overflow:hidden}
+.stat::after{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.stat:nth-child(1)::after{background:var(--accent)}.stat:nth-child(2)::after{background:var(--blue)}
+.stat:nth-child(3)::after{background:var(--green)}.stat:nth-child(4)::after{background:var(--amber)}
+.stat-label{font-size:10px;color:var(--tx-2);font-weight:600;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.stat-val{font-size:24px;font-weight:700;line-height:1.1;margin-bottom:2px}
+.stat-sub{font-size:11px;color:var(--tx-2)}
 
-        /* ── Buttons ───────────────────────────────────────────────── */
-        .btn { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border-radius:var(--r-sm); font-size:13px; font-weight:500; border:none; transition:all var(--transition); }
-        .btn-primary { background:var(--accent); color:#fff; }
-        .btn-primary:hover { background:var(--accent-h); }
-        .btn-ghost { background:var(--bg-2); color:var(--tx-1); border:1px solid var(--border); }
-        .btn-ghost:hover { background:var(--bg-3); color:var(--tx-0); }
-        .btn-sm { padding:6px 12px; font-size:12px; }
+/* ── Panels ─────────────────────────────────────────────── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px}
+.grid-main{display:grid;grid-template-columns:1fr minmax(0,320px);gap:14px;margin-bottom:14px}
+.panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.panel-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0;gap:8px}
+.panel-head h3{font-size:13px;font-weight:600;white-space:nowrap}
+.panel-body{flex:1;overflow-y:auto;max-height:320px}
+.panel-body.pad{padding:14px 16px}
+.panel-body.tall{max-height:calc(100vh - 200px)}
 
-        /* ── Stat cards ────────────────────────────────────────────── */
-        .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px; }
-        .stat { background:var(--bg-1); border:1px solid var(--border); border-radius:var(--r-md); padding:20px; position:relative; overflow:hidden; }
-        .stat::after { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
-        .stat:nth-child(1)::after { background:var(--accent); }
-        .stat:nth-child(2)::after { background:var(--blue); }
-        .stat:nth-child(3)::after { background:var(--green); }
-        .stat:nth-child(4)::after { background:var(--amber); }
-        .stat-label { font-size:12px; color:var(--tx-2); font-weight:500; text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px; }
-        .stat-val { font-size:28px; font-weight:700; line-height:1.1; margin-bottom:4px; }
-        .stat-sub { font-size:12px; color:var(--tx-2); }
+/* ── Resource bars ──────────────────────────────────────── */
+.res-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px 16px}
+.res{background:var(--bg-2);border-radius:var(--r-sm);padding:12px}
+.res-label{font-size:10px;color:var(--tx-2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.res-val{font-size:16px;font-weight:600;margin-bottom:6px}
+.res-bar{height:3px;background:var(--bg-4);border-radius:2px;overflow:hidden}
+.res-bar-fill{height:100%;border-radius:2px;transition:width .4s ease}
 
-        /* ── Panels ────────────────────────────────────────────────── */
-        .grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px; }
-        .grid-main { display:grid; grid-template-columns:1fr 380px; gap:16px; margin-bottom:16px; }
-        .panel { background:var(--bg-1); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; display:flex; flex-direction:column; }
-        .panel-head { padding:16px 20px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-shrink:0; }
-        .panel-head h3 { font-size:14px; font-weight:600; }
-        .panel-body { padding:0; flex:1; overflow-y:auto; }
-        .panel-body.pad { padding:16px 20px; }
+/* ── Service list ───────────────────────────────────────── */
+.svc-list{padding:6px 8px}
+.svc{display:flex;align-items:center;gap:9px;padding:8px 8px;border-radius:var(--r-sm)}
+.svc:hover{background:var(--bg-2)}
+.svc-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;font-size:14px;flex-shrink:0}
+.svc-icon.on{background:var(--green-dim)}.svc-icon.off{background:var(--bg-3)}
+.svc-info{flex:1;min-width:0}
+.svc-name{font-size:12px;font-weight:500}.svc-status{font-size:10px;color:var(--tx-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svc-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+.svc-dot.on{background:var(--green)}.svc-dot.off{background:var(--tx-3)}
 
-        /* ── Resource bars ─────────────────────────────────────────── */
-        .res-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:16px 20px; }
-        .res { background:var(--bg-2); border-radius:var(--r-sm); padding:14px; }
-        .res-label { font-size:11px; color:var(--tx-2); text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px; }
-        .res-val { font-size:18px; font-weight:600; margin-bottom:8px; }
-        .res-bar { height:4px; background:var(--bg-4); border-radius:2px; overflow:hidden; }
-        .res-bar-fill { height:100%; border-radius:2px; transition:width .4s ease; }
+/* ── Tasks ──────────────────────────────────────────────── */
+.task{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border);transition:background var(--tr)}
+.task:last-child{border-bottom:none}.task:hover{background:var(--bg-2)}
+.task-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.task-dot.pending{background:var(--amber)}.task-dot.running{background:var(--blue);animation:blink 1.4s infinite}
+.task-dot.completed{background:var(--green)}.task-dot.failed{background:var(--red)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.task-body{flex:1;min-width:0}
+.task-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-meta{font-size:10px;color:var(--tx-2)}
+.task-prog{width:80px;flex-shrink:0}
+.prog-bar{height:3px;background:var(--bg-3);border-radius:2px;overflow:hidden}
+.prog-fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent-h));border-radius:2px;transition:width .3s}
+.prog-pct{font-size:9px;color:var(--tx-2);text-align:right;margin-top:2px}
 
-        /* ── Service list ──────────────────────────────────────────── */
-        .svc-list { padding:8px 12px; }
-        .svc { display:flex; align-items:center; gap:10px; padding:10px 8px; border-radius:var(--r-sm); }
-        .svc:hover { background:var(--bg-2); }
-        .svc-icon { width:32px; height:32px; border-radius:var(--r-sm); display:grid; place-items:center; font-size:16px; flex-shrink:0; }
-        .svc-icon.on { background:var(--green-dim); }
-        .svc-icon.off { background:var(--bg-3); }
-        .svc-info { flex:1; min-width:0; }
-        .svc-name { font-size:13px; font-weight:500; }
-        .svc-status { font-size:11px; color:var(--tx-2); }
-        .svc-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .svc-dot.on { background:var(--green); }
-        .svc-dot.off { background:var(--tx-3); }
+/* ── Chat ───────────────────────────────────────────────── */
+.chat-wrap{display:flex;flex-direction:column;height:calc(100vh - 100px)}
+.chat-messages{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+.chat-msg{max-width:82%;animation:msgIn .2s ease}
+@keyframes msgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.chat-msg.user{align-self:flex-end}.chat-msg.assistant{align-self:flex-start}
+.chat-bubble{padding:9px 13px;border-radius:var(--r-md);font-size:13px;line-height:1.5;word-wrap:break-word;white-space:pre-wrap}
+.chat-msg.user .chat-bubble{background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.chat-msg.assistant .chat-bubble{background:var(--bg-2);color:var(--tx-0);border:1px solid var(--border);border-bottom-left-radius:4px}
+.chat-msg .chat-time{font-size:9px;color:var(--tx-3);margin-top:3px;padding:0 4px}
+.chat-msg.user .chat-time{text-align:right}
+.chat-typing{align-self:flex-start}
+.chat-typing .chat-bubble{display:flex;gap:4px;padding:11px 16px}
+.typing-dot{width:5px;height:5px;border-radius:50%;background:var(--tx-2);animation:bounce .6s infinite alternate}
+.typing-dot:nth-child(2){animation-delay:.15s}.typing-dot:nth-child(3){animation-delay:.3s}
+@keyframes bounce{from{opacity:.3;transform:translateY(0)}to{opacity:1;transform:translateY(-3px)}}
+.chat-input-area{padding:10px 14px;border-top:1px solid var(--border);background:var(--bg-1);flex-shrink:0}
+.chat-input-wrap{display:flex;gap:8px;align-items:flex-end}
+.chat-input{flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r-md);padding:9px 12px;color:var(--tx-0);font-size:13px;resize:none;outline:none;max-height:100px;min-height:38px;line-height:1.4;transition:border-color var(--tr)}
+.chat-input:focus{border-color:var(--accent)}.chat-input::placeholder{color:var(--tx-3)}
+.chat-send{width:36px;height:36px;border-radius:var(--r-sm);background:var(--accent);color:#fff;border:none;display:grid;place-items:center;transition:all var(--tr);flex-shrink:0}
+.chat-send:hover{background:var(--accent-h)}.chat-send:disabled{opacity:.35;cursor:not-allowed}
+.chat-send svg{width:16px;height:16px}
 
-        /* ── Task items ────────────────────────────────────────────── */
-        .task { display:flex; align-items:center; gap:12px; padding:12px 20px; border-bottom:1px solid var(--border); transition:background var(--transition); }
-        .task:last-child { border-bottom:none; }
-        .task:hover { background:var(--bg-2); }
-        .task-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
-        .task-dot.pending { background:var(--amber); }
-        .task-dot.running { background:var(--blue); animation:blink 1.4s infinite; }
-        .task-dot.completed { background:var(--green); }
-        .task-dot.failed { background:var(--red); }
-        @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
-        .task-body { flex:1; min-width:0; }
-        .task-name { font-size:13px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-        .task-meta { font-size:11px; color:var(--tx-2); }
-        .task-prog { width:100px; }
-        .prog-bar { height:4px; background:var(--bg-3); border-radius:2px; overflow:hidden; }
-        .prog-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--accent-h)); border-radius:2px; transition:width .3s; }
-        .prog-pct { font-size:10px; color:var(--tx-2); text-align:right; margin-top:3px; }
+/* ── Empty state ────────────────────────────────────────── */
+.empty{text-align:center;padding:36px 20px;color:var(--tx-2)}
+.empty-icon{font-size:28px;margin-bottom:8px;opacity:.4}
+.empty-title{font-size:13px;font-weight:600;color:var(--tx-1);margin-bottom:3px}
+.empty p{font-size:11px}
 
-        /* ── Chat ──────────────────────────────────────────────────── */
-        .chat-panel { display:flex; flex-direction:column; height:calc(100vh - 56px - 48px); max-height:700px; }
-        .chat-messages { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:12px; }
-        .chat-msg { max-width:85%; animation:msgIn .25s ease; }
-        @keyframes msgIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-        .chat-msg.user { align-self:flex-end; }
-        .chat-msg.assistant { align-self:flex-start; }
-        .chat-bubble { padding:10px 14px; border-radius:var(--r-md); font-size:13.5px; line-height:1.55; word-wrap:break-word; white-space:pre-wrap; }
-        .chat-msg.user .chat-bubble { background:var(--accent); color:#fff; border-bottom-right-radius:4px; }
-        .chat-msg.assistant .chat-bubble { background:var(--bg-2); color:var(--tx-0); border:1px solid var(--border); border-bottom-left-radius:4px; }
-        .chat-msg .chat-time { font-size:10px; color:var(--tx-3); margin-top:4px; padding:0 4px; }
-        .chat-msg.user .chat-time { text-align:right; }
-        .chat-typing { align-self:flex-start; }
-        .chat-typing .chat-bubble { display:flex; gap:4px; padding:12px 18px; }
-        .typing-dot { width:6px; height:6px; border-radius:50%; background:var(--tx-2); animation:typingBounce .6s infinite alternate; }
-        .typing-dot:nth-child(2) { animation-delay:.15s; }
-        .typing-dot:nth-child(3) { animation-delay:.3s; }
-        @keyframes typingBounce { from{opacity:.3;transform:translateY(0)} to{opacity:1;transform:translateY(-4px)} }
+/* ── Data rows ──────────────────────────────────────────── */
+.data-row{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);transition:background var(--tr);font-size:12px}
+.data-row:last-child{border-bottom:none}.data-row:hover{background:var(--bg-2)}
+.tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap}
+.tag-green{background:var(--green-dim);color:var(--green)}
+.tag-red{background:var(--red-dim);color:var(--red)}
+.tag-blue{background:var(--blue-dim);color:var(--blue)}
+.tag-amber{background:var(--amber-dim);color:var(--amber)}
+.tag-gray{background:var(--bg-3);color:var(--tx-2)}
 
-        .chat-input-area { padding:12px 16px; border-top:1px solid var(--border); background:var(--bg-1); flex-shrink:0; }
-        .chat-input-wrap { display:flex; gap:8px; align-items:flex-end; }
-        .chat-input { flex:1; background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r-md); padding:10px 14px; color:var(--tx-0); font-size:13.5px; resize:none; outline:none; max-height:120px; min-height:40px; line-height:1.4; transition:border-color var(--transition); }
-        .chat-input:focus { border-color:var(--accent); }
-        .chat-input::placeholder { color:var(--tx-3); }
-        .chat-send { width:38px; height:38px; border-radius:var(--r-sm); background:var(--accent); color:#fff; border:none; display:grid; place-items:center; transition:all var(--transition); flex-shrink:0; }
-        .chat-send:hover { background:var(--accent-h); }
-        .chat-send:disabled { opacity:.4; cursor:not-allowed; }
-        .chat-send svg { width:18px; height:18px; }
+/* ── Calendar events ────────────────────────────────────── */
+.evt{display:flex;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
+.evt:last-child{border-bottom:none}.evt:hover{background:var(--bg-2)}
+.evt-time{font-size:11px;color:var(--accent-h);font-weight:600;min-width:46px;flex-shrink:0;padding-top:1px}
+.evt-info{flex:1;min-width:0}
+.evt-title{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.evt-loc{font-size:10px;color:var(--tx-2)}
 
-        /* ── Empty state ───────────────────────────────────────────── */
-        .empty { text-align:center; padding:48px 24px; color:var(--tx-2); }
-        .empty-icon { font-size:36px; margin-bottom:12px; opacity:.5; }
-        .empty-title { font-size:14px; font-weight:600; color:var(--tx-1); margin-bottom:4px; }
-        .empty p { font-size:12px; }
+/* ── Account rows ───────────────────────────────────────── */
+.acc{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
+.acc:last-child{border-bottom:none}.acc:hover{background:var(--bg-2)}
+.acc-icon{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;font-size:14px;flex-shrink:0;background:var(--bg-3)}
+.acc-info{flex:1;min-width:0}
+.acc-name{font-size:12px;font-weight:500}.acc-detail{font-size:10px;color:var(--tx-2)}
 
-        /* ── Integrations grid ─────────────────────────────────────── */
-        .int-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:16px; }
-        .int-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--r-md); padding:20px; transition:border-color var(--transition); }
-        .int-card:hover { border-color:var(--accent-dim); }
-        .int-head { display:flex; align-items:center; gap:12px; margin-bottom:14px; }
-        .int-icon { width:40px; height:40px; border-radius:var(--r-sm); display:grid; place-items:center; font-size:20px; }
-        .int-title { font-size:14px; font-weight:600; }
-        .int-status { font-size:11px; color:var(--tx-2); margin-top:2px; }
+/* ── Scheduler rows ─────────────────────────────────────── */
+.sched{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--border);font-size:12px}
+.sched:last-child{border-bottom:none}.sched:hover{background:var(--bg-2)}
+.sched-name{flex:1;min-width:0;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sched-meta{font-size:10px;color:var(--tx-2);flex-shrink:0}
 
-        /* ── Section visibility ────────────────────────────────────── */
-        .section { display:none; }
-        .section.active { display:block; animation:fadeIn .2s ease; }
-        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+/* ── Integrations ───────────────────────────────────────── */
+.int-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:14px}
+.int-card{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);padding:16px;transition:border-color var(--tr)}
+.int-card:hover{border-color:rgba(99,102,241,.2)}
+.int-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.int-icon{width:34px;height:34px;border-radius:var(--r-sm);display:grid;place-items:center;font-size:17px;flex-shrink:0}
+.int-title{font-size:13px;font-weight:600}.int-desc{font-size:10px;color:var(--tx-2);margin-top:1px}
 
-        /* ── Scrollbar ─────────────────────────────────────────────── */
-        ::-webkit-scrollbar { width:6px; }
-        ::-webkit-scrollbar-track { background:transparent; }
-        ::-webkit-scrollbar-thumb { background:var(--bg-4); border-radius:3px; }
-        ::-webkit-scrollbar-thumb:hover { background:var(--tx-3); }
+/* ── Search bar ─────────────────────────────────────────── */
+.search-bar{display:flex;gap:8px;margin-bottom:14px}
+.search-input{flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 12px;color:var(--tx-0);font-size:12px;outline:none;transition:border-color var(--tr)}
+.search-input:focus{border-color:var(--accent)}.search-input::placeholder{color:var(--tx-3)}
 
-        /* ── Responsive ────────────────────────────────────────────── */
-        @media(max-width:1200px) { .stats{grid-template-columns:repeat(2,1fr)} .grid-main{grid-template-columns:1fr} }
-        @media(max-width:768px) { .app{grid-template-columns:1fr} .sidebar{display:none} .main{margin-left:0;padding:16px} .stats{grid-template-columns:1fr} }
-    </style>
+/* ── Section visibility ─────────────────────────────────── */
+.section{display:none}.section.active{display:block;animation:fadeIn .2s ease}
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg-4);border-radius:3px}::-webkit-scrollbar-thumb:hover{background:var(--tx-3)}
+
+/* ── Responsive ─────────────────────────────────────────── */
+@media(max-width:1100px){.stats{grid-template-columns:repeat(2,1fr)}.grid-main,.grid-2{grid-template-columns:1fr}}
+@media(max-width:768px){.app{grid-template-columns:1fr}.sidebar{display:none}.main{margin-left:0;padding:14px}.stats{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.stats{grid-template-columns:1fr}}
+</style>
 </head>
 <body>
 <div class="app">
-    <!-- ── Sidebar ─────────────────────────────────────────────── -->
-    <aside class="sidebar">
-        <div class="sidebar-top">
-            <div class="logo">
-                <div class="logo-mark">K</div>
-                <h1>Koda2 <span>AI</span></h1>
-            </div>
-            <nav>
-                <div class="nav-group">
-                    <div class="nav-group-label">Main</div>
-                    <button class="nav-item active" data-section="dashboard"><span class="icon">📊</span>Dashboard</button>
-                    <button class="nav-item" data-section="chat"><span class="icon">💬</span>Chat</button>
-                    <button class="nav-item" data-section="tasks"><span class="icon">⚡</span>Tasks <span class="nav-badge" id="tasks-badge" style="display:none">0</span></button>
-                </div>
-                <div class="nav-group">
-                    <div class="nav-group-label">Configure</div>
-                    <button class="nav-item" data-section="integrations"><span class="icon">🔌</span>Integrations</button>
-                    <button class="nav-item" data-section="accounts"><span class="icon">👤</span>Accounts</button>
-                </div>
-                <div class="nav-group">
-                    <div class="nav-group-label">System</div>
-                    <button class="nav-item" data-section="memory"><span class="icon">🧠</span>Memory</button>
-                    <button class="nav-item" data-section="logs"><span class="icon">📋</span>Logs</button>
-                </div>
-            </nav>
+
+<!-- ── Sidebar ──────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-top">
+    <div class="logo"><div class="logo-mark">K</div><h1>Koda2<small>AI</small></h1></div>
+    <nav>
+      <div class="nav-group">
+        <div class="nav-group-label">Main</div>
+        <button class="nav-item active" data-section="dashboard"><span class="ic">📊</span>Dashboard</button>
+        <button class="nav-item" data-section="chat"><span class="ic">💬</span>Chat</button>
+        <button class="nav-item" data-section="tasks"><span class="ic">⚡</span>Tasks<span class="nav-badge" id="tasks-badge" style="display:none">0</span></button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">Data</div>
+        <button class="nav-item" data-section="calendar"><span class="ic">📅</span>Calendar</button>
+        <button class="nav-item" data-section="email"><span class="ic">📧</span>Email</button>
+        <button class="nav-item" data-section="memory"><span class="ic">🧠</span>Memory</button>
+      </div>
+      <div class="nav-group">
+        <div class="nav-group-label">System</div>
+        <button class="nav-item" data-section="integrations"><span class="ic">🔌</span>Integrations</button>
+        <button class="nav-item" data-section="accounts"><span class="ic">👤</span>Accounts</button>
+        <button class="nav-item" data-section="scheduler"><span class="ic">⏰</span>Scheduler</button>
+      </div>
+    </nav>
+  </div>
+  <div class="sidebar-bottom">
+    <div class="conn-row"><span>WebSocket</span><span style="display:flex;align-items:center;gap:5px"><span class="conn-dot off" id="ws-dot"></span><span id="ws-label">...</span></span></div>
+    <div class="conn-row"><span>API</span><span style="display:flex;align-items:center;gap:5px"><span class="conn-dot off" id="api-dot"></span><span id="api-label">...</span></span></div>
+  </div>
+</aside>
+
+<!-- ── Main content ────────────────────────────────────── -->
+<main class="main">
+
+<!-- ═══ DASHBOARD ═══════════════════════════════════════ -->
+<section class="section active" id="section-dashboard">
+  <div class="page-head">
+    <h2>Dashboard</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="refreshAll()">Refresh</button>
+      <button class="btn btn-primary btn-sm" onclick="nav('chat')">Open Chat</button>
+    </div>
+  </div>
+  <div class="stats">
+    <div class="stat"><div class="stat-label">Active Tasks</div><div class="stat-val" id="s-tasks">0</div><div class="stat-sub">processing</div></div>
+    <div class="stat"><div class="stat-label">Messages</div><div class="stat-val" id="s-msgs">0</div><div class="stat-sub"><span id="s-rate">0</span>/min</div></div>
+    <div class="stat"><div class="stat-label">CPU</div><div class="stat-val" id="s-cpu">0%</div><div class="stat-sub"><span id="s-ram">0</span> MB RAM</div></div>
+    <div class="stat"><div class="stat-label">Uptime</div><div class="stat-val" id="s-up">--</div><div class="stat-sub" id="s-plat">--</div></div>
+  </div>
+  <div class="grid-main">
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <!-- Active Tasks -->
+      <div class="panel" style="flex:1">
+        <div class="panel-head"><h3>Active Tasks</h3><button class="btn btn-ghost btn-sm" onclick="nav('tasks')">View all</button></div>
+        <div class="panel-body" id="dash-tasks"><div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No active tasks</div><p>Tasks appear when the assistant is working</p></div></div>
+      </div>
+      <!-- Upcoming Events -->
+      <div class="panel">
+        <div class="panel-head"><h3>Upcoming Events</h3><button class="btn btn-ghost btn-sm" onclick="nav('calendar')">Calendar</button></div>
+        <div class="panel-body" id="dash-events"><div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No upcoming events</div></div></div>
+      </div>
+      <!-- System Resources -->
+      <div class="panel">
+        <div class="panel-head"><h3>System Resources</h3></div>
+        <div class="res-grid">
+          <div class="res"><div class="res-label">CPU</div><div class="res-val" id="r-cpu">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-cpu-bar" style="width:0%;background:var(--accent)"></div></div></div>
+          <div class="res"><div class="res-label">Memory</div><div class="res-val" id="r-mem">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-mem-bar" style="width:0%;background:var(--accent-h)"></div></div></div>
+          <div class="res"><div class="res-label">Disk</div><div class="res-val" id="r-disk">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-disk-bar" style="width:0%;background:var(--green)"></div></div></div>
+          <div class="res"><div class="res-label">Network</div><div class="res-val" id="r-net">0 B/s</div><div class="res-bar"><div class="res-bar-fill" id="r-net-bar" style="width:0%;background:var(--blue)"></div></div></div>
         </div>
-        <div class="sidebar-bottom">
-            <div class="conn-row"><span>WebSocket</span><span style="display:flex;align-items:center;gap:6px"><span class="conn-dot" id="ws-dot"></span><span id="ws-label">Connecting</span></span></div>
-            <div class="conn-row"><span>API</span><span style="display:flex;align-items:center;gap:6px"><span class="conn-dot off" id="api-dot"></span><span id="api-label">Checking</span></span></div>
+      </div>
+    </div>
+    <!-- Services sidebar -->
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div class="panel" style="flex:1">
+        <div class="panel-head"><h3>Services</h3></div>
+        <div class="svc-list" id="svc-list">
+          <div class="svc"><div class="svc-icon off">🤖</div><div class="svc-info"><div class="svc-name">LLM</div><div class="svc-status" id="svc-llm">...</div></div><div class="svc-dot off" id="d-llm"></div></div>
+          <div class="svc"><div class="svc-icon off">📅</div><div class="svc-info"><div class="svc-name">Calendar</div><div class="svc-status" id="svc-cal">...</div></div><div class="svc-dot off" id="d-cal"></div></div>
+          <div class="svc"><div class="svc-icon off">📧</div><div class="svc-info"><div class="svc-name">Email</div><div class="svc-status" id="svc-email">...</div></div><div class="svc-dot off" id="d-email"></div></div>
+          <div class="svc"><div class="svc-icon off">💬</div><div class="svc-info"><div class="svc-name">Telegram</div><div class="svc-status" id="svc-tg">...</div></div><div class="svc-dot off" id="d-tg"></div></div>
+          <div class="svc"><div class="svc-icon off">📱</div><div class="svc-info"><div class="svc-name">WhatsApp</div><div class="svc-status" id="svc-wa">...</div></div><div class="svc-dot off" id="d-wa"></div></div>
+          <div class="svc"><div class="svc-icon off">🔌</div><div class="svc-info"><div class="svc-name">Plugins</div><div class="svc-status" id="svc-plug">...</div></div><div class="svc-dot off" id="d-plug"></div></div>
+          <div class="svc"><div class="svc-icon off">⏰</div><div class="svc-info"><div class="svc-name">Scheduler</div><div class="svc-status" id="svc-sched">...</div></div><div class="svc-dot off" id="d-sched"></div></div>
         </div>
-    </aside>
+      </div>
+    </div>
+  </div>
+</section>
 
-    <!-- ── Main content ────────────────────────────────────────── -->
-    <main class="main">
+<!-- ═══ CHAT ════════════════════════════════════════════ -->
+<section class="section" id="section-chat">
+  <div class="page-head"><h2>Chat with Koda2</h2></div>
+  <div class="panel chat-wrap">
+    <div class="chat-messages" id="chat-messages">
+      <div class="chat-msg assistant"><div class="chat-bubble">Hello! I'm Koda2, your AI executive assistant. How can I help you today?</div><div class="chat-time">just now</div></div>
+    </div>
+    <div class="chat-input-area">
+      <div class="chat-input-wrap">
+        <textarea class="chat-input" id="chat-input" placeholder="Type a message..." rows="1"></textarea>
+        <button class="chat-send" id="chat-send" disabled title="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</section>
 
-        <!-- ═══ Dashboard ═══ -->
-        <section class="section active" id="section-dashboard">
-            <div class="page-head">
-                <h2>Dashboard</h2>
-                <div style="display:flex;gap:8px">
-                    <button class="btn btn-ghost btn-sm" onclick="refreshData()">Refresh</button>
-                    <button class="btn btn-primary btn-sm" onclick="navigate('chat')">Open Chat</button>
-                </div>
-            </div>
+<!-- ═══ TASKS ═══════════════════════════════════════════ -->
+<section class="section" id="section-tasks">
+  <div class="page-head"><h2>Tasks</h2></div>
+  <div class="panel"><div class="panel-body tall" id="all-tasks"><div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div><p>Tasks appear as the assistant works</p></div></div></div>
+</section>
 
-            <div class="stats">
-                <div class="stat"><div class="stat-label">Active Tasks</div><div class="stat-val" id="s-tasks">0</div><div class="stat-sub">processing now</div></div>
-                <div class="stat"><div class="stat-label">Messages</div><div class="stat-val" id="s-msgs">0</div><div class="stat-sub"><span id="s-msgs-rate">0</span>/min</div></div>
-                <div class="stat"><div class="stat-label">CPU</div><div class="stat-val" id="s-cpu">0%</div><div class="stat-sub"><span id="s-mem-mb">0</span> MB RAM</div></div>
-                <div class="stat"><div class="stat-label">Uptime</div><div class="stat-val" id="s-uptime">--</div><div class="stat-sub" id="s-platform">--</div></div>
-            </div>
+<!-- ═══ CALENDAR ════════════════════════════════════════ -->
+<section class="section" id="section-calendar">
+  <div class="page-head"><h2>Calendar</h2><button class="btn btn-ghost btn-sm" onclick="loadCalendar()">Refresh</button></div>
+  <div class="grid-2">
+    <div class="panel"><div class="panel-head"><h3>Upcoming Events (7 days)</h3></div><div class="panel-body tall" id="cal-events"><div class="empty"><div class="empty-icon">📅</div><div class="empty-title">Loading...</div></div></div></div>
+    <div class="panel"><div class="panel-head"><h3>Calendars</h3></div><div class="panel-body tall" id="cal-list"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Loading...</div></div></div></div>
+  </div>
+</section>
 
-            <div class="grid-main">
-                <!-- Tasks + Resources -->
-                <div style="display:flex;flex-direction:column;gap:16px">
-                    <div class="panel" style="flex:1">
-                        <div class="panel-head"><h3>Active Tasks</h3><button class="btn btn-ghost btn-sm" onclick="navigate('tasks')">View all</button></div>
-                        <div class="panel-body" id="dash-tasks">
-                            <div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No active tasks</div><p>Tasks appear here when the assistant is working</p></div>
-                        </div>
-                    </div>
-                    <div class="panel">
-                        <div class="panel-head"><h3>System Resources</h3></div>
-                        <div class="res-grid">
-                            <div class="res"><div class="res-label">CPU</div><div class="res-val" id="r-cpu">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-cpu-bar" style="width:0%;background:var(--accent)"></div></div></div>
-                            <div class="res"><div class="res-label">Memory</div><div class="res-val" id="r-mem">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-mem-bar" style="width:0%;background:var(--accent-h)"></div></div></div>
-                            <div class="res"><div class="res-label">Disk</div><div class="res-val" id="r-disk">0%</div><div class="res-bar"><div class="res-bar-fill" id="r-disk-bar" style="width:0%;background:var(--green)"></div></div></div>
-                            <div class="res"><div class="res-label">Network</div><div class="res-val" id="r-net">0 MB</div><div class="res-bar"><div class="res-bar-fill" id="r-net-bar" style="width:0%;background:var(--blue)"></div></div></div>
-                        </div>
-                    </div>
-                </div>
+<!-- ═══ EMAIL ═══════════════════════════════════════════ -->
+<section class="section" id="section-email">
+  <div class="page-head"><h2>Email</h2><button class="btn btn-ghost btn-sm" onclick="loadEmail()">Refresh</button></div>
+  <div class="panel"><div class="panel-body tall" id="email-inbox"><div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Loading...</div></div></div></div>
+</section>
 
-                <!-- Services -->
-                <div class="panel">
-                    <div class="panel-head"><h3>Services</h3></div>
-                    <div class="svc-list" id="svc-list">
-                        <div class="svc"><div class="svc-icon off">🤖</div><div class="svc-info"><div class="svc-name">LLM</div><div class="svc-status" id="svc-llm">checking...</div></div><div class="svc-dot off" id="svc-llm-dot"></div></div>
-                        <div class="svc"><div class="svc-icon off">📅</div><div class="svc-info"><div class="svc-name">Calendar</div><div class="svc-status" id="svc-cal">checking...</div></div><div class="svc-dot off" id="svc-cal-dot"></div></div>
-                        <div class="svc"><div class="svc-icon off">📧</div><div class="svc-info"><div class="svc-name">Email</div><div class="svc-status" id="svc-email">checking...</div></div><div class="svc-dot off" id="svc-email-dot"></div></div>
-                        <div class="svc"><div class="svc-icon off">💬</div><div class="svc-info"><div class="svc-name">Telegram</div><div class="svc-status" id="svc-tg">checking...</div></div><div class="svc-dot off" id="svc-tg-dot"></div></div>
-                        <div class="svc"><div class="svc-icon off">📱</div><div class="svc-info"><div class="svc-name">WhatsApp</div><div class="svc-status" id="svc-wa">checking...</div></div><div class="svc-dot off" id="svc-wa-dot"></div></div>
-                    </div>
-                </div>
-            </div>
-        </section>
+<!-- ═══ MEMORY ══════════════════════════════════════════ -->
+<section class="section" id="section-memory">
+  <div class="page-head"><h2>Memory</h2></div>
+  <div class="search-bar">
+    <input class="search-input" id="mem-q" placeholder="Search memories...">
+    <button class="btn btn-primary btn-sm" onclick="searchMemory()">Search</button>
+  </div>
+  <div class="panel"><div class="panel-body tall" id="mem-results"><div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Search your memory store</div><p>Enter a query above to find stored memories</p></div></div></div>
+</section>
 
-        <!-- ═══ Chat ═══ -->
-        <section class="section" id="section-chat">
-            <div class="page-head"><h2>Chat with Koda2</h2></div>
-            <div class="panel chat-panel">
-                <div class="chat-messages" id="chat-messages">
-                    <div class="chat-msg assistant">
-                        <div class="chat-bubble">Hello! I'm Koda2, your AI executive assistant. How can I help you today?</div>
-                        <div class="chat-time">just now</div>
-                    </div>
-                </div>
-                <div class="chat-input-area">
-                    <div class="chat-input-wrap">
-                        <textarea class="chat-input" id="chat-input" placeholder="Type a message..." rows="1"></textarea>
-                        <button class="chat-send" id="chat-send" title="Send message">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </section>
+<!-- ═══ INTEGRATIONS ════════════════════════════════════ -->
+<section class="section" id="section-integrations">
+  <div class="page-head"><h2>Integrations</h2><button class="btn btn-ghost btn-sm" onclick="checkHealth()">Refresh</button></div>
+  <div class="int-grid" id="int-grid"></div>
+</section>
 
-        <!-- ═══ Tasks ═══ -->
-        <section class="section" id="section-tasks">
-            <div class="page-head"><h2>Tasks</h2></div>
-            <div class="panel">
-                <div class="panel-body" id="all-tasks" style="max-height:calc(100vh - 160px)">
-                    <div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div><p>Tasks will appear here as the assistant works</p></div>
-                </div>
-            </div>
-        </section>
+<!-- ═══ ACCOUNTS ════════════════════════════════════════ -->
+<section class="section" id="section-accounts">
+  <div class="page-head"><h2>Accounts</h2><button class="btn btn-ghost btn-sm" onclick="loadAccounts()">Refresh</button></div>
+  <div class="panel"><div class="panel-body tall" id="acc-list"><div class="empty"><div class="empty-icon">👤</div><div class="empty-title">Loading...</div></div></div></div>
+</section>
 
-        <!-- ═══ Integrations ═══ -->
-        <section class="section" id="section-integrations">
-            <div class="page-head"><h2>Integrations</h2></div>
-            <div class="int-grid" id="int-grid"></div>
-        </section>
+<!-- ═══ SCHEDULER ═══════════════════════════════════════ -->
+<section class="section" id="section-scheduler">
+  <div class="page-head"><h2>Scheduled Tasks</h2><button class="btn btn-ghost btn-sm" onclick="loadScheduler()">Refresh</button></div>
+  <div class="panel"><div class="panel-body tall" id="sched-list"><div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">Loading...</div></div></div></div>
+</section>
 
-        <!-- ═══ Accounts ═══ -->
-        <section class="section" id="section-accounts">
-            <div class="page-head"><h2>Accounts</h2></div>
-            <div class="panel"><div class="panel-body pad"><div class="empty"><div class="empty-icon">👤</div><div class="empty-title">Account management</div><p>Manage your connected accounts via the setup wizard: <code style="background:var(--bg-3);padding:2px 6px;border-radius:4px;font-size:12px">koda2 --setup</code></p></div></div></div>
-        </section>
-
-        <!-- ═══ Memory ═══ -->
-        <section class="section" id="section-memory">
-            <div class="page-head"><h2>Memory</h2></div>
-            <div class="panel"><div class="panel-body pad"><div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Memory store</div><p>Browse stored memories and context</p></div></div></div>
-        </section>
-
-        <!-- ═══ Logs ═══ -->
-        <section class="section" id="section-logs">
-            <div class="page-head"><h2>System Logs</h2></div>
-            <div class="panel"><div class="panel-body pad"><div class="empty"><div class="empty-icon">📋</div><div class="empty-title">Logs</div><p>View system logs and audit trail</p></div></div></div>
-        </section>
-    </main>
+</main>
 </div>
 
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
-/* ── State ─────────────────────────────────────────────────────── */
-const state = { tasks:[], health:null, connected:false, chatBusy:false };
-const startTime = Date.now();
+/* ═══════════════════════════════════════════════════════
+   Koda2 Dashboard — JavaScript
+   ═══════════════════════════════════════════════════════ */
 
-/* ── WebSocket ─────────────────────────────────────────────────── */
+/* ── State ──────────────────────────────────────────────── */
+const S = { tasks:[], health:null, ws:false, chatBusy:false };
+const T0 = Date.now();
+
+/* ── Helpers ────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function setConn(dotId, lblId, on, txt) { $(dotId).classList.toggle('off', !on); $(lblId).textContent = txt; }
+
+function timeAgo(iso) {
+    if (!iso) return 'just now';
+    const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60); if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+}
+function fmtUp(ms) {
+    const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24);
+    if (d > 0) return d + 'd ' + (h%24) + 'h';
+    if (h > 0) return h + 'h ' + (m%60) + 'm';
+    return m + 'm';
+}
+function fmtTime(iso) {
+    try { const d = new Date(iso); return d.getHours().toString().padStart(2,'0') + ':' + d.getMinutes().toString().padStart(2,'0'); }
+    catch(e) { return ''; }
+}
+function fmtDate(iso) {
+    try { return new Date(iso).toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric' }); }
+    catch(e) { return ''; }
+}
+
+/* ── Navigation ─────────────────────────────────────────── */
+function nav(section) {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelector(`.nav-item[data-section="${section}"]`)?.classList.add('active');
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    $('section-' + section)?.classList.add('active');
+    onSection(section);
+}
+document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', () => nav(b.dataset.section)));
+
+function onSection(s) {
+    if (s === 'calendar') loadCalendar();
+    else if (s === 'email') loadEmail();
+    else if (s === 'accounts') loadAccounts();
+    else if (s === 'scheduler') loadScheduler();
+    else if (s === 'integrations' && S.health) renderIntegrations(S.health);
+}
+
+/* ── WebSocket ──────────────────────────────────────────── */
 const socket = io();
-socket.on('connect', () => { state.connected=true; setConn('ws-dot','ws-label',true,'Connected'); });
-socket.on('disconnect', () => { state.connected=false; setConn('ws-dot','ws-label',false,'Disconnected'); });
+socket.on('connect', () => { S.ws = true; setConn('ws-dot', 'ws-label', true, 'Connected'); });
+socket.on('disconnect', () => { S.ws = false; setConn('ws-dot', 'ws-label', false, 'Disconnected'); });
 socket.on('metrics_update', d => updateMetrics(d));
 socket.on('task_update', d => { upsertTask(d.task); renderTasks(); });
-socket.on('tasks_list', d => { state.tasks=d.tasks; renderTasks(); });
+socket.on('tasks_list', d => { S.tasks = d.tasks || []; renderTasks(); });
 
-/* ── Helpers ───────────────────────────────────────────────────── */
-function $(id) { return document.getElementById(id); }
-function esc(t) { const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
-function setConn(dotId,labelId,on,text) { $(dotId).classList.toggle('off',!on); $(labelId).textContent=text; }
-function timeAgo(iso) {
-    if(!iso) return 'just now';
-    const s=Math.floor((Date.now()-new Date(iso))/1000);
-    if(s<60) return 'just now'; const m=Math.floor(s/60);
-    if(m<60) return m+'m ago'; const h=Math.floor(m/60);
-    if(h<24) return h+'h ago'; return Math.floor(h/24)+'d ago';
-}
-function fmtUptime(ms) {
-    const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
-    if(d>0) return d+'d '+h%24+'h'; if(h>0) return h+'h '+m%60+'m'; return m+'m';
-}
-function navigate(section) {
-    document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-    document.querySelector(`.nav-item[data-section="${section}"]`)?.classList.add('active');
-    document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-    $('section-'+section)?.classList.add('active');
-}
-
-/* ── Navigation ────────────────────────────────────────────────── */
-document.querySelectorAll('.nav-item').forEach(btn => {
-    btn.addEventListener('click', () => navigate(btn.dataset.section));
-});
-
-/* ── Metrics ───────────────────────────────────────────────────── */
+/* ── Metrics ────────────────────────────────────────────── */
 function updateMetrics(d) {
-    const sys=d.system||{}, svc=d.service||{};
-    $('s-cpu').textContent = (sys.cpu_percent||0).toFixed(1)+'%';
-    $('s-mem-mb').textContent = (svc.memory_usage_mb||0).toFixed(0);
-    $('s-msgs-rate').textContent = (svc.messages_per_minute||0).toFixed(1);
-    $('s-uptime').textContent = fmtUptime(Date.now()-startTime);
-    if(sys.platform) $('s-platform').textContent = sys.platform;
+    const sys = d.system || {}, svc = d.service || {};
+    $('s-cpu').textContent = (sys.cpu_percent || 0).toFixed(1) + '%';
+    $('s-ram').textContent = (svc.memory_usage_mb || 0).toFixed(0);
+    $('s-rate').textContent = (svc.messages_per_minute || 0).toFixed(1);
+    $('s-up').textContent = fmtUp(Date.now() - T0);
+    if (sys.platform) $('s-plat').textContent = sys.platform;
 
-    $('r-cpu').textContent = (sys.cpu_percent||0).toFixed(1)+'%';
-    $('r-cpu-bar').style.width = (sys.cpu_percent||0)+'%';
-    $('r-mem').textContent = (sys.memory_percent||0).toFixed(1)+'%';
-    $('r-mem-bar').style.width = (sys.memory_percent||0)+'%';
-    $('r-disk').textContent = (sys.disk_percent||0).toFixed(1)+'%';
-    $('r-disk-bar').style.width = (sys.disk_percent||0)+'%';
-}
+    $('r-cpu').textContent = (sys.cpu_percent || 0).toFixed(1) + '%';
+    $('r-cpu-bar').style.width = Math.min(sys.cpu_percent || 0, 100) + '%';
+    $('r-mem').textContent = (sys.memory_percent || 0).toFixed(1) + '%';
+    $('r-mem-bar').style.width = Math.min(sys.memory_percent || 0, 100) + '%';
+    $('r-disk').textContent = (sys.disk_percent || 0).toFixed(1) + '%';
+    $('r-disk-bar').style.width = Math.min(sys.disk_percent || 0, 100) + '%';
 
-/* ── Tasks ─────────────────────────────────────────────────────── */
-function upsertTask(t) {
-    const i=state.tasks.findIndex(x=>x.id===t.id);
-    if(i>=0) Object.assign(state.tasks[i],t); else state.tasks.unshift(t);
-}
-function renderTasks() {
-    const active=state.tasks.filter(t=>t.status==='pending'||t.status==='running');
-    const badge=$('tasks-badge');
-    if(active.length>0){badge.textContent=active.length;badge.style.display=''}else{badge.style.display='none'}
-    $('s-tasks').textContent=active.length;
-
-    // Dashboard panel
-    $('dash-tasks').innerHTML = active.length===0
-        ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No active tasks</div><p>Tasks appear here when the assistant is working</p></div>'
-        : active.slice(0,6).map(taskHTML).join('');
-
-    // Full tasks page
-    const all=state.tasks.length===0
-        ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div></div>'
-        : state.tasks.slice(0,50).map(taskHTML).join('');
-    $('all-tasks').innerHTML=all;
-}
-function taskHTML(t) {
-    return `<div class="task"><div class="task-dot ${t.status}"></div><div class="task-body"><div class="task-name">${esc(t.name)}</div><div class="task-meta">${t.progress_message||t.status} &middot; ${timeAgo(t.created_at)}</div></div><div class="task-prog"><div class="prog-bar"><div class="prog-fill" style="width:${t.progress}%"></div></div><div class="prog-pct">${t.progress}%</div></div></div>`;
-}
-
-/* ── Health check ──────────────────────────────────────────────── */
-async function checkHealth() {
-    try {
-        const r=await fetch('/api/health'); const d=await r.json();
-        state.health=d;
-        setConn('api-dot','api-label',true,'Online');
-
-        // Services
-        const llm=d.llm_providers||[];
-        setSvc('svc-llm','svc-llm-dot', llm.length>0, llm.length>0?llm.join(', '):'not configured');
-        const cal=d.calendar_providers||[];
-        setSvc('svc-cal','svc-cal-dot', cal.length>0, cal.length>0?cal.join(', '):'not connected');
-        setSvc('svc-email','svc-email-dot', d.email_imap||d.email_smtp, (d.email_imap?'IMAP ':'')+(d.email_smtp?'SMTP':'') || 'not configured');
-        setSvc('svc-tg','svc-tg-dot', d.telegram, d.telegram?'connected':'disabled');
-        setSvc('svc-wa','svc-wa-dot', d.whatsapp, d.whatsapp?'connected':'disabled');
-
-        // Integrations page
-        renderIntegrations(d);
-    } catch(e) {
-        setConn('api-dot','api-label',false,'Offline');
+    const netMb = (sys.net_bytes_sent || 0) + (sys.net_bytes_recv || 0);
+    if (netMb > 0) {
+        const mb = netMb / (1024 * 1024);
+        $('r-net').textContent = mb > 1024 ? (mb/1024).toFixed(1) + ' GB' : mb.toFixed(0) + ' MB';
+        $('r-net-bar').style.width = Math.min(mb / 100, 100) + '%';
     }
 }
-function setSvc(labelId,dotId,on,text) {
-    $(labelId).textContent=text;
-    $(dotId).classList.toggle('on',on); $(dotId).classList.toggle('off',!on);
-    // Also update icon bg
-    const iconEl=$(dotId).closest('.svc')?.querySelector('.svc-icon');
-    if(iconEl){iconEl.classList.toggle('on',on);iconEl.classList.toggle('off',!on);}
+
+/* ── Tasks ──────────────────────────────────────────────── */
+function upsertTask(t) {
+    const i = S.tasks.findIndex(x => x.id === t.id);
+    if (i >= 0) Object.assign(S.tasks[i], t); else S.tasks.unshift(t);
 }
+function renderTasks() {
+    const active = S.tasks.filter(t => t.status === 'pending' || t.status === 'running');
+    const badge = $('tasks-badge');
+    if (active.length > 0) { badge.textContent = active.length; badge.style.display = ''; }
+    else badge.style.display = 'none';
+    $('s-tasks').textContent = active.length;
+
+    $('dash-tasks').innerHTML = active.length === 0
+        ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No active tasks</div></div>'
+        : active.slice(0, 5).map(taskH).join('');
+
+    $('all-tasks').innerHTML = S.tasks.length === 0
+        ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div></div>'
+        : S.tasks.slice(0, 100).map(taskH).join('');
+}
+function taskH(t) {
+    return `<div class="task"><div class="task-dot ${t.status}"></div><div class="task-body"><div class="task-name">${esc(t.name)}</div><div class="task-meta">${t.progress_message || t.status} &middot; ${timeAgo(t.created_at)}</div></div><div class="task-prog"><div class="prog-bar"><div class="prog-fill" style="width:${t.progress || 0}%"></div></div><div class="prog-pct">${t.progress || 0}%</div></div></div>`;
+}
+
+/* ── Health check ───────────────────────────────────────── */
+async function checkHealth() {
+    try {
+        const r = await fetch('/api/health');
+        const d = await r.json();
+        S.health = d;
+        setConn('api-dot', 'api-label', true, 'Online');
+
+        const llm = d.llm_providers || [];
+        setSvc('svc-llm', 'd-llm', llm.length > 0, llm.length ? llm.join(', ') : 'not configured');
+        const cal = d.calendar_providers || [];
+        setSvc('svc-cal', 'd-cal', cal.length > 0, cal.length ? cal.join(', ') : 'not connected');
+        const emailParts = []; if (d.email_imap) emailParts.push('IMAP'); if (d.email_smtp) emailParts.push('SMTP');
+        setSvc('svc-email', 'd-email', emailParts.length > 0, emailParts.length ? emailParts.join(' + ') : 'not configured');
+        setSvc('svc-tg', 'd-tg', d.telegram, d.telegram ? 'connected' : 'disabled');
+        setSvc('svc-wa', 'd-wa', d.whatsapp, d.whatsapp ? 'connected' : 'disabled');
+        setSvc('svc-plug', 'd-plug', d.plugins_loaded > 0, (d.plugins_loaded || 0) + ' loaded');
+        setSvc('svc-sched', 'd-sched', d.scheduled_tasks > 0, (d.scheduled_tasks || 0) + ' tasks');
+
+        renderIntegrations(d);
+    } catch(e) {
+        setConn('api-dot', 'api-label', false, 'Offline');
+    }
+}
+function setSvc(lblId, dotId, on, txt) {
+    $(lblId).textContent = txt;
+    $(dotId).classList.toggle('on', on);
+    $(dotId).classList.toggle('off', !on);
+    const ic = $(dotId).closest('.svc')?.querySelector('.svc-icon');
+    if (ic) { ic.classList.toggle('on', on); ic.classList.toggle('off', !on); }
+}
+
+/* ── Integrations ───────────────────────────────────────── */
 function renderIntegrations(d) {
-    const items=[
-        {icon:'🤖',name:'LLM Providers',status:d.llm_providers?.length?d.llm_providers.join(', '):'Not configured',on:d.llm_providers?.length>0},
-        {icon:'📅',name:'Calendar',status:d.calendar_providers?.length?d.calendar_providers.join(', '):'Not connected',on:d.calendar_providers?.length>0},
-        {icon:'📧',name:'Email (IMAP)',status:d.email_imap?'Connected':'Not configured',on:d.email_imap},
-        {icon:'📤',name:'Email (SMTP)',status:d.email_smtp?'Connected':'Not configured',on:d.email_smtp},
-        {icon:'💬',name:'Telegram',status:d.telegram?'Bot active':'Disabled',on:d.telegram},
-        {icon:'📱',name:'WhatsApp',status:d.whatsapp?'Connected':'Disabled',on:d.whatsapp},
-        {icon:'🔌',name:'Plugins',status:(d.plugins_loaded||0)+' loaded',on:d.plugins_loaded>0},
-        {icon:'⏰',name:'Scheduled Tasks',status:(d.scheduled_tasks||0)+' active',on:d.scheduled_tasks>0},
+    const items = [
+        { ic:'🤖', n:'LLM Providers', s: d.llm_providers?.length ? d.llm_providers.join(', ') : 'Not configured', on: d.llm_providers?.length > 0 },
+        { ic:'📅', n:'Calendar', s: d.calendar_providers?.length ? d.calendar_providers.join(', ') : 'Not connected', on: d.calendar_providers?.length > 0 },
+        { ic:'📧', n:'Email (IMAP)', s: d.email_imap ? 'Connected' : 'Not configured', on: d.email_imap },
+        { ic:'📤', n:'Email (SMTP)', s: d.email_smtp ? 'Connected' : 'Not configured', on: d.email_smtp },
+        { ic:'💬', n:'Telegram', s: d.telegram ? 'Bot active' : 'Disabled', on: d.telegram },
+        { ic:'📱', n:'WhatsApp', s: d.whatsapp ? 'Connected' : 'Disabled', on: d.whatsapp },
+        { ic:'🔌', n:'Plugins', s: (d.plugins_loaded || 0) + ' loaded', on: d.plugins_loaded > 0 },
+        { ic:'⏰', n:'Scheduled Tasks', s: (d.scheduled_tasks || 0) + ' active', on: d.scheduled_tasks > 0 },
     ];
-    $('int-grid').innerHTML=items.map(i=>`
+    $('int-grid').innerHTML = items.map(i => `
         <div class="int-card">
             <div class="int-head">
-                <div class="int-icon" style="background:${i.on?'var(--green-dim)':'var(--bg-3)'}">${i.icon}</div>
-                <div><div class="int-title">${i.name}</div><div class="int-status">${i.status}</div></div>
+                <div class="int-icon" style="background:${i.on ? 'var(--green-dim)' : 'var(--bg-3)'}">${i.ic}</div>
+                <div><div class="int-title">${i.n}</div><div class="int-desc">${i.s}</div></div>
             </div>
         </div>`).join('');
 }
 
-setInterval(checkHealth, 30000);
-checkHealth();
-
-/* ── Chat ──────────────────────────────────────────────────────── */
-const chatInput = $('chat-input');
-const chatSend = $('chat-send');
-const chatMessages = $('chat-messages');
-
-chatInput.addEventListener('input', () => {
-    chatInput.style.height='auto';
-    chatInput.style.height=Math.min(chatInput.scrollHeight,120)+'px';
-    chatSend.disabled = !chatInput.value.trim() || state.chatBusy;
-});
-chatInput.addEventListener('keydown', e => {
-    if(e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
-});
-chatSend.addEventListener('click', sendChat);
-chatSend.disabled = true;
-
-async function sendChat() {
-    const text=chatInput.value.trim();
-    if(!text || state.chatBusy) return;
-
-    addChatMsg('user', text);
-    chatInput.value=''; chatInput.style.height='auto';
-    chatSend.disabled=true;
-    state.chatBusy=true;
-
-    // Show typing indicator
-    const typingEl = document.createElement('div');
-    typingEl.className='chat-msg chat-typing assistant';
-    typingEl.innerHTML='<div class="chat-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
-    chatMessages.appendChild(typingEl);
-    chatMessages.scrollTop=chatMessages.scrollHeight;
-
+/* ── Calendar ───────────────────────────────────────────── */
+async function loadCalendar() {
     try {
-        const r=await fetch('/api/chat', {
-            method:'POST',
-            headers:{'Content-Type':'application/json'},
-            body:JSON.stringify({message:text, user_id:'dashboard', channel:'dashboard'})
-        });
-        const d=await r.json();
-        typingEl.remove();
-        addChatMsg('assistant', d.response || d.detail || 'No response');
+        const [evR, clR] = await Promise.all([
+            fetch('/api/calendar/events?days=7'),
+            fetch('/api/calendar/calendars')
+        ]);
+        const events = await evR.json();
+        const cals = await clR.json();
+
+        // Events list
+        if (events.length === 0) {
+            $('cal-events').innerHTML = '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No events in the next 7 days</div></div>';
+        } else {
+            $('cal-events').innerHTML = events.map(e => `
+                <div class="evt">
+                    <div class="evt-time">${fmtTime(e.start)}</div>
+                    <div class="evt-info">
+                        <div class="evt-title">${esc(e.title)}</div>
+                        <div class="evt-loc">${fmtDate(e.start)}${e.location ? ' &middot; ' + esc(e.location) : ''}</div>
+                    </div>
+                </div>`).join('');
+        }
+
+        // Dashboard upcoming events
+        $('dash-events').innerHTML = events.length === 0
+            ? '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No upcoming events</div></div>'
+            : events.slice(0, 4).map(e => `
+                <div class="evt">
+                    <div class="evt-time">${fmtTime(e.start)}</div>
+                    <div class="evt-info"><div class="evt-title">${esc(e.title)}</div><div class="evt-loc">${fmtDate(e.start)}</div></div>
+                </div>`).join('');
+
+        // Calendar list
+        const entries = Object.entries(cals);
+        $('cal-list').innerHTML = entries.length === 0
+            ? '<div class="empty"><div class="empty-icon">📋</div><div class="empty-title">No calendars found</div></div>'
+            : entries.map(([prov, names]) =>
+                names.map(n => `<div class="data-row"><span class="tag tag-blue">${esc(prov)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n)}</span></div>`).join('')
+              ).join('');
     } catch(e) {
-        typingEl.remove();
-        addChatMsg('assistant', 'Error: Could not reach the API. Please check if Koda2 is running.');
-    } finally {
-        state.chatBusy=false;
-        chatSend.disabled=!chatInput.value.trim();
+        $('cal-events').innerHTML = '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">Could not load events</div><p>Calendar may not be configured</p></div>';
+        $('cal-list').innerHTML = '<div class="empty"><div class="empty-icon">📋</div><div class="empty-title">No calendars</div></div>';
+        $('dash-events').innerHTML = '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">Calendar not available</div></div>';
     }
 }
 
-function addChatMsg(role, text) {
-    const now=new Date();
-    const time=now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');
-    const div=document.createElement('div');
-    div.className='chat-msg '+role;
-    div.innerHTML=`<div class="chat-bubble">${esc(text)}</div><div class="chat-time">${time}</div>`;
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop=chatMessages.scrollHeight;
+/* ── Email ──────────────────────────────────────────────── */
+async function loadEmail() {
+    try {
+        const r = await fetch('/api/email/inbox?limit=30');
+        const emails = await r.json();
+        if (emails.length === 0) {
+            $('email-inbox').innerHTML = '<div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Inbox is empty</div></div>';
+        } else {
+            $('email-inbox').innerHTML = emails.map(e => `
+                <div class="data-row" style="gap:8px">
+                    <span style="width:6px;height:6px;border-radius:50%;background:${e.is_read ? 'var(--tx-3)' : 'var(--blue)'};flex-shrink:0"></span>
+                    <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${e.is_read ? '400' : '500'}">${esc(e.subject || '(no subject)')}</span>
+                    <span style="font-size:10px;color:var(--tx-2);flex-shrink:0">${esc((e.sender || '').split('@')[0])}</span>
+                    <span style="font-size:10px;color:var(--tx-3);flex-shrink:0">${fmtDate(e.date)}</span>
+                    ${e.has_attachments ? '<span style="font-size:11px">📎</span>' : ''}
+                </div>`).join('');
+        }
+    } catch(e) {
+        $('email-inbox').innerHTML = '<div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Could not load inbox</div><p>Email may not be configured</p></div>';
+    }
 }
 
-/* ── Actions ───────────────────────────────────────────────────── */
-function refreshData() { checkHealth(); socket.emit('refresh_request'); }
+/* ── Memory ─────────────────────────────────────────────── */
+$('mem-q').addEventListener('keydown', e => { if (e.key === 'Enter') searchMemory(); });
+async function searchMemory() {
+    const q = $('mem-q').value.trim();
+    if (!q) return;
+    $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">Searching...</div></div>';
+    try {
+        const r = await fetch(`/api/memory/search?query=${encodeURIComponent(q)}&n=10`);
+        const results = await r.json();
+        if (results.length === 0) {
+            $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">No results found</div></div>';
+        } else {
+            $('mem-results').innerHTML = results.map(m => `
+                <div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+                    <div style="display:flex;gap:6px;width:100%;align-items:center">
+                        <span class="tag tag-blue">${esc(m.category || 'general')}</span>
+                        ${m.score ? '<span style="font-size:10px;color:var(--tx-3);margin-left:auto">' + (m.score * 100).toFixed(0) + '% match</span>' : ''}
+                    </div>
+                    <div style="font-size:12px;line-height:1.4;color:var(--tx-1);word-break:break-word">${esc(m.content || m.text || JSON.stringify(m))}</div>
+                </div>`).join('');
+        }
+    } catch(e) {
+        $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Search failed</div><p>Memory service may not be available</p></div>';
+    }
+}
 
-/* ── Init ──────────────────────────────────────────────────────── */
+/* ── Accounts ───────────────────────────────────────────── */
+async function loadAccounts() {
+    try {
+        const r = await fetch('/api/accounts?active_only=false');
+        const accs = await r.json();
+        if (accs.length === 0) {
+            $('acc-list').innerHTML = '<div class="empty"><div class="empty-icon">👤</div><div class="empty-title">No accounts configured</div><p>Use <code>koda2 --setup</code> to add accounts</p></div>';
+        } else {
+            const icons = { calendar:'📅', email:'📧', messaging:'💬' };
+            $('acc-list').innerHTML = accs.map(a => `
+                <div class="acc">
+                    <div class="acc-icon">${icons[a.account_type] || '🔑'}</div>
+                    <div class="acc-info">
+                        <div class="acc-name">${esc(a.name)}</div>
+                        <div class="acc-detail">${esc(a.provider)} &middot; ${esc(a.account_type)}${a.is_default ? ' &middot; <span class="tag tag-blue">default</span>' : ''}</div>
+                    </div>
+                    <span class="tag ${a.is_active ? 'tag-green' : 'tag-red'}">${a.is_active ? 'active' : 'inactive'}</span>
+                </div>`).join('');
+        }
+    } catch(e) {
+        $('acc-list').innerHTML = '<div class="empty"><div class="empty-icon">👤</div><div class="empty-title">Could not load accounts</div></div>';
+    }
+}
+
+/* ── Scheduler ──────────────────────────────────────────── */
+async function loadScheduler() {
+    try {
+        const r = await fetch('/api/scheduler/tasks');
+        const tasks = await r.json();
+        if (tasks.length === 0) {
+            $('sched-list').innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">No scheduled tasks</div></div>';
+        } else {
+            $('sched-list').innerHTML = tasks.map(t => `
+                <div class="sched">
+                    <div style="width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0"></div>
+                    <div class="sched-name">${esc(t.name || t.id)}</div>
+                    <div class="sched-meta">${esc(t.type || '')} &middot; runs: ${t.run_count || 0}${t.last_run ? ' &middot; last: ' + timeAgo(t.last_run) : ''}</div>
+                </div>`).join('');
+        }
+    } catch(e) {
+        $('sched-list').innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">Could not load scheduler</div></div>';
+    }
+}
+
+/* ── Chat ───────────────────────────────────────────────── */
+const chatIn = $('chat-input'), chatBtn = $('chat-send'), chatBox = $('chat-messages');
+
+chatIn.addEventListener('input', () => {
+    chatIn.style.height = 'auto';
+    chatIn.style.height = Math.min(chatIn.scrollHeight, 100) + 'px';
+    chatBtn.disabled = !chatIn.value.trim() || S.chatBusy;
+});
+chatIn.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+chatBtn.addEventListener('click', sendChat);
+
+async function sendChat() {
+    const text = chatIn.value.trim();
+    if (!text || S.chatBusy) return;
+
+    addMsg('user', text);
+    chatIn.value = ''; chatIn.style.height = 'auto';
+    chatBtn.disabled = true; S.chatBusy = true;
+
+    const typ = document.createElement('div');
+    typ.className = 'chat-msg chat-typing assistant';
+    typ.innerHTML = '<div class="chat-bubble"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>';
+    chatBox.appendChild(typ);
+    chatBox.scrollTop = chatBox.scrollHeight;
+
+    try {
+        const r = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, user_id: 'dashboard', channel: 'dashboard' })
+        });
+        const d = await r.json();
+        typ.remove();
+        addMsg('assistant', d.response || d.detail || 'No response');
+    } catch(e) {
+        typ.remove();
+        addMsg('assistant', 'Error: Could not reach the API. Is Koda2 running?');
+    } finally {
+        S.chatBusy = false;
+        chatBtn.disabled = !chatIn.value.trim();
+    }
+}
+
+function addMsg(role, text) {
+    const now = new Date();
+    const ts = now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + role;
+    div.innerHTML = `<div class="chat-bubble">${esc(text)}</div><div class="chat-time">${ts}</div>`;
+    chatBox.appendChild(div);
+    chatBox.scrollTop = chatBox.scrollHeight;
+}
+
+/* ── Refresh / Init ─────────────────────────────────────── */
+function refreshAll() {
+    checkHealth();
+    loadCalendar();
+    if (S.ws) socket.emit('refresh_request');
+}
+
+// Initial loads
+checkHealth();
+loadCalendar();
 renderTasks();
-setInterval(()=>{ $('s-uptime').textContent=fmtUptime(Date.now()-startTime); }, 60000);
+
+// Periodic updates
+setInterval(checkHealth, 30000);
+setInterval(() => { $('s-up').textContent = fmtUp(Date.now() - T0); }, 60000);
 </script>
 </body>
 </html>
