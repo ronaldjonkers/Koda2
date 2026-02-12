@@ -817,7 +817,6 @@ async def setup_general_settings(wizard: AccountSetupWizard, is_first_run: bool)
             print_info("Fetching popular models from OpenRouter...")
             try:
                 import httpx
-                import asyncio
                 
                 async def fetch_openrouter_models():
                     async with httpx.AsyncClient() as client:
@@ -837,7 +836,7 @@ async def setup_general_settings(wizard: AccountSetupWizard, is_first_run: bool)
                         active_models.sort(key=lambda x: x.get("context_length", 0), reverse=True)
                         return active_models[:10]
                 
-                top_models = asyncio.run(fetch_openrouter_models())
+                top_models = await fetch_openrouter_models()
                 
                 if top_models:
                     print("\n  Top 10 Popular OpenRouter Models:")
