@@ -49,7 +49,7 @@ class FacilityService:
                 max_capacity=10,
                 seating_capacity=8,
                 equipment=[
-                    EquipmentType.TV_SCREEN,
+                    EquipmentType.SCREEN,
                     EquipmentType.WHITEBOARD,
                     EquipmentType.VIDEO_CONF,
                 ],
