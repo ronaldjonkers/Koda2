@@ -242,6 +242,12 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         service = self._get_service()
 
         def _fetch():
+            # Convert to naive UTC for Google API (RFC3339 with Z suffix)
+            start_utc = start.replace(tzinfo=None) if start.tzinfo else start
+            end_utc = end.replace(tzinfo=None) if end.tzinfo else end
+            time_min = start_utc.isoformat() + "Z"
+            time_max = end_utc.isoformat() + "Z"
+
             # If a specific calendar is requested, use it; otherwise fetch from ALL calendars
             if calendar_name:
                 cal_ids = [calendar_name]
@@ -264,8 +270,8 @@ class GoogleCalendarProvider(BaseCalendarProvider):
 
                     result = service.events().list(
                         calendarId=cal_id,
-                        timeMin=start.isoformat() + "Z",
-                        timeMax=end.isoformat() + "Z",
+                        timeMin=time_min,
+                        timeMax=time_max,
                         singleEvents=True,
                         orderBy="startTime",
                     ).execute()
