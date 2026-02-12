@@ -318,6 +318,44 @@ async def generate_plugin(request: PluginRequest) -> dict[str, Any]:
     return {"path": path, "status": "generated_and_loaded"}
 
 
+# ── WhatsApp ─────────────────────────────────────────────────────────
+
+@router.get("/whatsapp/status")
+async def whatsapp_status() -> dict[str, Any]:
+    """Get WhatsApp connection status."""
+    orch = get_orchestrator()
+    return await orch.whatsapp.get_status()
+
+
+@router.get("/whatsapp/qr")
+async def whatsapp_qr() -> dict[str, Any]:
+    """Get QR code for WhatsApp pairing."""
+    orch = get_orchestrator()
+    return await orch.whatsapp.get_qr()
+
+
+@router.post("/whatsapp/send")
+async def whatsapp_send(to: str, message: str) -> dict[str, Any]:
+    """Send a WhatsApp message to any number."""
+    orch = get_orchestrator()
+    return await orch.whatsapp.send_message(to, message)
+
+
+@router.post("/whatsapp/webhook")
+async def whatsapp_webhook(payload: dict[str, Any]) -> dict[str, Any]:
+    """Receive incoming WhatsApp messages from the bridge."""
+    orch = get_orchestrator()
+    response = await orch.handle_whatsapp_message(payload)
+    return {"processed": response is not None, "response": response}
+
+
+@router.post("/whatsapp/logout")
+async def whatsapp_logout() -> dict[str, Any]:
+    """Disconnect WhatsApp session."""
+    orch = get_orchestrator()
+    return await orch.whatsapp.logout()
+
+
 # ── Scheduler ────────────────────────────────────────────────────────
 
 @router.get("/scheduler/tasks")

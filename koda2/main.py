@@ -43,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await _orchestrator.scheduler.start()
 
     asyncio.create_task(_start_messaging(_orchestrator))
+    asyncio.create_task(_start_whatsapp(_orchestrator))
 
     logger.info(
         "koda2_ready",
@@ -57,6 +58,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("koda2_shutting_down")
     if _orchestrator:
         await _orchestrator.telegram.stop()
+        await _orchestrator.whatsapp.stop()
         await _orchestrator.scheduler.stop()
     await close_db()
     logger.info("koda2_stopped")
@@ -68,6 +70,14 @@ async def _start_messaging(orch: Orchestrator) -> None:
         await orch.setup_telegram()
     except Exception as exc:
         logger.error("telegram_start_failed", error=str(exc))
+
+
+async def _start_whatsapp(orch: Orchestrator) -> None:
+    """Start WhatsApp bridge in the background."""
+    try:
+        await orch.setup_whatsapp()
+    except Exception as exc:
+        logger.error("whatsapp_start_failed", error=str(exc))
 
 
 app = FastAPI(

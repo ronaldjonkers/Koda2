@@ -11,7 +11,7 @@ Koda2 is a modular, scalable, and self-improving AI assistant that manages calen
 | **Memory System** | Long-term user profile with vector-based semantic search (ChromaDB) |
 | **Calendar Management** | Exchange (EWS), Google Calendar, Office 365 (Graph API), CalDAV |
 | **Email Management** | IMAP/SMTP, Gmail API — read, send, reply, prioritize, templates |
-| **Messaging** | Telegram Bot + WhatsApp Business API with command parsing |
+| **Messaging** | Telegram Bot + WhatsApp Web (QR code pairing, personal account) |
 | **LLM Router** | Multi-provider (OpenAI, Anthropic, Google, OpenRouter) with fallback |
 | **Image Gen/Analysis** | DALL-E, Stability AI generation + GPT-4 Vision analysis |
 | **Document Generation** | DOCX, XLSX, PDF with templates and code scaffolding |
@@ -44,12 +44,23 @@ koda2/
 
 ## Quick Start
 
-### One-Command Install
+### macOS / Linux
 
 ```bash
 git clone <repository-url> && cd Koda2
 chmod +x install.sh && ./install.sh
 ```
+
+The installer automatically installs Homebrew (macOS), Python 3.12+, Node.js 18+, and all dependencies. It supports Ubuntu/Debian, Fedora/RHEL, Arch, openSUSE, Alpine, and macOS (Intel + Apple Silicon).
+
+### Windows
+
+```powershell
+git clone <repository-url>; cd Koda2
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+See `docs/windows-install.md` for detailed Windows instructions.
 
 ### Interactive Setup
 
@@ -60,9 +71,17 @@ python setup_wizard.py
 ### Start the Server
 
 ```bash
-source .venv/bin/activate
+source .venv/bin/activate   # Linux/macOS
+# .venv\Scripts\activate    # Windows
 koda2
 ```
+
+### Run as a Service (auto-start on boot)
+
+The installer offers to install Koda2 as a system service:
+- **macOS:** LaunchAgent (launchd) — starts at login
+- **Linux:** systemd user service — starts at boot
+- **Windows:** Task Scheduler — starts at login
 
 ### Docker
 
@@ -102,6 +121,10 @@ See `.env.example` for all available configuration options.
 | `GET` | `/api/plugins` | List loaded plugins |
 | `GET` | `/api/capabilities` | List all capabilities |
 | `POST` | `/api/plugins/generate` | Auto-generate a plugin |
+| `GET` | `/api/whatsapp/status` | WhatsApp connection status |
+| `GET` | `/api/whatsapp/qr` | Get QR code for WhatsApp pairing |
+| `POST` | `/api/whatsapp/send` | Send WhatsApp message to anyone |
+| `POST` | `/api/whatsapp/webhook` | Receive WhatsApp messages |
 | `GET` | `/api/scheduler/tasks` | List scheduled tasks |
 
 ## Usage Examples
@@ -130,6 +153,14 @@ curl -X POST http://localhost:8000/api/documents/generate \
    - `/remind Buy groceries at 5pm`
    - `/status` — System health
 
+### Via WhatsApp
+
+1. Set `WHATSAPP_ENABLED=true` in `.env`
+2. Start the server
+3. Scan the QR code at `http://localhost:8000/api/whatsapp/qr`
+4. Send a message **to yourself** in WhatsApp — Koda2 processes it and replies
+5. Koda2 can send messages to anyone on your behalf via the API or chat commands
+
 ## Testing
 
 ```bash
@@ -143,7 +174,8 @@ pytest tests/test_calendar.py -v    # Single module
 
 | Script | Description |
 |--------|-------------|
-| `install.sh` | One-command installation (macOS/Linux) |
+| `install.sh` | One-command installation (macOS/Linux — all distros) |
+| `install.ps1` | Windows installation (PowerShell) |
 | `uninstall.sh` | Complete removal |
 | `update.sh` | Pull latest + update dependencies |
 | `setup_wizard.py` | Interactive configuration wizard |
@@ -178,4 +210,4 @@ MIT
 
 ## Version
 
-0.1.0
+0.2.0

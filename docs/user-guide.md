@@ -3,23 +3,60 @@
 ## Getting Started
 
 ### Prerequisites
-- macOS or Linux
+- macOS, Linux, or Windows
 - Python 3.12+
+- Node.js 18+ (for WhatsApp integration)
 - At least one LLM API key (OpenAI, Anthropic, Google, or OpenRouter)
 
 ### Installation
 
+**macOS / Linux:**
 ```bash
 ./install.sh
 python setup_wizard.py    # Interactive API key configuration
-koda2        # Start the server
+koda2                     # Start the server
 ```
+
+**Windows:**
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+python setup_wizard.py
+koda2
+```
+
+### Running as a Service
+
+The installer offers to set up Koda2 as a system service that starts automatically:
+- **macOS:** LaunchAgent (launchd)
+- **Linux:** systemd user service
+- **Windows:** Task Scheduler
 
 ## Using Koda2
 
+### Via WhatsApp (Personal Account)
+
+Connect your personal WhatsApp account via QR code scan:
+
+1. Set `WHATSAPP_ENABLED=true` in `.env`
+2. Start Koda2
+3. Open `http://localhost:8000/api/whatsapp/qr` in your browser
+4. Scan the QR code with your WhatsApp phone app
+5. Send a message **to yourself** in WhatsApp
+
+**How it works:**
+- Koda2 reads all your WhatsApp messages but **only responds to messages you send to yourself**
+- This is your private command channel — like talking to your assistant
+- Koda2 can send messages to **anyone** on your behalf when you ask
+- Your session persists (no need to re-scan unless you log out)
+
+**Examples (send to yourself):**
+- "Schedule a meeting with John next Tuesday at 2pm"
+- "Send a WhatsApp to +31612345678: I'll be 10 minutes late"
+- "What's on my calendar today?"
+
 ### Via Telegram Bot
 
-The most natural way to interact with Koda2. Set up your Telegram bot:
+Set up your Telegram bot:
 
 1. Create a bot via [@BotFather](https://t.me/botfather)
 2. Add the token to your `.env` file

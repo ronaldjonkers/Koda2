@@ -79,9 +79,8 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_allowed_user_ids: str = ""
 
-    whatsapp_api_url: str = ""
-    whatsapp_api_token: str = ""
-    whatsapp_instance_id: str = ""
+    whatsapp_enabled: bool = False
+    whatsapp_bridge_port: int = 3001
 
     # ── Image Generation ─────────────────────────────────────────────
     image_provider: str = "openai"

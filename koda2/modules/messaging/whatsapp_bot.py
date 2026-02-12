@@ -1,149 +1,234 @@
-"""WhatsApp Business API integration."""
+"""WhatsApp Web integration via QR code bridge (whatsapp-web.js).
+
+Connects to any personal WhatsApp account by scanning a QR code.
+The bot reads all messages but only responds to messages the user sends to themselves.
+It can send messages to anyone on the user's behalf.
+"""
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+BRIDGE_DIR = Path(__file__).parent / "whatsapp_bridge"
+
 
 class WhatsAppBot:
-    """WhatsApp Business API client for sending and receiving messages."""
+    """WhatsApp Web client using QR code pairing via Node.js bridge.
+
+    Architecture:
+        Python (this class) <--HTTP--> Node.js bridge (whatsapp-web.js)
+
+    The bridge handles the WhatsApp Web protocol and exposes a local HTTP API.
+    Messages from the user to themselves are forwarded to Koda2 for processing.
+    """
 
     def __init__(self) -> None:
         self._settings = get_settings()
+        self._bridge_process: Optional[subprocess.Popen] = None
+        self._bridge_url = f"http://localhost:{self._settings.whatsapp_bridge_port}"
 
     @property
     def is_configured(self) -> bool:
-        return bool(self._settings.whatsapp_api_url and self._settings.whatsapp_api_token)
+        """WhatsApp is configured if the bridge is enabled."""
+        return self._settings.whatsapp_enabled
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._settings.whatsapp_api_token}",
-            "Content-Type": "application/json",
+    @property
+    def bridge_url(self) -> str:
+        return self._bridge_url
+
+    async def start_bridge(self) -> None:
+        """Start the Node.js WhatsApp bridge process."""
+        if not self.is_configured:
+            logger.info("whatsapp_disabled_skipping")
+            return
+
+        if not (BRIDGE_DIR / "node_modules").exists():
+            logger.info("whatsapp_bridge_installing_deps")
+            proc = await asyncio.create_subprocess_exec(
+                "npm", "install", "--production",
+                cwd=str(BRIDGE_DIR),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            await proc.wait()
+            if proc.returncode != 0:
+                stderr = (await proc.stderr.read()).decode() if proc.stderr else ""
+                logger.error("whatsapp_bridge_npm_install_failed", error=stderr)
+                return
+
+        env = {
+            "WHATSAPP_BRIDGE_PORT": str(self._settings.whatsapp_bridge_port),
+            "KODA2_CALLBACK_URL": f"http://localhost:{self._settings.api_port}/api/whatsapp/webhook",
+            "WHATSAPP_AUTH_DIR": str(Path("data") / "whatsapp_session"),
+            "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
         }
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+        self._bridge_process = subprocess.Popen(
+            ["node", "bridge.js"],
+            cwd=str(BRIDGE_DIR),
+            env=env,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+        logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)
+
+        for _ in range(30):
+            await asyncio.sleep(1)
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(f"{self._bridge_url}/status", timeout=2)
+                    if resp.status_code == 200:
+                        logger.info("whatsapp_bridge_ready")
+                        return
+            except httpx.ConnectError:
+                continue
+
+        logger.warning("whatsapp_bridge_slow_start")
+
+    async def stop(self) -> None:
+        """Stop the bridge process."""
+        if self._bridge_process and self._bridge_process.poll() is None:
+            self._bridge_process.terminate()
+            try:
+                self._bridge_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._bridge_process.kill()
+            logger.info("whatsapp_bridge_stopped")
+
+    async def get_status(self) -> dict[str, Any]:
+        """Get bridge connection status."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self._bridge_url}/status", timeout=5)
+                return resp.json()
+        except Exception as exc:
+            return {"ready": False, "error": str(exc)}
+
+    async def get_qr(self) -> dict[str, Any]:
+        """Get QR code for WhatsApp pairing."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self._bridge_url}/qr", timeout=5)
+                return resp.json()
+        except Exception as exc:
+            return {"status": "bridge_unavailable", "error": str(exc)}
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10),
+           retry=retry_if_not_exception_type(ValueError))
     async def send_message(self, to: str, text: str) -> dict[str, Any]:
-        """Send a text message via WhatsApp."""
+        """Send a text message to any WhatsApp number.
+
+        Args:
+            to: Phone number (e.g., "+31612345678" or "31612345678")
+            text: Message body
+        """
         if not self.is_configured:
             logger.warning("whatsapp_not_configured")
             return {"status": "not_configured"}
 
-        payload = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": "text",
-            "text": {"body": text},
-        }
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{self._settings.whatsapp_api_url}/messages",
-                json=payload,
-                headers=self._headers(),
+                f"{self._bridge_url}/send",
+                json={"to": to, "message": text},
                 timeout=30,
             )
+            if resp.status_code == 503:
+                return {"status": "not_connected", "message": "Scan QR code first"}
             resp.raise_for_status()
             data = resp.json()
             logger.info("whatsapp_message_sent", to=to)
             return data
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10),
+           retry=retry_if_not_exception_type(ValueError))
     async def send_media(
-        self, to: str, media_url: str, media_type: str = "image", caption: str = "",
+        self, to: str, media_url: str, caption: str = "",
     ) -> dict[str, Any]:
-        """Send a media message (image, document, audio, video)."""
+        """Send a media message (image, document, etc.)."""
         if not self.is_configured:
             return {"status": "not_configured"}
 
-        payload: dict[str, Any] = {
-            "messaging_product": "whatsapp",
-            "recipient_type": "individual",
-            "to": to,
-            "type": media_type,
-            media_type: {"link": media_url},
-        }
-        if caption and media_type in ("image", "video", "document"):
-            payload[media_type]["caption"] = caption
-
         async with httpx.AsyncClient() as client:
             resp = await client.post(
-                f"{self._settings.whatsapp_api_url}/messages",
-                json=payload,
-                headers=self._headers(),
+                f"{self._bridge_url}/send",
+                json={"to": to, "media_url": media_url, "media_caption": caption},
                 timeout=60,
             )
             resp.raise_for_status()
             return resp.json()
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
-    async def send_template(
-        self, to: str, template_name: str, language: str = "en",
-        parameters: Optional[list[dict[str, Any]]] = None,
-    ) -> dict[str, Any]:
-        """Send a pre-approved WhatsApp template message."""
-        if not self.is_configured:
-            return {"status": "not_configured"}
+    async def get_messages(self, since: int = 0, self_only: bool = True) -> list[dict[str, Any]]:
+        """Get recent messages from the bridge queue.
 
-        template: dict[str, Any] = {
-            "name": template_name,
-            "language": {"code": language},
-        }
-        if parameters:
-            template["components"] = parameters
+        Args:
+            since: Unix timestamp to filter messages after
+            self_only: If True, only return messages the user sent to themselves
+        """
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    f"{self._bridge_url}/messages",
+                    params={"since": since, "self_only": str(self_only).lower()},
+                    timeout=10,
+                )
+                data = resp.json()
+                return data.get("messages", [])
+        except Exception:
+            return []
 
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "template",
-            "template": template,
-        }
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{self._settings.whatsapp_api_url}/messages",
-                json=payload,
-                headers=self._headers(),
-                timeout=30,
-            )
-            resp.raise_for_status()
-            return resp.json()
+    async def get_contacts(self) -> list[dict[str, Any]]:
+        """Get the user's WhatsApp contacts."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(f"{self._bridge_url}/contacts", timeout=15)
+                data = resp.json()
+                return data.get("contacts", [])
+        except Exception:
+            return []
 
     async def process_webhook(self, payload: dict[str, Any]) -> Optional[dict[str, Any]]:
-        """Process incoming WhatsApp webhook payload."""
-        try:
-            entry = payload.get("entry", [{}])[0]
-            changes = entry.get("changes", [{}])[0]
-            value = changes.get("value", {})
-            messages = value.get("messages", [])
+        """Process incoming message from the bridge callback.
 
-            if not messages:
+        Only processes messages the user sends to themselves (self-chat).
+        """
+        try:
+            if not payload.get("fromMe") or not payload.get("isToSelf"):
                 return None
 
-            msg = messages[0]
             result = {
-                "from": msg.get("from", ""),
-                "type": msg.get("type", ""),
-                "timestamp": msg.get("timestamp", ""),
+                "from": payload.get("from", ""),
+                "type": payload.get("type", "text"),
+                "timestamp": payload.get("timestamp", ""),
+                "text": payload.get("body", ""),
+                "chat_name": payload.get("chatName", ""),
+                "has_media": payload.get("hasMedia", False),
+                "is_self_message": True,
             }
 
-            if msg["type"] == "text":
-                result["text"] = msg["text"]["body"]
-            elif msg["type"] in ("image", "document", "audio", "video"):
-                media = msg[msg["type"]]
-                result["media_id"] = media.get("id", "")
-                result["mime_type"] = media.get("mime_type", "")
-                result["caption"] = media.get("caption", "")
-
-            logger.info("whatsapp_message_received", from_=result["from"], type=result["type"])
+            logger.info("whatsapp_self_message_received", text_length=len(result["text"]))
             return result
 
         except (KeyError, IndexError) as exc:
             logger.error("whatsapp_webhook_parse_error", error=str(exc))
             return None
+
+    async def logout(self) -> dict[str, Any]:
+        """Disconnect WhatsApp session (requires re-scan of QR)."""
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(f"{self._bridge_url}/logout", timeout=10)
+                return resp.json()
+        except Exception as exc:
+            return {"error": str(exc)}

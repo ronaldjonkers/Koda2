@@ -30,9 +30,9 @@ def mock_settings():
         s.redis_url = ""
         s.telegram_bot_token = ""
         s.telegram_allowed_user_ids = ""
-        s.whatsapp_api_url = ""
-        s.whatsapp_api_token = ""
-        s.whatsapp_instance_id = ""
+        s.whatsapp_enabled = False
+        s.whatsapp_bridge_port = 3001
+        s.api_port = 8000
         s.imap_server = ""
         s.imap_username = ""
         s.smtp_server = ""

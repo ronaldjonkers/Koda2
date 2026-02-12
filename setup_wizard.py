@@ -119,6 +119,24 @@ def main() -> None:
             "Allowed user IDs (comma-separated)", config.get("TELEGRAM_ALLOWED_USER_IDS", "")
         )
 
+    # ── WhatsApp ──────────────────────────────────────────────────
+    print_header("WhatsApp Integration (optional)")
+    print("  WhatsApp connects via QR code scan (like WhatsApp Web).")
+    print("  Requires Node.js 18+. Messages you send to yourself are processed by Koda2.")
+    print("  Koda2 can send messages to anyone on your behalf.\n")
+    if ask_bool("Enable WhatsApp?", config.get("WHATSAPP_ENABLED", "false").lower() == "true"):
+        config["WHATSAPP_ENABLED"] = "true"
+        config["WHATSAPP_BRIDGE_PORT"] = ask("Bridge port", config.get("WHATSAPP_BRIDGE_PORT", "3001"))
+        # Check Node.js
+        import shutil
+        if shutil.which("node"):
+            print("  Node.js: found ✓")
+        else:
+            print("  ⚠ Node.js not found. Install Node.js 18+ before using WhatsApp.")
+        print("  After starting Koda2, scan the QR code at: http://localhost:" + config.get("API_PORT", "8000") + "/api/whatsapp/qr")
+    else:
+        config["WHATSAPP_ENABLED"] = "false"
+
     # ── Email ────────────────────────────────────────────────────
     print_header("Email (optional)")
     if ask_bool("Configure IMAP/SMTP email?", bool(config.get("IMAP_SERVER"))):

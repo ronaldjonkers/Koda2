@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koda2"
-version = "0.1.0"
+version = "0.2.0"
 description = "Professional AI Executive Assistant — fully automated director-level secretary"
 readme = "README.md"
 license = {text = "MIT"}
@@ -41,7 +41,7 @@ dependencies = [
 
     # Messaging
     "python-telegram-bot>=21.6",
-    "whatsapp-api-client-python>=0.0.46",
+    # WhatsApp uses Node.js bridge (whatsapp-web.js) — no Python dependency needed
 
     # Document Generation
     "python-docx>=1.1.0",

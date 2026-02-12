@@ -325,3 +325,36 @@ class Orchestrator:
 
         await self.telegram.start()
         logger.info("telegram_integration_ready")
+
+    async def setup_whatsapp(self) -> None:
+        """Start the WhatsApp Web bridge and configure message handling."""
+        if not self.whatsapp.is_configured:
+            logger.info("whatsapp_not_configured_skipping")
+            return
+
+        await self.whatsapp.start_bridge()
+        logger.info("whatsapp_integration_ready")
+
+    async def handle_whatsapp_message(self, payload: dict[str, Any]) -> Optional[str]:
+        """Handle an incoming WhatsApp self-message.
+
+        Only processes messages the user sends to themselves.
+        Can send replies to anyone on the user's behalf.
+        """
+        parsed = await self.whatsapp.process_webhook(payload)
+        if parsed is None:
+            return None
+
+        text = parsed.get("text", "")
+        if not text:
+            return None
+
+        user_id = parsed.get("from", "whatsapp_user")
+        result = await self.process_message(user_id, text, channel="whatsapp")
+        response = result.get("response", "")
+
+        # Send the response back to the user's own chat
+        if response:
+            await self.whatsapp.send_message(user_id, response)
+
+        return response
