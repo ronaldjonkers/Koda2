@@ -29,7 +29,9 @@ def _get_cipher() -> AESGCM:
         key = AESGCM.generate_key(bit_length=256)
         logger.info("ephemeral_key_generated", key_b64=base64.urlsafe_b64encode(key).decode())
     else:
-        key = base64.urlsafe_b64decode(key_b64)
+        # Fix base64 padding if missing (common with copy-paste or env var issues)
+        padded = key_b64 + "=" * (-len(key_b64) % 4)
+        key = base64.urlsafe_b64decode(padded)
         if len(key) != 32:
             raise ValueError("KODA2_ENCRYPTION_KEY must be a 32-byte base64-encoded value")
 
