@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _background_tasks.append(asyncio.create_task(_start_messaging(_orchestrator)))
     _background_tasks.append(asyncio.create_task(_start_whatsapp(_orchestrator)))
     _background_tasks.append(asyncio.create_task(_periodic_token_refresh(_orchestrator)))
+    _background_tasks.append(asyncio.create_task(_periodic_calendar_sync(_orchestrator)))
 
     await _print_status(settings, _orchestrator)
     
@@ -421,6 +422,30 @@ async def _start_whatsapp(orch: Orchestrator) -> None:
         await orch.setup_whatsapp()
     except Exception as exc:
         logger.error("whatsapp_start_failed", error=str(exc))
+
+
+async def _periodic_calendar_sync(orch: Orchestrator) -> None:
+    """Periodically sync calendar events from remote providers to local DB.
+    
+    First sync after 10 seconds, then every 5 minutes.
+    """
+    SYNC_INTERVAL = 5 * 60  # 5 minutes
+    await asyncio.sleep(10)  # Let startup finish
+
+    while True:
+        try:
+            results = await orch.calendar.sync_all()
+            total = sum(v for v in results.values() if v >= 0)
+            logger.info("calendar_sync_done", total_events=total, accounts=results)
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.error("calendar_sync_error", error=str(exc))
+
+        try:
+            await asyncio.sleep(SYNC_INTERVAL)
+        except asyncio.CancelledError:
+            break
 
 
 async def _periodic_token_refresh(orch: Orchestrator) -> None:

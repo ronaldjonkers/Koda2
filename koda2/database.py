@@ -73,6 +73,10 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """Create all tables."""
+    # Import all models so Base.metadata knows about them
+    import koda2.modules.account.models  # noqa: F401
+    import koda2.modules.calendar.cache  # noqa: F401
+
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

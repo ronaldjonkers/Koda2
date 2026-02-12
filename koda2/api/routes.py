@@ -165,10 +165,25 @@ async def list_events(
         {
             "id": e.id, "title": e.title, "start": e.start.isoformat(),
             "end": e.end.isoformat(), "location": e.location,
+            "description": e.description,
+            "calendar_name": e.calendar_name,
+            "organizer": e.organizer,
+            "is_online": e.is_online,
+            "meeting_url": e.meeting_url,
             "provider": str(e.provider) if e.provider else None,
+            "attendees": [{"name": a.name, "email": a.email, "status": a.status} for a in e.attendees],
         }
         for e in events
     ]
+
+
+@router.post("/calendar/sync")
+async def sync_calendar() -> dict[str, Any]:
+    """Trigger a manual calendar sync from remote providers to local cache."""
+    orch = get_orchestrator()
+    results = await orch.calendar.sync_all()
+    total = sum(v for v in results.values() if v >= 0)
+    return {"status": "ok", "total_events": total, "accounts": results}
 
 
 @router.post("/calendar/events")

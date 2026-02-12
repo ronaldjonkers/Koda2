@@ -1,4 +1,9 @@
-"""Calendar service — unified interface across all providers with multi-account support."""
+"""Calendar service — unified interface across all providers with multi-account support.
+
+Events are cached locally in SQLite so the API and assistant always have
+access, even when the remote provider is temporarily unreachable.
+A background sync task keeps the cache fresh.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,7 @@ from typing import Optional
 from koda2.logging_config import get_logger
 from koda2.modules.account.models import AccountType, ProviderType
 from koda2.modules.account.service import AccountService
+from koda2.modules.calendar.cache import CalendarCache
 from koda2.modules.calendar.models import (
     CalendarEvent,
     CalendarProvider,
@@ -28,9 +34,14 @@ logger = get_logger(__name__)
 class CalendarService:
     """Unified calendar management with multi-account support."""
 
+    # How far ahead to sync events (days)
+    SYNC_WINDOW_DAYS = 30
+
     def __init__(self, account_service: Optional[AccountService] = None) -> None:
         self._account_service = account_service or AccountService()
         self._providers: dict[str, BaseCalendarProvider] = {}  # account_id -> provider
+        self._cache = CalendarCache()
+        self._last_sync: Optional[dt.datetime] = None
 
     async def _get_provider(self, account_id: Optional[str] = None) -> tuple[str, BaseCalendarProvider]:
         """Get a calendar provider for the specified account or default.
@@ -134,30 +145,57 @@ class CalendarService:
         account_id: Optional[str] = None,
         calendar_name: Optional[str] = None,
     ) -> list[CalendarEvent]:
-        """List events from specified account or all accounts."""
+        """List events — serves from local cache, falls back to live fetch."""
+        # Try cache first
+        try:
+            cached = await self._cache.get_events(start, end)
+            if cached:
+                return cached
+        except Exception as exc:
+            logger.warning("cache_read_failed", error=str(exc))
+
+        # Cache empty — do a live fetch and cache the results
+        events = await self._fetch_events_live(start, end, account_id, calendar_name)
+
+        # Store in cache (non-blocking, best-effort)
+        if events:
+            try:
+                accounts = await self.get_accounts()
+                account_name = accounts[0].name if accounts else "default"
+                await self._cache.sync_events(events, account_name, start, end)
+            except Exception as exc:
+                logger.warning("cache_write_failed", error=str(exc))
+
+        return events
+
+    async def _fetch_events_live(
+        self,
+        start: dt.datetime,
+        end: dt.datetime,
+        account_id: Optional[str] = None,
+        calendar_name: Optional[str] = None,
+    ) -> list[CalendarEvent]:
+        """Fetch events directly from remote providers (no cache)."""
         events: list[CalendarEvent] = []
-        
+
         if account_id:
-            # Get from specific account
             try:
                 _, provider = await self._get_provider(account_id)
                 events = await provider.list_events(start, end, calendar_name)
             except Exception as exc:
                 logger.error("list_events_failed", account_id=account_id, error=str(exc))
         else:
-            # Get from all accounts
             accounts = await self.get_accounts()
             for account in accounts:
                 try:
                     _, provider = await self._get_provider(account.id)
                     acc_events = await provider.list_events(start, end, calendar_name)
-                    # Tag events with account name
                     for event in acc_events:
-                        event.calendar_name = account.name
+                        event.calendar_name = event.calendar_name or account.name
                     events.extend(acc_events)
                 except Exception as exc:
                     logger.error("list_events_failed", account=account.name, error=str(exc))
-        
+
         # Normalize to naive UTC for sorting (some providers return tz-aware, others naive)
         def _sort_key(e):
             s = e.start
@@ -166,6 +204,39 @@ class CalendarService:
             return s
         events.sort(key=_sort_key)
         return events
+
+    async def sync_all(self) -> dict[str, int]:
+        """Sync events from all accounts into the local cache.
+
+        Called periodically by the background sync task.
+        Returns dict of account_name -> number of events synced.
+        """
+        results: dict[str, int] = {}
+        now = dt.datetime.now(dt.UTC)
+        start = now - dt.timedelta(days=7)  # Include recent past
+        end = now + dt.timedelta(days=self.SYNC_WINDOW_DAYS)
+
+        accounts = await self.get_accounts()
+        for account in accounts:
+            try:
+                _, provider = await self._get_provider(account.id)
+                events = await provider.list_events(start, end)
+                for event in events:
+                    event.calendar_name = event.calendar_name or account.name
+                count = await self._cache.sync_events(events, account.name, start, end)
+                results[account.name] = count
+            except Exception as exc:
+                logger.error("calendar_sync_failed", account=account.name, error=str(exc))
+                results[account.name] = -1
+
+        self._last_sync = dt.datetime.now(dt.UTC)
+        logger.info("calendar_sync_complete", results=results)
+        return results
+
+    @property
+    def last_sync(self) -> Optional[dt.datetime]:
+        """When the last sync completed."""
+        return self._last_sync
 
     async def create_event(
         self,
