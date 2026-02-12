@@ -169,11 +169,23 @@ class TelegramBot:
         await self._app.updater.start_polling()
 
     async def stop(self) -> None:
-        """Stop the Telegram bot."""
+        """Stop the Telegram bot gracefully."""
         if self._app:
-            await self._app.updater.stop()
-            await self._app.stop()
-            await self._app.shutdown()
+            try:
+                if self._app.updater and self._app.updater.running:
+                    await self._app.updater.stop()
+            except Exception as exc:
+                logger.warning("telegram_updater_stop_error", error=str(exc))
+            try:
+                if self._app.running:
+                    await self._app.stop()
+            except Exception as exc:
+                logger.warning("telegram_app_stop_error", error=str(exc))
+            try:
+                await self._app.shutdown()
+            except Exception as exc:
+                logger.warning("telegram_shutdown_error", error=str(exc))
+            self._app = None
             logger.info("telegram_bot_stopped")
 
     async def send_message(self, chat_id: int | str, text: str, parse_mode: str = "Markdown") -> None:

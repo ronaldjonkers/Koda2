@@ -8,6 +8,8 @@ It can send messages to anyone on the user's behalf.
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -116,6 +118,7 @@ class WhatsAppBot:
             env=env,
             stdout=sys.stdout,
             stderr=sys.stderr,
+            preexec_fn=os.setsid,  # new process group so we can kill all children
         )
         logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)
 
@@ -133,14 +136,64 @@ class WhatsAppBot:
         logger.warning("whatsapp_bridge_slow_start")
 
     async def stop(self) -> None:
-        """Stop the bridge process."""
+        """Stop the bridge process and all its children."""
         if self._bridge_process and self._bridge_process.poll() is None:
-            self._bridge_process.terminate()
+            pgid = None
+            try:
+                pgid = os.getpgid(self._bridge_process.pid)
+            except OSError:
+                pass
+
+            # Try graceful SIGTERM on the whole process group
+            if pgid:
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except OSError:
+                    pass
+            else:
+                self._bridge_process.terminate()
+
             try:
                 self._bridge_process.wait(timeout=5)
             except subprocess.TimeoutExpired:
+                # Force kill the entire process group
+                if pgid:
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except OSError:
+                        pass
                 self._bridge_process.kill()
+                try:
+                    self._bridge_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    pass
+
             logger.info("whatsapp_bridge_stopped")
+
+    def stop_sync(self) -> None:
+        """Synchronous stop — used by atexit handler."""
+        if self._bridge_process and self._bridge_process.poll() is None:
+            pgid = None
+            try:
+                pgid = os.getpgid(self._bridge_process.pid)
+            except OSError:
+                pass
+            if pgid:
+                try:
+                    os.killpg(pgid, signal.SIGTERM)
+                except OSError:
+                    pass
+            else:
+                self._bridge_process.terminate()
+            try:
+                self._bridge_process.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                if pgid:
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except OSError:
+                        pass
+                self._bridge_process.kill()
 
     async def get_status(self) -> dict[str, Any]:
         """Get bridge connection status."""

@@ -13,6 +13,9 @@ Environment:
 from __future__ import annotations
 
 import asyncio
+import atexit
+import os
+import signal
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -42,9 +45,12 @@ logger = get_logger(__name__)
 _orchestrator: Orchestrator | None = None
 _task_queue: TaskQueueService | None = None
 _metrics: MetricsService | None = None
+_background_tasks: list[asyncio.Task] = []
+_shutdown_in_progress = False
 
 BLUE = "\033[0;34m"
 GREEN = "\033[0;32m"
+YELLOW = "\033[0;33m"
 CYAN = "\033[0;36m"
 DIM = "\033[2m"
 BOLD = "\033[1m"
@@ -138,8 +144,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     sio.dashboard_ws = dashboard_ws
     await dashboard_ws.start()
 
-    asyncio.create_task(_start_messaging(_orchestrator))
-    asyncio.create_task(_start_whatsapp(_orchestrator))
+    _background_tasks.append(asyncio.create_task(_start_messaging(_orchestrator)))
+    _background_tasks.append(asyncio.create_task(_start_whatsapp(_orchestrator)))
 
     await _print_status(settings, _orchestrator)
     
@@ -156,24 +162,85 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         calendar_providers=[str(p) for p in cal_providers],
     )
 
+    # Register atexit safety net (kills child processes even on hard exit)
+    atexit.register(_atexit_cleanup)
+
     yield
+
+    await _graceful_shutdown()
+
+
+async def _graceful_shutdown() -> None:
+    """Gracefully shut down all services and child processes."""
+    global _shutdown_in_progress
+    if _shutdown_in_progress:
+        return
+    _shutdown_in_progress = True
 
     print(f"\n  {DIM}🛑 Koda2 shutting down...{NC}")
     logger.info("koda2_shutting_down")
-    
-    if _metrics:
-        await _metrics.stop()
-    if _task_queue:
-        await _task_queue.stop()
-    if hasattr(sio, 'dashboard_ws') and sio.dashboard_ws:
-        await sio.dashboard_ws.stop()
+
+    # 1. Cancel background asyncio tasks
+    for task in _background_tasks:
+        if not task.done():
+            task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
+    _background_tasks.clear()
+
+    # 2. Stop services (order: messaging → scheduler → metrics → queue → ws → db)
     if _orchestrator:
-        await _orchestrator.telegram.stop()
-        await _orchestrator.whatsapp.stop()
-        await _orchestrator.scheduler.stop()
-    await close_db()
+        try:
+            await _orchestrator.telegram.stop()
+        except Exception as exc:
+            logger.warning("telegram_stop_error", error=str(exc))
+        try:
+            await _orchestrator.whatsapp.stop()
+        except Exception as exc:
+            logger.warning("whatsapp_stop_error", error=str(exc))
+        try:
+            await _orchestrator.scheduler.stop()
+        except Exception as exc:
+            logger.warning("scheduler_stop_error", error=str(exc))
+
+    if _metrics:
+        try:
+            await _metrics.stop()
+        except Exception as exc:
+            logger.warning("metrics_stop_error", error=str(exc))
+
+    if _task_queue:
+        try:
+            await _task_queue.stop()
+        except Exception as exc:
+            logger.warning("task_queue_stop_error", error=str(exc))
+
+    if hasattr(sio, 'dashboard_ws') and sio.dashboard_ws:
+        try:
+            await sio.dashboard_ws.stop()
+        except Exception as exc:
+            logger.warning("websocket_stop_error", error=str(exc))
+
+    try:
+        await close_db()
+    except Exception as exc:
+        logger.warning("db_close_error", error=str(exc))
+
     print(f"  {GREEN}✔{NC} Koda2 stopped. Goodbye! 👋\n")
     logger.info("koda2_stopped")
+
+
+def _atexit_cleanup() -> None:
+    """Safety-net cleanup called on interpreter exit.
+
+    This runs even when the event loop is gone, so it can only do
+    synchronous work — primarily killing child processes.
+    """
+    if _orchestrator:
+        try:
+            _orchestrator.whatsapp.stop_sync()
+        except Exception:
+            pass
 
 
 async def _ensure_llm_configured(settings) -> None:
