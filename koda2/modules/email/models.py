@@ -59,7 +59,7 @@ class EmailMessage(BaseModel):
     labels: list[str] = Field(default_factory=list)
     in_reply_to: str = ""
     references: str = ""
-    date: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    date: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
     @property
     def has_attachments(self) -> bool:

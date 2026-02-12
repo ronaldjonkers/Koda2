@@ -35,7 +35,7 @@ class TestSchedulerService:
         task_id = scheduler.schedule_once(
             "test_task",
             dummy_task,
-            run_at=dt.datetime.utcnow() + dt.timedelta(hours=1),
+            run_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
         )
         assert task_id is not None
         assert len(scheduler.list_tasks()) == 1
@@ -90,7 +90,7 @@ class TestSchedulerService:
 
         task_id = scheduler.schedule_once(
             "to_cancel", dummy_task,
-            run_at=dt.datetime.utcnow() + dt.timedelta(hours=1),
+            run_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
         )
         assert len(scheduler.list_tasks()) == 1
         assert scheduler.cancel_task(task_id) is True
@@ -128,7 +128,7 @@ class TestSchedulerService:
 
         task_id = scheduler.schedule_reminder(
             "standup", callback,
-            remind_at=dt.datetime.utcnow() + dt.timedelta(hours=1),
+            remind_at=dt.datetime.now(dt.UTC) + dt.timedelta(hours=1),
             message="Daily standup in 15 minutes",
         )
         tasks = scheduler.list_tasks()

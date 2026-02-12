@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wait_exponential
 
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
@@ -23,7 +23,7 @@ class ImageService:
 
     # ── Generation ───────────────────────────────────────────────────
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10), retry=retry_if_not_exception_type(ValueError))
     async def generate(
         self,
         prompt: str,

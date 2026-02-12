@@ -27,8 +27,8 @@ class UserProfile(Base):
     preferences = Column(SQLiteJSON, default=dict)
     habits = Column(SQLiteJSON, default=dict)
     important_dates = Column(SQLiteJSON, default=dict)
-    created_at = Column(DateTime, default=dt.datetime.utcnow)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC))
+    updated_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC), onupdate=lambda: dt.datetime.now(dt.UTC))
 
     conversations = relationship("Conversation", back_populates="profile", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="profile", cascade="all, delete-orphan")
@@ -49,8 +49,8 @@ class Contact(Base):
     notes = Column(Text, default="")
     birthday = Column(String(16), default="")
     metadata_ = Column("metadata", SQLiteJSON, default=dict)
-    created_at = Column(DateTime, default=dt.datetime.utcnow)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC))
+    updated_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC), onupdate=lambda: dt.datetime.now(dt.UTC))
 
     profile = relationship("UserProfile", back_populates="contacts")
 
@@ -67,7 +67,7 @@ class Conversation(Base):
     channel = Column(String(64), default="api")
     tokens_used = Column(Integer, default=0)
     model = Column(String(128), default="")
-    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC), index=True)
 
     profile = relationship("UserProfile", back_populates="conversations")
 
@@ -84,5 +84,5 @@ class MemoryEntry(Base):
     importance = Column(Float, default=0.5)
     source = Column(String(128), default="")
     active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=dt.datetime.utcnow)
-    updated_at = Column(DateTime, default=dt.datetime.utcnow, onupdate=dt.datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC))
+    updated_at = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC), onupdate=lambda: dt.datetime.now(dt.UTC))

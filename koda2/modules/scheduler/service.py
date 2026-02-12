@@ -34,7 +34,7 @@ class ScheduledTask:
         self.task_type = task_type
         self.schedule_info = schedule_info
         self.func_name = func_name
-        self.created_at = dt.datetime.utcnow()
+        self.created_at = dt.datetime.now(dt.UTC)
         self.last_run: Optional[dt.datetime] = None
         self.run_count: int = 0
 
@@ -72,7 +72,7 @@ class SchedulerService:
                 await func(**(kwargs or {}))
                 meta = self._tasks.get(task_id)
                 if meta:
-                    meta.last_run = dt.datetime.utcnow()
+                    meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
                 logger.info("task_executed", task_id=task_id, name=name)
             except Exception as exc:
@@ -115,7 +115,7 @@ class SchedulerService:
                 await func(**(kwargs or {}))
                 meta = self._tasks.get(task_id)
                 if meta:
-                    meta.last_run = dt.datetime.utcnow()
+                    meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
             except Exception as exc:
                 logger.error("recurring_task_failed", task_id=task_id, error=str(exc))
@@ -150,7 +150,7 @@ class SchedulerService:
                 await func(**(kwargs or {}))
                 meta = self._tasks.get(task_id)
                 if meta:
-                    meta.last_run = dt.datetime.utcnow()
+                    meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
             except Exception as exc:
                 logger.error("interval_task_failed", task_id=task_id, error=str(exc))
@@ -212,4 +212,4 @@ class SchedulerService:
             try:
                 await handler(**(data or {}))
             except Exception as exc:
-                logger.error("event_handler_failed", event=event_name, error=str(exc))
+                logger.error("event_handler_failed", event_name=event_name, error=str(exc))

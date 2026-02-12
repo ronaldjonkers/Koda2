@@ -171,9 +171,9 @@ class Orchestrator:
         params = action.get("params", {})
 
         if action_name == "check_calendar":
-            start = dt.datetime.fromisoformat(params.get("start", dt.datetime.utcnow().isoformat()))
+            start = dt.datetime.fromisoformat(params.get("start", dt.datetime.now(dt.UTC).isoformat()))
             end = dt.datetime.fromisoformat(
-                params.get("end", (dt.datetime.utcnow() + dt.timedelta(days=1)).isoformat())
+                params.get("end", (dt.datetime.now(dt.UTC) + dt.timedelta(days=1)).isoformat())
             )
             events = await self.calendar.list_events(start, end)
             return [{"title": e.title, "start": e.start.isoformat(), "end": e.end.isoformat()} for e in events]

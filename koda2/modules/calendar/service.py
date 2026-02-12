@@ -185,6 +185,6 @@ class CalendarService:
                     calendar_name=event.calendar_name,
                 )
                 prep_event = await self.create_event(prep_event, provider)
-                logger.info("prep_time_scheduled", minutes=prep_minutes, event=event.title)
+                logger.info("prep_time_scheduled", minutes=prep_minutes, event_title=event.title)
 
         return created, prep_event

@@ -47,8 +47,8 @@ class CalendarEvent(BaseModel):
     is_online: bool = False
     meeting_url: str = ""
     status: str = "confirmed"
-    created_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
-    updated_at: dt.datetime = Field(default_factory=dt.datetime.utcnow)
+    created_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.UTC))
+    updated_at: dt.datetime = Field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
     @property
     def duration_minutes(self) -> int:

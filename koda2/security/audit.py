@@ -21,7 +21,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    timestamp = Column(DateTime, default=dt.datetime.utcnow, nullable=False, index=True)
+    timestamp = Column(DateTime, default=lambda: dt.datetime.now(dt.UTC), nullable=False, index=True)
     user_id = Column(String(128), nullable=False, index=True)
     action = Column(String(256), nullable=False, index=True)
     module = Column(String(128), nullable=False)

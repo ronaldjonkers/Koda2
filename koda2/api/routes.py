@@ -150,7 +150,7 @@ async def list_events(
 ) -> list[dict[str, Any]]:
     """List calendar events."""
     orch = get_orchestrator()
-    start_dt = dt.datetime.fromisoformat(start) if start else dt.datetime.utcnow()
+    start_dt = dt.datetime.fromisoformat(start) if start else dt.datetime.now(dt.UTC)
     end_dt = dt.datetime.fromisoformat(end) if end else start_dt + dt.timedelta(days=days)
     events = await orch.calendar.list_events(start_dt, end_dt)
     return [

@@ -51,7 +51,7 @@ class MemoryService:
             for key, value in updates.items():
                 if hasattr(profile, key):
                     setattr(profile, key, value)
-            profile.updated_at = dt.datetime.utcnow()
+            profile.updated_at = dt.datetime.now(dt.UTC)
             await session.flush()
             logger.info("profile_updated", user_id=user_id, fields=list(updates.keys()))
             return profile
@@ -68,7 +68,7 @@ class MemoryService:
             prefs = dict(profile.preferences or {})
             prefs[key] = value
             profile.preferences = prefs
-            profile.updated_at = dt.datetime.utcnow()
+            profile.updated_at = dt.datetime.now(dt.UTC)
             await session.flush()
             logger.debug("preference_learned", user_id=user_id, key=key)
 
