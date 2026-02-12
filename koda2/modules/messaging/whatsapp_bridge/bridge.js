@@ -77,14 +77,18 @@ async function onMessageCreate(msg) {
     const isFromMe = msg.fromMe;
     const chat = await msg.getChat();
 
-    // Detect self-message: compare the chat's remote JID against our own WID.
-    // In WhatsApp, "Message yourself" chat has your own number as the chat ID.
-    // msg.to === msg.from is NOT reliable for this.
-    const myWid = clientInfo ? clientInfo.wid : null;
+    // Detect self-message: the "Message yourself" chat has your own number as
+    // the chat ID. We must check that the RECIPIENT (chat/to) is ourselves,
+    // not just that the sender is ourselves (fromMe covers that).
+    // IMPORTANT: Do NOT check msg.from === myWid here — for ALL outgoing
+    // messages msg.from is your own WID, which would make every outgoing
+    // message look like a self-message.
+    const myWid = clientInfo ? clientInfo.wid._serialized : null;
+    const chatIdStr = chat.id ? chat.id._serialized : null;
     const isToSelf = isFromMe && (
-        msg.to === msg.from ||
-        (myWid && (msg.to === myWid || msg.from === myWid)) ||
-        (myWid && chat.id && chat.id._serialized === myWid)
+        (myWid && chatIdStr && chatIdStr === myWid) ||
+        (myWid && msg.to === myWid) ||
+        msg.to === msg.from
     );
 
     const parsed = {
@@ -116,7 +120,9 @@ async function onMessageCreate(msg) {
     // Skip messages sent by the bot itself to prevent infinite reply loops.
     // isSendingReply is true while /send is executing client.sendMessage(),
     // which triggers message_create synchronously before the send resolves.
-    if (isFromMe && isToSelf && isSendingReply) {
+    if (isFromMe && !isToSelf) {
+        console.log(`[WhatsApp] Outgoing to other contact (ignored): ${(parsed.body || '').substring(0, 50)}`);
+    } else if (isFromMe && isToSelf && isSendingReply) {
         console.log(`[WhatsApp] Skipping bot's own reply (loop prevention): ${(parsed.body || '').substring(0, 50)}`);
     } else if (isFromMe && isToSelf) {
         console.log(`[WhatsApp] Forwarding self-message to Koda2: ${(parsed.body || '').substring(0, 50)}...`);

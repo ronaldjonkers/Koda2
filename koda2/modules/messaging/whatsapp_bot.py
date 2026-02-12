@@ -446,11 +446,13 @@ class WhatsAppBot:
             is_self = is_to_self  # trust bridge-side detection first
             if not is_self and from_me:
                 # Fallback: check if chat ID matches our own WID
+                # This is the most reliable check — the "Message yourself" chat
+                # has your own number as the chat ID.
                 if my_wid and chat_id and chat_id == my_wid:
                     is_self = True
-                # Fallback: classic to === from check
-                elif to_addr == from_addr:
-                    is_self = True
+                # NOTE: Do NOT use to_addr == from_addr as fallback.
+                # For outgoing messages, from is always your own WID,
+                # and to can also match in some edge cases.
 
             if not from_me or not is_self:
                 logger.debug(
