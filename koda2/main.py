@@ -272,8 +272,9 @@ async def _ensure_llm_configured(settings) -> None:
             print(f"  {YELLOW}Invalid choice. Run setup with:{NC} koda2 --setup")
             raise SystemExit(1)
     
-    # Check if model is set
-    elif has_provider and not settings.llm_default_model:
+    # Check if model is set (especially important for OpenRouter)
+    elif has_provider and (not settings.llm_default_model or 
+                           (provider_name == "openrouter" and not settings.openrouter_model)):
         print(f"\n  {YELLOW}⚠ LLM provider configured but no model selected!{NC}")
         
         default_models = {
@@ -286,7 +287,11 @@ async def _ensure_llm_configured(settings) -> None:
         default = default_models.get(provider_name, "gpt-4o")
         model = input(f"  Model (default: {default}): ").strip() or default
         
-        _update_env_file({"LLM_DEFAULT_MODEL": model})
+        updates = {"LLM_DEFAULT_MODEL": model}
+        if provider_name == "openrouter":
+            updates["OPENROUTER_MODEL"] = model
+        
+        _update_env_file(updates)
         print(f"  {GREEN}✓ Model set to {model}{NC}")
 
 

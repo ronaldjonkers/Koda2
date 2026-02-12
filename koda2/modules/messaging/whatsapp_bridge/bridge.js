@@ -75,7 +75,8 @@ client.on('disconnected', (reason) => {
     clientInfo = null;
 });
 
-client.on('message', async (msg) => {
+// Handle ALL messages including self-messages
+client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
     const isToSelf = msg.to === msg.from;
     const chat = await msg.getChat();
@@ -94,7 +95,7 @@ client.on('message', async (msg) => {
         hasMedia: msg.hasMedia,
     };
 
-    // Log ALL incoming messages for debugging
+    // Log ALL messages for debugging (including self-messages)
     console.log(`[WhatsApp] Message from ${parsed.from} (${isFromMe ? 'me' : 'other'}, toSelf: ${isToSelf}): ${parsed.body.substring(0, 100)}`);
 
     // Queue for polling
@@ -120,6 +121,36 @@ client.on('message', async (msg) => {
         } catch (err) {
             console.warn('[WhatsApp] Callback error (Koda2 might not be running):', err.message);
         }
+    }
+});
+
+// Also listen to regular 'message' event for incoming messages from others
+client.on('message', async (msg) => {
+    // Only process messages from others here (self-messages handled by message_create)
+    if (msg.fromMe) return;
+    
+    const chat = await msg.getChat();
+    const parsed = {
+        id: msg.id._serialized,
+        from: msg.from,
+        to: msg.to,
+        fromMe: false,
+        isToSelf: false,
+        isGroup: chat.isGroup,
+        body: msg.body,
+        type: msg.type,
+        timestamp: msg.timestamp,
+        chatName: chat.name || msg.from,
+        hasMedia: msg.hasMedia,
+    };
+
+    // Log incoming messages from others
+    console.log(`[WhatsApp] Incoming from ${parsed.from}: ${parsed.body.substring(0, 100)}`);
+
+    // Queue for polling
+    messageQueue.push(parsed);
+    if (messageQueue.length > MAX_QUEUE) {
+        messageQueue = messageQueue.slice(-MAX_QUEUE);
     }
 });
 

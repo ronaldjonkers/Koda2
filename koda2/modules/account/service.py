@@ -42,15 +42,23 @@ class AccountService:
         """
         self._session = session
 
-    async def _get_session(self) -> AsyncSession:
-        """Get the database session to use.
+    def _get_session(self):
+        """Get the database session context manager to use.
         
         Returns:
-            The session if provided at initialization, otherwise creates a new one.
+            An async context manager that yields a session.
         """
         if self._session is not None:
-            return self._session
-        # Return a context manager that will be used in 'async with'
+            # Return a simple context manager that yields the existing session
+            class _SessionContext:
+                def __init__(self, session):
+                    self._session = session
+                async def __aenter__(self):
+                    return self._session
+                async def __aexit__(self, *args):
+                    pass
+            return _SessionContext(self._session)
+        # Return the async context manager from get_session()
         return get_session()
 
     def _encrypt_credentials(self, credentials: dict) -> str:
@@ -106,17 +114,10 @@ class AccountService:
         # Encrypt credentials
         encrypted_creds = self._encrypt_credentials(credentials)
         
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
-            session = session_context
+        async with self._get_session() as session:
             return await self._create_account_internal(
                 session, name, account_type, provider, encrypted_creds, is_default
             )
-        else:
-            async with session_context as session:
-                return await self._create_account_internal(
-                    session, name, account_type, provider, encrypted_creds, is_default
-                )
 
     async def _create_account_internal(
         self,
@@ -186,18 +187,11 @@ class AccountService:
         Returns:
             The Account if found, None otherwise.
         """
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
-            result = await session_context.execute(
+        async with self._get_session() as session:
+            result = await session.execute(
                 select(Account).where(Account.id == account_id)
             )
             return result.scalar_one_or_none()
-        else:
-            async with session_context as session:
-                result = await session.execute(
-                    select(Account).where(Account.id == account_id)
-                )
-                return result.scalar_one_or_none()
 
     async def get_accounts(
         self,
@@ -226,14 +220,9 @@ class AccountService:
         
         stmt = stmt.order_by(Account.name)
         
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
-            result = await session_context.execute(stmt)
+        async with self._get_session() as session:
+            result = await session.execute(stmt)
             return list(result.scalars().all())
-        else:
-            async with session_context as session:
-                result = await session.execute(stmt)
-                return list(result.scalars().all())
 
     async def get_default_account(
         self,
@@ -261,14 +250,9 @@ class AccountService:
         if provider:
             stmt = stmt.where(Account.provider == provider.value)
         
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
-            result = await session_context.execute(stmt)
+        async with self._get_session() as session:
+            result = await session.execute(stmt)
             return result.scalar_one_or_none()
-        else:
-            async with session_context as session:
-                result = await session.execute(stmt)
-                return result.scalar_one_or_none()
 
     async def update_account(self, account_id: str, **fields) -> Optional[Account]:
         """Update an account's fields.
@@ -296,16 +280,10 @@ class AccountService:
         # Handle is_default specially
         set_default = fields.pop("is_default", None)
         
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
+        async with self._get_session() as session:
             return await self._update_account_internal(
-                session_context, account_id, fields, set_default
+                session, account_id, fields, set_default
             )
-        else:
-            async with session_context as session:
-                return await self._update_account_internal(
-                    session, account_id, fields, set_default
-                )
 
     async def _update_account_internal(
         self,
@@ -357,12 +335,8 @@ class AccountService:
         Returns:
             True if deleted, False if not found.
         """
-        session_context = self._get_session()
-        if isinstance(session_context, AsyncSession):
-            return await self._delete_account_internal(session_context, account_id)
-        else:
-            async with session_context as session:
-                return await self._delete_account_internal(session, account_id)
+        async with self._get_session() as session:
+            return await self._delete_account_internal(session, account_id)
 
     async def _delete_account_internal(
         self, session: AsyncSession, account_id: str

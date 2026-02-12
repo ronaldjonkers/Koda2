@@ -32,8 +32,13 @@ def setup(
     reconfigure: bool = typer.Option(False, "--reconfigure", "-r", help="Force reconfiguration"),
 ) -> None:
     """Run the setup wizard."""
-    from setup_wizard import main
-    main()
+    import subprocess
+    import sys
+    from pathlib import Path
+    
+    # Run setup_wizard.py from project root
+    setup_script = Path(__file__).parent.parent.parent / "setup_wizard.py"
+    subprocess.run([sys.executable, str(setup_script)])
 
 
 @app.command()
