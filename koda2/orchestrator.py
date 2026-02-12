@@ -142,8 +142,20 @@ class Orchestrator:
         parsed = self._parse_llm_response(llm_response.content)
         intent = parsed.get("intent", "general_chat")
         entities = parsed.get("entities", {})
-        response_text = parsed.get("response", llm_response.content)
+        response_text = parsed.get("response", "")
         actions = parsed.get("actions", [])
+
+        # If the LLM returned raw JSON without a "response" field, or the
+        # response itself looks like JSON, extract just the human-readable part.
+        if not response_text:
+            response_text = llm_response.content
+        if response_text.strip().startswith("{"):
+            try:
+                inner = json.loads(response_text)
+                if isinstance(inner, dict) and "response" in inner:
+                    response_text = inner["response"]
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         action_results = []
         for action in actions:
