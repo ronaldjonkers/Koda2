@@ -117,13 +117,17 @@ def get_orchestrator():
 async def health_check() -> dict[str, Any]:
     """System health check."""
     orch = get_orchestrator()
+    cal_providers = await orch.calendar.active_providers
+    imap_configured = await orch.email.imap_configured
+    smtp_configured = await orch.email.smtp_configured
+    tg_configured = await orch.telegram.is_configured
     return {
         "status": "healthy",
-        "calendar_providers": [str(p) for p in orch.calendar.active_providers],
+        "calendar_providers": [str(p) for p in cal_providers],
         "llm_providers": [str(p) for p in orch.llm.available_providers],
-        "email_imap": orch.email.imap_configured,
-        "email_smtp": orch.email.smtp_configured,
-        "telegram": orch.telegram.is_configured,
+        "email_imap": imap_configured,
+        "email_smtp": smtp_configured,
+        "telegram": tg_configured,
         "whatsapp": orch.whatsapp.is_configured,
         "plugins_loaded": len(orch.self_improve.list_plugins()),
         "scheduled_tasks": len(orch.scheduler.list_tasks()),
@@ -372,5 +376,492 @@ async def list_tasks() -> list[dict[str, Any]]:
     ]
 
 
-# Import needed for type reference in create_event
+# ── Travel ───────────────────────────────────────────────────────────
+
+@router.get("/travel/search-flights")
+async def search_flights(
+    origin: str,
+    destination: str,
+    departure_date: str,
+    return_date: Optional[str] = None,
+) -> dict[str, Any]:
+    """Search for flights."""
+    orch = get_orchestrator()
+    dep = dt.datetime.strptime(departure_date, "%Y-%m-%d").date()
+    ret = dt.datetime.strptime(return_date, "%Y-%m-%d").date() if return_date else None
+    
+    result = await orch.travel.search_flights(origin, destination, dep, ret)
+    return {
+        "success": result.success,
+        "flights": [f.model_dump() for f in result.data] if result.success else [],
+        "error": result.error,
+    }
+
+
+@router.get("/travel/search-hotels")
+async def search_hotels(
+    destination: str,
+    check_in: str,
+    check_out: str,
+) -> dict[str, Any]:
+    """Search for hotels."""
+    orch = get_orchestrator()
+    check_in_date = dt.datetime.strptime(check_in, "%Y-%m-%d").date()
+    check_out_date = dt.datetime.strptime(check_out, "%Y-%m-%d").date()
+    
+    result = await orch.travel.search_hotels(destination, check_in_date, check_out_date)
+    return {
+        "success": result.success,
+        "hotels": [h.model_dump() for h in result.data] if result.success else [],
+        "error": result.error,
+    }
+
+
+# ── Meetings ─────────────────────────────────────────────────────────
+
+@router.post("/meetings/create")
+async def create_meeting(
+    title: str,
+    scheduled_start: str,
+    scheduled_end: str,
+    organizer: str,
+    description: str = "",
+) -> dict[str, Any]:
+    """Create a new meeting."""
+    orch = get_orchestrator()
+    start = dt.datetime.fromisoformat(scheduled_start)
+    end = dt.datetime.fromisoformat(scheduled_end)
+    
+    meeting = await orch.meetings.create_meeting(
+        title=title,
+        scheduled_start=start,
+        scheduled_end=end,
+        organizer=organizer,
+        description=description,
+    )
+    return {"meeting_id": meeting.id, "status": "created"}
+
+
+@router.post("/meetings/transcribe")
+async def transcribe_meeting(
+    meeting_id: str,
+    audio_path: str,
+) -> dict[str, Any]:
+    """Transcribe meeting audio."""
+    orch = get_orchestrator()
+    meeting = orch.meetings.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404, "Meeting not found")
+    
+    result = await orch.meetings.transcribe_audio(audio_path)
+    if result["success"]:
+        await orch.meetings.process_transcript(meeting, result["transcript"], result.get("segments"))
+    
+    return result
+
+
+@router.get("/meetings/{meeting_id}/minutes")
+async def get_meeting_minutes(meeting_id: str) -> dict[str, Any]:
+    """Generate meeting minutes PDF."""
+    orch = get_orchestrator()
+    meeting = orch.meetings.get_meeting(meeting_id)
+    if not meeting:
+        raise HTTPException(404, "Meeting not found")
+    
+    pdf_path = await orch.meetings.generate_minutes_pdf(meeting)
+    return {"pdf_path": pdf_path}
+
+
+@router.get("/meetings/action-items")
+async def get_action_items() -> list[dict[str, Any]]:
+    """Get all pending action items."""
+    orch = get_orchestrator()
+    items = orch.meetings.get_pending_action_items()
+    return [
+        {
+            "id": item.id,
+            "description": item.description,
+            "assignee": item.assignee,
+            "due_date": item.due_date.isoformat() if item.due_date else None,
+            "status": item.status.value,
+            "priority": item.priority,
+        }
+        for item in items
+    ]
+
+
+# ── Expenses ─────────────────────────────────────────────────────────
+
+@router.post("/expenses/process-receipt")
+async def process_receipt(
+    image_path: str,
+    submitted_by: str,
+    project_code: Optional[str] = None,
+) -> dict[str, Any]:
+    """Process a receipt image."""
+    orch = get_orchestrator()
+    expense = await orch.expenses.process_receipt(image_path, submitted_by, project_code)
+    return expense.model_dump()
+
+
+@router.post("/expenses/create-report")
+async def create_expense_report(
+    title: str,
+    employee_name: str,
+    period_start: str,
+    period_end: str,
+) -> dict[str, Any]:
+    """Create expense report."""
+    orch = get_orchestrator()
+    start = dt.datetime.strptime(period_start, "%Y-%m-%d").date()
+    end = dt.datetime.strptime(period_end, "%Y-%m-%d").date()
+    
+    report = await orch.expenses.create_report(title, employee_name, start, end)
+    return {"report_id": report.id, "status": "created"}
+
+
+@router.post("/expenses/{report_id}/export")
+async def export_expense_report(report_id: str) -> dict[str, str]:
+    """Export expense report to Excel."""
+    orch = get_orchestrator()
+    report = orch.expenses.get_report(report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+    
+    excel_path = await orch.expenses.export_to_excel(report)
+    return {"excel_path": excel_path}
+
+
+# ── Facilities ───────────────────────────────────────────────────────
+
+@router.get("/facilities/venues")
+async def list_venues(
+    min_capacity: int = 0,
+    internal_only: bool = False,
+) -> list[dict[str, Any]]:
+    """List available venues."""
+    orch = get_orchestrator()
+    venues = orch.facilities.list_venues(min_capacity=min_capacity, internal_only=internal_only)
+    return [
+        {
+            "id": v.id,
+            "name": v.name,
+            "type": v.venue_type.value,
+            "capacity": v.max_capacity,
+            "equipment": [e.value for e in v.equipment],
+        }
+        for v in venues
+    ]
+
+
+@router.post("/facilities/book-room")
+async def book_room(
+    venue_id: str,
+    meeting_title: str,
+    organizer_name: str,
+    organizer_email: str,
+    start_time: str,
+    end_time: str,
+    expected_attendees: int,
+) -> dict[str, Any]:
+    """Book a meeting room."""
+    orch = get_orchestrator()
+    start = dt.datetime.fromisoformat(start_time)
+    end = dt.datetime.fromisoformat(end_time)
+    
+    booking = await orch.facilities.book_room(
+        venue_id=venue_id,
+        meeting_title=meeting_title,
+        organizer_name=organizer_name,
+        organizer_email=organizer_email,
+        start_time=start,
+        end_time=end,
+        expected_attendees=expected_attendees,
+    )
+    return {"booking_id": booking.id, "status": "confirmed"}
+
+
+@router.post("/facilities/catering")
+async def create_catering_order(
+    catering_type: str,
+    event_name: str,
+    event_date: str,
+    delivery_time: str,
+    number_of_people: int,
+) -> dict[str, Any]:
+    """Create catering order."""
+    from koda2.modules.facilities.models import CateringType
+    
+    orch = get_orchestrator()
+    date = dt.datetime.strptime(event_date, "%Y-%m-%d").date()
+    time = dt.datetime.strptime(delivery_time, "%H:%M").time()
+    
+    order = await orch.facilities.create_catering_order(
+        catering_type=CateringType(catering_type),
+        event_name=event_name,
+        event_date=date,
+        delivery_time=time,
+        number_of_people=number_of_people,
+    )
+    return {"order_id": order.id, "status": "pending"}
+
+
+# ── Presentations ────────────────────────────────────────────────────
+
+@router.post("/documents/presentation")
+async def create_presentation(
+    title: str,
+    outline: str,
+    author: str = "",
+) -> dict[str, str]:
+    """Create PowerPoint presentation from outline."""
+    from koda2.modules.documents.presentations import PresentationGenerator
+    
+    gen = PresentationGenerator()
+    output_path = gen.generate_from_outline(
+        outline=outline,
+        title=title,
+        author=author,
+    )
+    return {"pptx_path": output_path}
+
+
+# Import needed for type reference
 from koda2.modules.calendar.models import CalendarEvent
+from koda2.modules.email.models import EmailMessage
+
+
+# ── Account Management ───────────────────────────────────────────────
+
+class AccountCreateRequest(BaseModel):
+    """Request to create a new account."""
+    name: str
+    account_type: str  # calendar, email, messaging
+    provider: str  # ews, google, msgraph, caldav, imap, smtp, telegram
+    credentials: dict[str, Any]
+    is_default: bool = False
+
+
+class AccountUpdateRequest(BaseModel):
+    """Request to update an account."""
+    name: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_default: Optional[bool] = None
+    credentials: Optional[dict[str, Any]] = None
+
+
+class AccountResponse(BaseModel):
+    """Account response model."""
+    id: str
+    name: str
+    account_type: str
+    provider: str
+    is_active: bool
+    is_default: bool
+    created_at: str
+
+
+@router.get("/accounts")
+async def list_accounts(
+    account_type: Optional[str] = Query(None),
+    provider: Optional[str] = Query(None),
+    active_only: bool = Query(True),
+) -> list[AccountResponse]:
+    """List all accounts with optional filtering."""
+    from koda2.modules.account.models import AccountType, ProviderType
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    
+    # Parse filters
+    acc_type = None
+    if account_type:
+        try:
+            acc_type = AccountType(account_type)
+        except ValueError:
+            raise HTTPException(400, f"Invalid account_type: {account_type}")
+    
+    prov = None
+    if provider:
+        try:
+            prov = ProviderType(provider)
+        except ValueError:
+            raise HTTPException(400, f"Invalid provider: {provider}")
+    
+    accounts = await service.get_accounts(
+        account_type=acc_type,
+        provider=prov,
+        active_only=active_only,
+    )
+    
+    return [
+        AccountResponse(
+            id=acc.id,
+            name=acc.name,
+            account_type=acc.account_type,
+            provider=acc.provider,
+            is_active=acc.is_active,
+            is_default=acc.is_default,
+            created_at=acc.created_at.isoformat() if acc.created_at else "",
+        )
+        for acc in accounts
+    ]
+
+
+@router.get("/accounts/{account_id}")
+async def get_account(account_id: str) -> AccountResponse:
+    """Get a specific account by ID."""
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    account = await service.get_account(account_id)
+    
+    if not account:
+        raise HTTPException(404, "Account not found")
+    
+    return AccountResponse(
+        id=account.id,
+        name=account.name,
+        account_type=account.account_type,
+        provider=account.provider,
+        is_active=account.is_active,
+        is_default=account.is_default,
+        created_at=account.created_at.isoformat() if account.created_at else "",
+    )
+
+
+@router.post("/accounts")
+async def create_account(request: AccountCreateRequest) -> AccountResponse:
+    """Create a new account."""
+    from koda2.modules.account.models import AccountType, ProviderType
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    
+    try:
+        acc_type = AccountType(request.account_type)
+        provider = ProviderType(request.provider)
+    except ValueError as e:
+        raise HTTPException(400, f"Invalid type or provider: {e}")
+    
+    # Validate credentials first
+    valid, error = await service.validate_account_credentials(
+        acc_type, provider, request.credentials
+    )
+    if not valid:
+        raise HTTPException(400, f"Credential validation failed: {error}")
+    
+    account = await service.create_account(
+        name=request.name,
+        account_type=acc_type,
+        provider=provider,
+        credentials=request.credentials,
+        is_default=request.is_default,
+    )
+    
+    return AccountResponse(
+        id=account.id,
+        name=account.name,
+        account_type=account.account_type,
+        provider=account.provider,
+        is_active=account.is_active,
+        is_default=account.is_default,
+        created_at=account.created_at.isoformat() if account.created_at else "",
+    )
+
+
+@router.patch("/accounts/{account_id}")
+async def update_account(account_id: str, request: AccountUpdateRequest) -> AccountResponse:
+    """Update an existing account."""
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    
+    # Build update dict
+    updates = {}
+    if request.name is not None:
+        updates["name"] = request.name
+    if request.is_active is not None:
+        updates["is_active"] = request.is_active
+    if request.is_default is not None:
+        updates["is_default"] = request.is_default
+    if request.credentials is not None:
+        updates["credentials"] = request.credentials
+    
+    account = await service.update_account(account_id, **updates)
+    
+    if not account:
+        raise HTTPException(404, "Account not found")
+    
+    return AccountResponse(
+        id=account.id,
+        name=account.name,
+        account_type=account.account_type,
+        provider=account.provider,
+        is_active=account.is_active,
+        is_default=account.is_default,
+        created_at=account.created_at.isoformat() if account.created_at else "",
+    )
+
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(account_id: str) -> dict[str, str]:
+    """Delete an account."""
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    success = await service.delete_account(account_id)
+    
+    if not success:
+        raise HTTPException(404, "Account not found")
+    
+    return {"status": "deleted", "account_id": account_id}
+
+
+@router.post("/accounts/{account_id}/test")
+async def test_account(account_id: str) -> dict[str, Any]:
+    """Test account credentials."""
+    from koda2.modules.account.models import AccountType, ProviderType
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    account = await service.get_account(account_id)
+    
+    if not account:
+        raise HTTPException(404, "Account not found")
+    
+    credentials = service.decrypt_credentials(account)
+    success, message = await service.validate_account_credentials(
+        AccountType(account.account_type),
+        ProviderType(account.provider),
+        credentials,
+    )
+    
+    return {
+        "account_id": account_id,
+        "name": account.name,
+        "valid": success,
+        "message": message,
+    }
+
+
+@router.post("/accounts/{account_id}/set-default")
+async def set_default_account(account_id: str) -> AccountResponse:
+    """Set an account as default for its type."""
+    from koda2.modules.account.service import AccountService
+    
+    service = AccountService()
+    account = await service.set_default(account_id)
+    
+    if not account:
+        raise HTTPException(404, "Account not found")
+    
+    return AccountResponse(
+        id=account.id,
+        name=account.name,
+        account_type=account.account_type,
+        provider=account.provider,
+        is_active=account.is_active,
+        is_default=account.is_default,
+        created_at=account.created_at.isoformat() if account.created_at else "",
+    )

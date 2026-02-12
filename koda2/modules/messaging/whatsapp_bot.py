@@ -18,6 +18,7 @@ from tenacity import retry, retry_if_not_exception_type, stop_after_attempt, wai
 
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
+from koda2.modules.messaging.command_parser import CommandParser, ParsedCommand
 
 logger = get_logger(__name__)
 
@@ -38,6 +39,40 @@ class WhatsAppBot:
         self._settings = get_settings()
         self._bridge_process: Optional[subprocess.Popen] = None
         self._bridge_url = f"http://localhost:{self._settings.whatsapp_bridge_port}"
+        self._command_parser: Optional[CommandParser] = None
+        self._message_handler: Optional[Any] = None
+
+    def set_command_parser(self, parser: CommandParser) -> None:
+        """Set the command parser for handling commands."""
+        self._command_parser = parser
+
+    def set_message_handler(self, handler: Any) -> None:
+        """Set the handler for non-command messages."""
+        self._message_handler = handler
+
+    async def handle_message(self, user_id: str, text: str) -> str:
+        """Process an incoming message with command support."""
+        if not self._command_parser:
+            # Fallback to natural language only
+            if self._message_handler:
+                return await self._message_handler(user_id=user_id, text=text, platform="whatsapp")
+            return "Command parser not configured"
+
+        # Try to parse as command
+        parsed = self._command_parser.parse(text, platform="whatsapp")
+        
+        if parsed.is_command:
+            is_cmd, response = await self._command_parser.execute(
+                parsed, user_id=user_id, platform="whatsapp"
+            )
+            if is_cmd:
+                return response
+        
+        # Not a command or command not found - treat as natural language
+        if self._message_handler:
+            return await self._message_handler(user_id=user_id, text=text, platform="whatsapp")
+        
+        return "I understand: " + text[:100]
 
     @property
     def is_configured(self) -> bool:
@@ -204,7 +239,20 @@ class WhatsAppBot:
         Only processes messages the user sends to themselves (self-chat).
         """
         try:
+            # Log ALL incoming webhooks for debugging
+            logger.info(
+                "whatsapp_webhook_received",
+                from_me=payload.get("fromMe"),
+                is_to_self=payload.get("isToSelf"),
+                from_addr=payload.get("from", "unknown"),
+                body_preview=payload.get("body", "")[:50],
+            )
+            
+            # Also print to console for immediate visibility
+            print(f"[WhatsApp Webhook] fromMe={payload.get('fromMe')}, isToSelf={payload.get('isToSelf')}, body='{payload.get('body', '')[:50]}...'")
+
             if not payload.get("fromMe") or not payload.get("isToSelf"):
+                logger.debug("whatsapp_webhook_ignored_not_self_message")
                 return None
 
             result = {
@@ -217,11 +265,17 @@ class WhatsAppBot:
                 "is_self_message": True,
             }
 
-            logger.info("whatsapp_self_message_received", text_length=len(result["text"]))
+            logger.info(
+                "whatsapp_self_message_received",
+                text_length=len(result["text"]),
+                preview=result["text"][:100],
+            )
+            print(f"[WhatsApp] Self-message received: {result['text'][:100]}...")
             return result
 
         except (KeyError, IndexError) as exc:
             logger.error("whatsapp_webhook_parse_error", error=str(exc))
+            print(f"[WhatsApp Error] Webhook parse error: {exc}")
             return None
 
     async def logout(self) -> dict[str, Any]:

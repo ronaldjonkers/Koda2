@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
+from koda2.modules.account.service import AccountService
 from koda2.modules.calendar import CalendarEvent, CalendarService
 from koda2.modules.documents import DocumentService
 from koda2.modules.email import EmailMessage, EmailService
@@ -16,9 +17,15 @@ from koda2.modules.llm import LLMRouter
 from koda2.modules.llm.models import ChatMessage, LLMRequest
 from koda2.modules.macos import MacOSService
 from koda2.modules.memory import MemoryService
+from koda2.modules.expenses import ExpenseService
+from koda2.modules.facilities import FacilityService
+from koda2.modules.git_manager import GitManagerService
+from koda2.modules.meetings import MeetingService
 from koda2.modules.messaging import TelegramBot, WhatsAppBot
+from koda2.modules.messaging.command_parser import create_command_parser
 from koda2.modules.scheduler import SchedulerService
 from koda2.modules.self_improve import SelfImproveService
+from koda2.modules.travel import TravelService
 from koda2.security.audit import log_action
 
 logger = get_logger(__name__)
@@ -51,9 +58,10 @@ class Orchestrator:
         self._settings = get_settings()
         self.llm = LLMRouter()
         self.memory = MemoryService()
-        self.calendar = CalendarService()
-        self.email = EmailService()
-        self.telegram = TelegramBot()
+        self.account_service = AccountService()
+        self.calendar = CalendarService(self.account_service)
+        self.email = EmailService(self.account_service)
+        self.telegram = TelegramBot(self.account_service)
         self.whatsapp = WhatsAppBot()
         self.images = ImageService()
         self.documents = DocumentService()
@@ -61,6 +69,19 @@ class Orchestrator:
         self.macos = MacOSService()
         self.self_improve = SelfImproveService()
         self.self_improve.set_llm_router(self.llm)
+        self.git_manager = GitManagerService(self.llm)
+        
+        # New modules for director-level secretary features
+        self.travel = TravelService()
+        self.meetings = MeetingService(self.llm)
+        self.expenses = ExpenseService(self.llm)
+        self.facilities = FacilityService()
+        
+        # Create unified command parser and inject into messaging bots
+        self.command_parser = create_command_parser(self)
+        self.telegram.set_command_parser(self.command_parser)
+        self.whatsapp.set_command_parser(self.command_parser)
+        self.whatsapp.set_message_handler(self.process_message)
 
     async def process_message(
         self,
@@ -341,20 +362,33 @@ class Orchestrator:
         Only processes messages the user sends to themselves.
         Can send replies to anyone on the user's behalf.
         """
+        logger.info("orchestrator_whatsapp_message_received", payload_preview=str(payload)[:200])
+        print(f"[Koda2] WhatsApp message received: {payload.get('body', '')[:50]}...")
+        
         parsed = await self.whatsapp.process_webhook(payload)
         if parsed is None:
+            logger.debug("orchestrator_whatsapp_message_ignored_not_parsed")
             return None
 
         text = parsed.get("text", "")
         if not text:
+            logger.debug("orchestrator_whatsapp_message_empty_text")
             return None
 
         user_id = parsed.get("from", "whatsapp_user")
+        logger.info("orchestrator_processing_whatsapp_message", user_id=user_id, text_preview=text[:100])
+        print(f"[Koda2] Processing message from {user_id}: {text[:50]}...")
+        
         result = await self.process_message(user_id, text, channel="whatsapp")
         response = result.get("response", "")
 
         # Send the response back to the user's own chat
         if response:
+            logger.info("orchestrator_sending_whatsapp_reply", to=user_id, response_preview=response[:100])
+            print(f"[Koda2] Sending reply: {response[:100]}...")
             await self.whatsapp.send_message(user_id, response)
+        else:
+            logger.warning("orchestrator_no_response_for_whatsapp_message")
+            print("[Koda2] No response generated for message")
 
         return response

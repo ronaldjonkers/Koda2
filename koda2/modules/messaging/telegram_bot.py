@@ -7,6 +7,7 @@ from typing import Any, Callable, Coroutine, Optional
 
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
+from koda2.modules.messaging.command_parser import CommandParser
 
 logger = get_logger(__name__)
 
@@ -16,14 +17,42 @@ CommandHandler = Callable[..., Coroutine[Any, Any, str]]
 class TelegramBot:
     """Full-featured Telegram bot with command routing and media support."""
 
-    def __init__(self) -> None:
+    def __init__(self, account_service: Optional[Any] = None) -> None:
         self._settings = get_settings()
+        self._account_service = account_service
         self._app = None
         self._command_handlers: dict[str, CommandHandler] = {}
         self._message_handler: Optional[CommandHandler] = None
+        self._command_parser: Optional[CommandParser] = None
+
+    def set_command_parser(self, parser: CommandParser) -> None:
+        """Set the unified command parser."""
+        self._command_parser = parser
+        # Sync registered commands
+        if parser:
+            for cmd in parser.list_commands():
+                if cmd not in self._command_handlers:
+                    # Create wrapper that calls parser
+                    async def wrapper(user_id: str, args: str = "", command: str = cmd, **kwargs):
+                        parsed = parser.parse(f"/{command} {args}", platform="telegram")
+                        _, response = await parser.execute(parsed, user_id=user_id, platform="telegram")
+                        return response
+                    self.register_command(cmd, wrapper)
 
     @property
     def is_configured(self) -> bool:
+        # Check if there's an active Telegram account in the database
+        if self._account_service:
+            import asyncio
+            try:
+                accounts = asyncio.run(self._account_service.get_accounts(
+                    account_type="messaging",
+                    provider="telegram",
+                ))
+                return len(accounts) > 0
+            except Exception:
+                pass
+        # Fallback to settings
         return bool(self._settings.telegram_bot_token)
 
     def _check_user_allowed(self, user_id: int) -> bool:

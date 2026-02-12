@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from koda2.logging_config import get_logger
+from koda2.modules.git_manager.service import GitManagerService
 
 logger = get_logger(__name__)
 
@@ -54,11 +55,28 @@ class SelfImproveService:
             "schedule_task": "scheduler",
         }
         self._plugins: dict[str, Plugin] = {}
-        self._llm_router = None
+        self._llm_router: Optional[Any] = None
+        self._git_manager: Optional[GitManagerService] = None
 
     def set_llm_router(self, router: Any) -> None:
         """Inject the LLM router for code generation."""
         self._llm_router = router
+        # Initialize git manager with same LLM router
+        self._git_manager = GitManagerService(router)
+
+    async def handle_plugin_generation_complete(
+        self, 
+        capability_name: str, 
+        plugin_path: str,
+        description: str,
+    ) -> dict[str, Any]:
+        """Handle post-generation tasks: docs update, git commit."""
+        if not self._git_manager:
+            return {"committed": False, "reason": "no_git_manager"}
+        
+        return await self._git_manager.after_plugin_generation(
+            capability_name, plugin_path, description
+        )
 
     def has_capability(self, capability: str) -> bool:
         """Check if a capability exists in core modules or plugins."""
@@ -127,6 +145,17 @@ Return ONLY the Python code, no markdown formatting."""
         logger.info("plugin_test_generated", path=str(test_file))
 
         self.load_plugin(str(plugin_file))
+        
+        # Trigger git commit and doc updates
+        if self._git_manager:
+            try:
+                import asyncio
+                await self.handle_plugin_generation_complete(
+                    capability_name, str(plugin_file), description
+                )
+            except Exception as exc:
+                logger.error("post_generation_hook_failed", error=str(exc))
+        
         return str(plugin_file)
 
     async def _generate_test(self, capability_name: str, plugin_code: str) -> str:

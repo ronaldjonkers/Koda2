@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koda2 Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-tertiary: #1a1a25;
+            --bg-elevated: #222230;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0b0;
+            --text-muted: #606070;
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            --border-color: rgba(255, 255, 255, 0.08);
+            --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.4);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* Layout */
+        .app {
+            display: grid;
+            grid-template-columns: 260px 1fr;
+            min-height: 100vh;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            width: 260px;
+            height: 100vh;
+            overflow-y: auto;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 12px 24px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 24px;
+        }
+
+        .logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .logo-text {
+            font-size: 22px;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--text-primary), var(--accent-primary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .nav-section {
+            margin-bottom: 8px;
+        }
+
+        .nav-label {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-muted);
+            padding: 0 12px;
+            margin-bottom: 8px;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .nav-item.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .nav-icon {
+            width: 20px;
+            text-align: center;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--accent-error);
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .connection-status {
+            margin-top: auto;
+            padding: 16px 12px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+        }
+
+        .status-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .status-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-success);
+            box-shadow: 0 0 8px var(--accent-success);
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: var(--accent-error);
+            box-shadow: 0 0 8px var(--accent-error);
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Main Content */
+        .main {
+            margin-left: 260px;
+            padding: 32px;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+        }
+
+        .header-title {
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border-radius: var(--radius-sm);
+            border: none;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #5254c7;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-tertiary);
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+        }
+
+        .stat-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .stat-change {
+            font-size: 13px;
+            color: var(--accent-success);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .stat-change.negative {
+            color: var(--accent-error);
+        }
+
+        /* Content Grid */
+        .content-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .panel-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .panel-btn {
+            padding: 6px 12px;
+            font-size: 12px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .panel-btn:hover {
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+        }
+
+        .panel-content {
+            padding: 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        /* Tasks List */
+        .task-item {
+            display: flex;
+            align-items: center;
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            transition: background 0.2s;
+        }
+
+        .task-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .task-item:last-child {
+            border-bottom: none;
+        }
+
+        .task-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 16px;
+            flex-shrink: 0;
+        }
+
+        .task-status.pending { background: var(--accent-warning); }
+        .task-status.running { background: var(--accent-info); animation: pulse 1.5s infinite; }
+        .task-status.completed { background: var(--accent-success); }
+        .task-status.failed { background: var(--accent-error); }
+
+        .task-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .task-name {
+            font-weight: 500;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .task-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .task-progress {
+            width: 120px;
+            margin-left: 16px;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-align: right;
+            margin-top: 4px;
+        }
+
+        /* Messages List */
+        .message-item {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 6px;
+        }
+
+        .message-channel {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--accent-primary);
+            text-transform: uppercase;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .message-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        /* System Stats */
+        .system-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 16px;
+            padding: 24px;
+        }
+
+        .system-stat {
+            background: var(--bg-tertiary);
+            padding: 16px;
+            border-radius: var(--radius-sm);
+        }
+
+        .system-stat-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .system-stat-value {
+            font-size: 20px;
+            font-weight: 600;
+        }
+
+        .system-stat-bar {
+            height: 4px;
+            background: var(--bg-elevated);
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+
+        .system-stat-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s ease;
+        }
+
+        /* Config Panel */
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 24px;
+            padding: 24px;
+        }
+
+        .config-card {
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-md);
+            padding: 20px;
+        }
+
+        .config-card-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .config-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--bg-elevated);
+            border-radius: var(--radius-sm);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+        }
+
+        .config-title {
+            font-weight: 600;
+        }
+
+        .config-status {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .config-btn {
+            width: 100%;
+            margin-top: 12px;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: var(--text-muted);
+        }
+
+        .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--bg-elevated);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-in {
+            animation: fadeIn 0.3s ease;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .content-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .app {
+                grid-template-columns: 1fr;
+            }
+            .sidebar {
+                display: none;
+            }
+            .main {
+                margin-left: 0;
+            }
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Section visibility */
+        .section {
+            display: none;
+        }
+
+        .section.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">🤖</div>
+                <div class="logo-text">Koda2</div>
+            </div>
+
+            <nav>
+                <div class="nav-section">
+                    <div class="nav-label">Overview</div>
+                    <div class="nav-item active" data-section="dashboard">
+                        <span class="nav-icon">📊</span>
+                        Dashboard
+                    </div>
+                    <div class="nav-item" data-section="tasks">
+                        <span class="nav-icon">⚡</span>
+                        Tasks
+                        <span class="nav-badge" id="tasks-badge" style="display: none;">0</span>
+                    </div>
+                    <div class="nav-item" data-section="messages">
+                        <span class="nav-icon">💬</span>
+                        Messages
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-label">Configuration</div>
+                    <div class="nav-item" data-section="calendar">
+                        <span class="nav-icon">📅</span>
+                        Calendar
+                    </div>
+                    <div class="nav-item" data-section="email">
+                        <span class="nav-icon">📧</span>
+                        Email
+                    </div>
+                    <div class="nav-item" data-section="integrations">
+                        <span class="nav-icon">🔌</span>
+                        Integrations
+                    </div>
+                </div>
+
+                <div class="nav-section">
+                    <div class="nav-label">System</div>
+                    <div class="nav-item" data-section="memory">
+                        <span class="nav-icon">🧠</span>
+                        Memory
+                    </div>
+                    <div class="nav-item" data-section="logs">
+                        <span class="nav-icon">📋</span>
+                        Logs
+                    </div>
+                </div>
+            </nav>
+
+            <div class="connection-status">
+                <div class="status-row">
+                    <span>WebSocket</span>
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <span class="status-indicator" id="ws-status"></span>
+                        <span id="ws-text">Connected</span>
+                    </span>
+                </div>
+                <div class="status-row">
+                    <span>API</span>
+                    <span style="display: flex; align-items: center; gap: 6px;">
+                        <span class="status-indicator" id="api-status"></span>
+                        <span id="api-text">Online</span>
+                    </span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Dashboard Section -->
+            <section class="section active" id="section-dashboard">
+                <div class="header">
+                    <h1 class="header-title">Dashboard</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="refreshData()">🔄 Refresh</button>
+                        <button class="btn btn-primary" onclick="openNewTask()">+ New Task</button>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Active Tasks</div>
+                        <div class="stat-value" id="stat-active-tasks">0</div>
+                        <div class="stat-change">
+                            <span>↑</span> Processing now
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Messages Today</div>
+                        <div class="stat-value" id="stat-messages">0</div>
+                        <div class="stat-change">
+                            <span>↓</span> <span id="stat-messages-rate">0</span>/min
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">System Load</div>
+                        <div class="stat-value" id="stat-cpu">0%</div>
+                        <div class="stat-change">
+                            <span>~</span> <span id="stat-memory">0</span>MB RAM
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Uptime</div>
+                        <div class="stat-value" id="stat-uptime">0h</div>
+                        <div class="stat-change">
+                            <span>✓</span> Stable
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-grid">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title">Active Tasks</h3>
+                            <div class="panel-actions">
+                                <button class="panel-btn" onclick="viewAllTasks()">View All</button>
+                            </div>
+                        </div>
+                        <div class="panel-content" id="tasks-list">
+                            <div class="empty-state">
+                                <div class="empty-icon">⚡</div>
+                                <div class="empty-title">No active tasks</div>
+                                <p>Tasks will appear here when the assistant is working</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title">Recent Messages</h3>
+                        </div>
+                        <div class="panel-content" id="messages-list">
+                            <div class="empty-state">
+                                <div class="empty-icon">💬</div>
+                                <div class="empty-title">No messages yet</div>
+                                <p>Messages from all channels will appear here</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="content-grid" style="margin-top: 24px;">
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title">System Resources</h3>
+                        </div>
+                        <div class="system-stats">
+                            <div class="system-stat">
+                                <div class="system-stat-label">CPU Usage</div>
+                                <div class="system-stat-value" id="sys-cpu">0%</div>
+                                <div class="system-stat-bar">
+                                    <div class="system-stat-bar-fill" id="sys-cpu-bar" style="width: 0%; background: var(--accent-primary);"></div>
+                                </div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Memory</div>
+                                <div class="system-stat-value" id="sys-memory">0%</div>
+                                <div class="system-stat-bar">
+                                    <div class="system-stat-bar-fill" id="sys-memory-bar" style="width: 0%; background: var(--accent-secondary);"></div>
+                                </div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Disk</div>
+                                <div class="system-stat-value" id="sys-disk">0%</div>
+                                <div class="system-stat-bar">
+                                    <div class="system-stat-bar-fill" id="sys-disk-bar" style="width: 0%; background: var(--accent-success);"></div>
+                                </div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Network I/O</div>
+                                <div class="system-stat-value" id="sys-net">0 MB</div>
+                                <div class="system-stat-bar">
+                                    <div class="system-stat-bar-fill" id="sys-net-bar" style="width: 0%; background: var(--accent-info);"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-header">
+                            <h3 class="panel-title">Connected Services</h3>
+                        </div>
+                        <div class="system-stats" style="grid-template-columns: 1fr;">
+                            <div class="system-stat">
+                                <div class="system-stat-label">LLM Providers</div>
+                                <div class="system-stat-value" id="svc-llm">0</div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Calendar Providers</div>
+                                <div class="system-stat-value" id="svc-calendar">0</div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Email</div>
+                                <div class="system-stat-value" id="svc-email">Disconnected</div>
+                            </div>
+                            <div class="system-stat">
+                                <div class="system-stat-label">Messaging</div>
+                                <div class="system-stat-value" id="svc-messaging">None</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tasks Section -->
+            <section class="section" id="section-tasks">
+                <div class="header">
+                    <h1 class="header-title">Tasks</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary">Filter</button>
+                        <button class="btn btn-primary">+ New Task</button>
+                    </div>
+                </div>
+                <div class="panel">
+                    <div class="panel-content" id="all-tasks-list">
+                        <div class="empty-state">
+                            <div class="empty-icon">⚡</div>
+                            <div class="empty-title">No tasks</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Configuration Sections -->
+            <section class="section" id="section-integrations">
+                <div class="header">
+                    <h1 class="header-title">Integrations</h1>
+                </div>
+                <div class="config-grid">
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <div class="config-icon">🤖</div>
+                            <div>
+                                <div class="config-title">OpenAI</div>
+                                <div class="config-status">API Key configured</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary config-btn">Configure</button>
+                    </div>
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <div class="config-icon">📅</div>
+                            <div>
+                                <div class="config-title">Google Calendar</div>
+                                <div class="config-status">Not connected</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary config-btn">Connect</button>
+                    </div>
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <div class="config-icon">💬</div>
+                            <div>
+                                <div class="config-title">Telegram</div>
+                                <div class="config-status">Bot active</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-secondary config-btn">Configure</button>
+                    </div>
+                    <div class="config-card">
+                        <div class="config-card-header">
+                            <div class="config-icon">📱</div>
+                            <div>
+                                <div class="config-title">WhatsApp</div>
+                                <div class="config-status">QR scan required</div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary config-btn">Scan QR</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Other sections placeholder -->
+            <section class="section" id="section-messages">
+                <div class="header">
+                    <h1 class="header-title">Messages</h1>
+                </div>
+                <div class="panel">
+                    <div class="panel-content">
+                        <div class="empty-state">
+                            <div class="empty-icon">💬</div>
+                            <div class="empty-title">Message history</div>
+                            <p>Coming soon...</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="section-calendar">
+                <div class="header">
+                    <h1 class="header-title">Calendar Configuration</h1>
+                </div>
+                <div class="panel">
+                    <div class="panel-content">
+                        <div class="empty-state">
+                            <div class="empty-icon">📅</div>
+                            <div class="empty-title">Calendar accounts</div>
+                            <p>Configure your calendar accounts here</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="section-email">
+                <div class="header">
+                    <h1 class="header-title">Email Configuration</h1>
+                </div>
+                <div class="panel">
+                    <div class="panel-content">
+                        <div class="empty-state">
+                            <div class="empty-icon">📧</div>
+                            <div class="empty-title">Email accounts</div>
+                            <p>Configure your email accounts here</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="section-memory">
+                <div class="header">
+                    <h1 class="header-title">Memory</h1>
+                </div>
+                <div class="panel">
+                    <div class="panel-content">
+                        <div class="empty-state">
+                            <div class="empty-icon">🧠</div>
+                            <div class="empty-title">Memory store</div>
+                            <p>Browse stored memories and context</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section" id="section-logs">
+                <div class="header">
+                    <h1 class="header-title">System Logs</h1>
+                </div>
+                <div class="panel">
+                    <div class="panel-content">
+                        <div class="empty-state">
+                            <div class="empty-icon">📋</div>
+                            <div class="empty-title">Logs</div>
+                            <p>View system logs and audit trail</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        // Global state
+        const state = {
+            tasks: [],
+            messages: [],
+            metrics: {},
+            connected: false
+        };
+
+        // Initialize WebSocket
+        const socket = io();
+
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            state.connected = true;
+            updateConnectionStatus(true);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            state.connected = false;
+            updateConnectionStatus(false);
+        });
+
+        socket.on('metrics_update', (data) => {
+            updateMetrics(data);
+        });
+
+        socket.on('task_update', (data) => {
+            updateTask(data.task);
+        });
+
+        socket.on('tasks_list', (data) => {
+            state.tasks = data.tasks;
+            renderTasks();
+        });
+
+        // UI Functions
+        function updateConnectionStatus(connected) {
+            const indicator = document.getElementById('ws-status');
+            const text = document.getElementById('ws-text');
+            if (connected) {
+                indicator.classList.remove('disconnected');
+                text.textContent = 'Connected';
+            } else {
+                indicator.classList.add('disconnected');
+                text.textContent = 'Disconnected';
+            }
+        }
+
+        function updateMetrics(data) {
+            const sys = data.system;
+            const svc = data.service;
+
+            // Update stats
+            document.getElementById('stat-cpu').textContent = sys.cpu_percent.toFixed(1) + '%';
+            document.getElementById('stat-memory').textContent = svc.memory_usage_mb.toFixed(0);
+            document.getElementById('stat-messages-rate').textContent = svc.messages_per_minute.toFixed(1);
+
+            // Update system bars
+            document.getElementById('sys-cpu').textContent = sys.cpu_percent.toFixed(1) + '%';
+            document.getElementById('sys-cpu-bar').style.width = sys.cpu_percent + '%';
+
+            document.getElementById('sys-memory').textContent = sys.memory_percent.toFixed(1) + '%';
+            document.getElementById('sys-memory-bar').style.width = sys.memory_percent + '%';
+
+            document.getElementById('sys-disk').textContent = sys.disk_percent.toFixed(1) + '%';
+            document.getElementById('sys-disk-bar').style.width = sys.disk_percent + '%';
+
+            // Update services
+            document.getElementById('svc-llm').textContent = svc.llm_providers_active || 0;
+            document.getElementById('svc-calendar').textContent = svc.calendar_providers_active || 0;
+        }
+
+        function updateTask(task) {
+            const existing = state.tasks.find(t => t.id === task.id);
+            if (existing) {
+                Object.assign(existing, task);
+            } else {
+                state.tasks.unshift(task);
+            }
+            renderTasks();
+            updateTaskBadge();
+        }
+
+        function renderTasks() {
+            const container = document.getElementById('tasks-list');
+            const activeTasks = state.tasks.filter(t => t.status === 'pending' || t.status === 'running');
+
+            if (activeTasks.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-icon">⚡</div>
+                        <div class="empty-title">No active tasks</div>
+                        <p>Tasks will appear here when the assistant is working</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = activeTasks.slice(0, 5).map(task => `
+                <div class="task-item animate-in">
+                    <div class="task-status ${task.status}"></div>
+                    <div class="task-info">
+                        <div class="task-name">${escapeHtml(task.name)}</div>
+                        <div class="task-meta">${task.progress_message || task.status} • ${timeAgo(task.created_at)}</div>
+                    </div>
+                    <div class="task-progress">
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: ${task.progress}%"></div>
+                        </div>
+                        <div class="progress-text">${task.progress}%</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function updateTaskBadge() {
+            const badge = document.getElementById('tasks-badge');
+            const activeCount = state.tasks.filter(t => t.status === 'pending' || t.status === 'running').length;
+            if (activeCount > 0) {
+                badge.textContent = activeCount;
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+            document.getElementById('stat-active-tasks').textContent = activeCount;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function timeAgo(isoString) {
+            if (!isoString) return 'just now';
+            const date = new Date(isoString);
+            const seconds = Math.floor((new Date() - date) / 1000);
+            if (seconds < 60) return 'just now';
+            const minutes = Math.floor(seconds / 60);
+            if (minutes < 60) return `${minutes}m ago`;
+            const hours = Math.floor(minutes / 60);
+            if (hours < 24) return `${hours}h ago`;
+            return `${Math.floor(hours / 24)}d ago`;
+        }
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const section = item.dataset.section;
+                
+                // Update nav
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                item.classList.add('active');
+                
+                // Update section
+                document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+                document.getElementById(`section-${section}`).classList.add('active');
+            });
+        });
+
+        // Actions
+        function refreshData() {
+            socket.emit('refresh_request');
+        }
+
+        function openNewTask() {
+            alert('New task dialog - coming soon!');
+        }
+
+        function viewAllTasks() {
+            document.querySelector('[data-section="tasks"]').click();
+        }
+
+        // Check API status
+        async function checkApiStatus() {
+            try {
+                const response = await fetch('/api/health');
+                const indicator = document.getElementById('api-status');
+                const text = document.getElementById('api-text');
+                if (response.ok) {
+                    indicator.classList.remove('disconnected');
+                    text.textContent = 'Online';
+                } else {
+                    indicator.classList.add('disconnected');
+                    text.textContent = 'Error';
+                }
+            } catch (e) {
+                document.getElementById('api-status').classList.add('disconnected');
+                document.getElementById('api-text').textContent = 'Offline';
+            }
+        }
+
+        setInterval(checkApiStatus, 30000);
+        checkApiStatus();
+
+        // Initial load
+        renderTasks();
+    </script>
+</body>
+</html>

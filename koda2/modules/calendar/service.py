@@ -1,4 +1,4 @@
-"""Calendar service — unified interface across all providers."""
+"""Calendar service — unified interface across all providers with multi-account support."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import datetime as dt
 from typing import Optional
 
 from koda2.logging_config import get_logger
+from koda2.modules.account.models import AccountType, ProviderType
+from koda2.modules.account.service import AccountService
 from koda2.modules.calendar.models import (
     CalendarEvent,
     CalendarProvider,
@@ -24,111 +26,196 @@ logger = get_logger(__name__)
 
 
 class CalendarService:
-    """Unified calendar management across all configured providers."""
+    """Unified calendar management with multi-account support."""
 
-    def __init__(self) -> None:
-        self._providers: dict[CalendarProvider, BaseCalendarProvider] = {}
-        self._init_providers()
+    def __init__(self, account_service: Optional[AccountService] = None) -> None:
+        self._account_service = account_service or AccountService()
+        self._providers: dict[str, BaseCalendarProvider] = {}  # account_id -> provider
 
-    def _init_providers(self) -> None:
-        """Initialize all configured calendar providers."""
-        candidates: list[BaseCalendarProvider] = [
-            EWSCalendarProvider(),
-            GoogleCalendarProvider(),
-            MSGraphCalendarProvider(),
-            CalDAVCalendarProvider(),
-        ]
-        for p in candidates:
-            if p.is_configured():
-                self._providers[p.provider] = p
-                logger.info("calendar_provider_enabled", provider=p.provider)
+    async def _get_provider(self, account_id: Optional[str] = None) -> tuple[str, BaseCalendarProvider]:
+        """Get a calendar provider for the specified account or default.
+        
+        Returns:
+            Tuple of (account_id, provider_instance)
+        """
+        if account_id and account_id in self._providers:
+            return account_id, self._providers[account_id]
+        
+        # Get default calendar account
+        account = await self._account_service.get_default_account(AccountType.CALENDAR)
+        if not account:
+            raise ValueError("No calendar account configured")
+        
+        # Initialize provider if needed
+        if account.id not in self._providers:
+            provider = self._create_provider(account)
+            if provider:
+                self._providers[account.id] = provider
+        
+        if account.id not in self._providers:
+            raise ValueError(f"Could not initialize provider for account: {account.name}")
+        
+        return account.id, self._providers[account.id]
+
+    def _create_provider(self, account) -> Optional[BaseCalendarProvider]:
+        """Create a provider instance from an account."""
+        try:
+            credentials = self._account_service.decrypt_credentials(account)
+            provider_type = ProviderType(account.provider)
+            
+            if provider_type == ProviderType.EWS:
+                return EWSCalendarProvider(
+                    server=credentials["server"],
+                    username=credentials["username"],
+                    password=credentials["password"],
+                    email=credentials["email"],
+                )
+            elif provider_type == ProviderType.GOOGLE:
+                return GoogleCalendarProvider(
+                    credentials_file=credentials["credentials_file"],
+                    token_file=credentials["token_file"],
+                )
+            elif provider_type == ProviderType.MSGRAPH:
+                return MSGraphCalendarProvider(
+                    client_id=credentials["client_id"],
+                    client_secret=credentials["client_secret"],
+                    tenant_id=credentials["tenant_id"],
+                )
+            elif provider_type == ProviderType.CALDAV:
+                return CalDAVCalendarProvider(
+                    url=credentials["url"],
+                    username=credentials["username"],
+                    password=credentials["password"],
+                )
+            else:
+                logger.error("unsupported_calendar_provider", provider=provider_type)
+                return None
+        except Exception as exc:
+            logger.error("failed_to_create_provider", account_id=account.id, error=str(exc))
+            return None
+
+    async def get_accounts(self, active_only: bool = True) -> list:
+        """Get all calendar accounts."""
+        return await self._account_service.get_accounts(
+            account_type=AccountType.CALENDAR,
+            active_only=active_only,
+        )
 
     @property
-    def active_providers(self) -> list[CalendarProvider]:
-        """List active provider names."""
-        return list(self._providers.keys())
+    async def active_accounts(self) -> list:
+        """List active calendar account names."""
+        accounts = await self.get_accounts()
+        return [acc.name for acc in accounts]
 
-    async def list_all_calendars(self) -> dict[CalendarProvider, list[str]]:
-        """List all calendars across all active providers."""
-        result: dict[CalendarProvider, list[str]] = {}
-        for provider, impl in self._providers.items():
+    @property
+    async def active_providers(self) -> list[str]:
+        """List active provider types."""
+        accounts = await self.get_accounts()
+        return list(set(acc.provider for acc in accounts))
+
+    async def list_all_calendars(self) -> dict[str, list[str]]:
+        """List all calendars across all active accounts."""
+        result: dict[str, list[str]] = {}
+        accounts = await self.get_accounts()
+        
+        for account in accounts:
             try:
-                cals = await impl.list_calendars()
-                result[provider] = cals
+                _, provider = await self._get_provider(account.id)
+                cals = await provider.list_calendars()
+                result[account.name] = cals
             except Exception as exc:
-                logger.error("list_calendars_failed", provider=provider, error=str(exc))
-                result[provider] = []
+                logger.error("list_calendars_failed", account=account.name, error=str(exc))
+                result[account.name] = []
+        
         return result
 
     async def list_events(
         self,
         start: dt.datetime,
         end: dt.datetime,
-        provider: Optional[CalendarProvider] = None,
+        account_id: Optional[str] = None,
         calendar_name: Optional[str] = None,
     ) -> list[CalendarEvent]:
-        """List events from one or all providers."""
+        """List events from specified account or all accounts."""
         events: list[CalendarEvent] = []
-        targets = (
-            {provider: self._providers[provider]}
-            if provider and provider in self._providers
-            else self._providers
-        )
-        for p_name, impl in targets.items():
+        
+        if account_id:
+            # Get from specific account
             try:
-                p_events = await impl.list_events(start, end, calendar_name)
-                events.extend(p_events)
+                _, provider = await self._get_provider(account_id)
+                events = await provider.list_events(start, end, calendar_name)
             except Exception as exc:
-                logger.error("list_events_failed", provider=p_name, error=str(exc))
-
+                logger.error("list_events_failed", account_id=account_id, error=str(exc))
+        else:
+            # Get from all accounts
+            accounts = await self.get_accounts()
+            for account in accounts:
+                try:
+                    _, provider = await self._get_provider(account.id)
+                    acc_events = await provider.list_events(start, end, calendar_name)
+                    # Tag events with account name
+                    for event in acc_events:
+                        event.calendar_name = account.name
+                    events.extend(acc_events)
+                except Exception as exc:
+                    logger.error("list_events_failed", account=account.name, error=str(exc))
+        
         events.sort(key=lambda e: e.start)
         return events
 
     async def create_event(
         self,
         event: CalendarEvent,
-        provider: Optional[CalendarProvider] = None,
+        account_id: Optional[str] = None,
+        account_name: Optional[str] = None,
     ) -> CalendarEvent:
-        """Create an event on the specified provider (or first available)."""
-        target_provider = provider or (self.active_providers[0] if self.active_providers else None)
-        if not target_provider or target_provider not in self._providers:
-            raise ValueError(f"No calendar provider available: {target_provider}")
-
-        impl = self._providers[target_provider]
-        created = await impl.create_event(event)
-        logger.info("event_created", title=event.title, provider=target_provider)
+        """Create an event on the specified account (or default)."""
+        # Find account by name if specified
+        if account_name:
+            accounts = await self.get_accounts()
+            for acc in accounts:
+                if acc.name.lower() == account_name.lower():
+                    account_id = acc.id
+                    break
+        
+        acc_id, provider = await self._get_provider(account_id)
+        created = await provider.create_event(event)
+        
+        # Get account name for logging
+        accounts = await self.get_accounts()
+        account_name = next((a.name for a in accounts if a.id == acc_id), acc_id)
+        logger.info("event_created", title=event.title, account=account_name)
+        
         return created
 
     async def update_event(
         self,
         event: CalendarEvent,
-        provider: Optional[CalendarProvider] = None,
+        account_id: Optional[str] = None,
     ) -> CalendarEvent:
         """Update an event."""
-        target = provider or event.provider
-        if not target or target not in self._providers:
-            raise ValueError(f"Provider not available: {target}")
-        return await self._providers[target].update_event(event)
+        _, provider = await self._get_provider(account_id)
+        return await provider.update_event(event)
 
     async def delete_event(
         self,
         event_id: str,
-        provider: CalendarProvider,
+        account_id: str,
     ) -> bool:
-        """Delete an event by provider and ID."""
-        if provider not in self._providers:
-            raise ValueError(f"Provider not available: {provider}")
-        return await self._providers[provider].delete_event(event_id)
+        """Delete an event by account and ID."""
+        _, provider = await self._get_provider(account_id)
+        return await provider.delete_event(event_id)
 
     async def detect_conflicts(
         self,
         proposed: CalendarEvent,
         buffer_minutes: int = 0,
+        account_id: Optional[str] = None,
     ) -> ConflictResult:
         """Detect scheduling conflicts with existing events."""
         search_start = proposed.start - dt.timedelta(minutes=buffer_minutes)
         search_end = proposed.end + dt.timedelta(minutes=buffer_minutes)
-        existing = await self.list_events(search_start, search_end)
+        existing = await self.list_events(search_start, search_end, account_id)
 
         conflicts = [e for e in existing if proposed.conflicts_with(e)]
         return ConflictResult(
@@ -140,10 +227,11 @@ class CalendarService:
         self,
         event: CalendarEvent,
         default_prep_minutes: int = 15,
+        account_id: Optional[str] = None,
     ) -> PrepTimeResult:
         """Calculate available preparation time before an event."""
         search_start = event.start - dt.timedelta(hours=4)
-        earlier_events = await self.list_events(search_start, event.start)
+        earlier_events = await self.list_events(search_start, event.start, account_id)
         earlier_events = [e for e in earlier_events if e.end <= event.start]
 
         if earlier_events:
@@ -168,14 +256,14 @@ class CalendarService:
         self,
         event: CalendarEvent,
         prep_minutes: int = 15,
-        provider: Optional[CalendarProvider] = None,
+        account_id: Optional[str] = None,
     ) -> tuple[CalendarEvent, Optional[CalendarEvent]]:
         """Create an event and optionally a prep-time block before it."""
-        created = await self.create_event(event, provider)
+        created = await self.create_event(event, account_id)
 
         prep_event = None
         if prep_minutes > 0:
-            prep_time = await self.calculate_prep_time(event, prep_minutes)
+            prep_time = await self.calculate_prep_time(event, prep_minutes, account_id)
             if prep_time.available_minutes >= prep_minutes:
                 prep_event = CalendarEvent(
                     title=f"[Prep] {event.title}",
@@ -184,7 +272,7 @@ class CalendarService:
                     end=event.start,
                     calendar_name=event.calendar_name,
                 )
-                prep_event = await self.create_event(prep_event, provider)
+                prep_event = await self.create_event(prep_event, account_id)
                 logger.info("prep_time_scheduled", minutes=prep_minutes, event_title=event.title)
 
         return created, prep_event

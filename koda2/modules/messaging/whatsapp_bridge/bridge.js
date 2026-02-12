@@ -94,6 +94,9 @@ client.on('message', async (msg) => {
         hasMedia: msg.hasMedia,
     };
 
+    // Log ALL incoming messages for debugging
+    console.log(`[WhatsApp] Message from ${parsed.from} (${isFromMe ? 'me' : 'other'}, toSelf: ${isToSelf}): ${parsed.body.substring(0, 100)}`);
+
     // Queue for polling
     messageQueue.push(parsed);
     if (messageQueue.length > MAX_QUEUE) {
@@ -102,6 +105,7 @@ client.on('message', async (msg) => {
 
     // Forward to Koda2 callback if it's a self-message (user messaging themselves)
     if (isFromMe && isToSelf) {
+        console.log(`[WhatsApp] Forwarding self-message to Koda2: ${parsed.body.substring(0, 50)}...`);
         try {
             const resp = await fetch(CALLBACK_URL, {
                 method: 'POST',
@@ -109,10 +113,12 @@ client.on('message', async (msg) => {
                 body: JSON.stringify(parsed),
             });
             if (!resp.ok) {
-                console.warn('Callback failed:', resp.status);
+                console.warn('[WhatsApp] Callback failed:', resp.status);
+            } else {
+                console.log('[WhatsApp] Callback successful');
             }
         } catch (err) {
-            // Koda2 might not be running yet, that's fine
+            console.warn('[WhatsApp] Callback error (Koda2 might not be running):', err.message);
         }
     }
 });

@@ -43,6 +43,7 @@ class EmailMessage(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     provider: Optional[EmailProvider] = None
     provider_id: str = ""
+    account_name: str = ""  # Name of the account this email belongs to
     subject: str = ""
     sender: str = ""
     sender_name: str = ""

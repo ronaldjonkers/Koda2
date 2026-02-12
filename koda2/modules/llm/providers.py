@@ -311,12 +311,15 @@ class OpenRouterProvider(BaseLLMProvider):
     async def complete(
         self,
         messages: list[ChatMessage],
-        model: str = "anthropic/claude-3.5-sonnet",
+        model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
+        # Use configured model if not specified
+        if model is None:
+            model = self._settings.openrouter_model
         msgs: list[dict[str, str]] = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})
@@ -358,11 +361,14 @@ class OpenRouterProvider(BaseLLMProvider):
     async def stream(
         self,
         messages: list[ChatMessage],
-        model: str = "anthropic/claude-3.5-sonnet",
+        model: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
     ) -> AsyncIterator[str]:
+        # Use configured model if not specified
+        if model is None:
+            model = self._settings.openrouter_model
         msgs: list[dict[str, str]] = []
         if system_prompt:
             msgs.append({"role": "system", "content": system_prompt})

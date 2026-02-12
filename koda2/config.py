@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_ai_api_key: str = ""
     openrouter_api_key: str = ""
+    openrouter_model: str = "openai/gpt-4o"
     llm_default_provider: str = "openai"
     llm_default_model: str = "gpt-4o"
 
@@ -86,6 +87,20 @@ class Settings(BaseSettings):
     image_provider: str = "openai"
     stability_api_key: str = ""
 
+    # ── Git Auto-Commit ──────────────────────────────────────────────
+    git_auto_commit: bool = True
+    git_auto_push: bool = False  # Require explicit push for safety
+
+    # ── Travel APIs ──────────────────────────────────────────────────
+    amadeus_api_key: str = ""
+    amadeus_api_secret: str = ""
+    amadeus_test_mode: bool = True
+    rapidapi_key: str = ""  # For Booking.com API
+    
+    # ── Meeting & Expenses ───────────────────────────────────────────
+    whisper_api_key: str = ""  # OpenAI Whisper for transcription
+    azure_speech_key: str = ""  # Alternative: Azure Speech Services
+
     # ── Derived ──────────────────────────────────────────────────────
     @property
     def data_dir(self) -> Path:
@@ -107,6 +122,11 @@ class Settings(BaseSettings):
         if not self.telegram_allowed_user_ids:
             return []
         return [int(uid.strip()) for uid in self.telegram_allowed_user_ids.split(",") if uid.strip()]
+
+    @property
+    def git_auto_commit_enabled(self) -> bool:
+        """Check if auto-commit is enabled and we're in a git repo."""
+        return self.git_auto_commit
 
     def has_provider(self, provider: str) -> bool:
         """Check if a given LLM provider has credentials configured."""

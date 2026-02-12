@@ -8,7 +8,6 @@ from typing import Optional
 
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from koda2.config import get_settings
 from koda2.logging_config import get_logger
 from koda2.modules.calendar.models import Attendee, CalendarEvent, CalendarProvider
 
@@ -42,23 +41,24 @@ class BaseCalendarProvider(ABC):
     async def list_calendars(self) -> list[str]:
         """List available calendar names."""
 
-    @abstractmethod
-    def is_configured(self) -> bool:
-        """Check if this provider has valid configuration."""
-
 
 class EWSCalendarProvider(BaseCalendarProvider):
     """Exchange Web Services calendar integration."""
 
     provider = CalendarProvider.EWS
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(
+        self,
+        server: str,
+        username: str,
+        password: str,
+        email: str,
+    ) -> None:
+        self._server = server
+        self._username = username
+        self._password = password
+        self._email = email
         self._account = None
-
-    def is_configured(self) -> bool:
-        s = self._settings
-        return all([s.ews_server, s.ews_username, s.ews_password, s.ews_email])
 
     def _get_account(self):
         """Lazy-initialize the Exchange account connection."""
@@ -66,10 +66,10 @@ class EWSCalendarProvider(BaseCalendarProvider):
             return self._account
         from exchangelib import Account, Configuration, Credentials, DELEGATE
 
-        creds = Credentials(self._settings.ews_username, self._settings.ews_password)
-        config = Configuration(server=self._settings.ews_server, credentials=creds)
+        creds = Credentials(self._username, self._password)
+        config = Configuration(server=self._server, credentials=creds)
         self._account = Account(
-            self._settings.ews_email,
+            self._email,
             config=config,
             autodiscover=False,
             access_type=DELEGATE,
@@ -167,13 +167,14 @@ class GoogleCalendarProvider(BaseCalendarProvider):
 
     provider = CalendarProvider.GOOGLE
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
+    def __init__(
+        self,
+        credentials_file: str,
+        token_file: str,
+    ) -> None:
+        self._credentials_file = credentials_file
+        self._token_file = token_file
         self._service = None
-
-    def is_configured(self) -> bool:
-        from pathlib import Path
-        return Path(self._settings.google_credentials_file).exists()
 
     def _get_service(self):
         """Lazy-init Google Calendar service."""
@@ -191,7 +192,7 @@ class GoogleCalendarProvider(BaseCalendarProvider):
             "https://www.googleapis.com/auth/gmail.modify",
         ]
         creds = None
-        token_path = Path(self._settings.google_token_file)
+        token_path = Path(self._token_file)
         if token_path.exists():
             creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
         if not creds or not creds.valid:
@@ -199,7 +200,7 @@ class GoogleCalendarProvider(BaseCalendarProvider):
                 creds.refresh(Request())
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
-                    self._settings.google_credentials_file, SCOPES
+                    self._credentials_file, SCOPES
                 )
                 creds = flow.run_local_server(port=0)
             token_path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,10 +231,10 @@ class GoogleCalendarProvider(BaseCalendarProvider):
                 s = item.get("start", {})
                 e = item.get("end", {})
                 start_dt = dt.datetime.fromisoformat(
-                    s.get("dateTime", s.get("date", ""))
+                    s.get("dateTime", s.get("date", "")).replace("Z", "+00:00")
                 )
                 end_dt = dt.datetime.fromisoformat(
-                    e.get("dateTime", e.get("date", ""))
+                    e.get("dateTime", e.get("date", "")).replace("Z", "+00:00")
                 )
                 attendees = [
                     Attendee(email=a["email"], name=a.get("displayName", ""),
@@ -334,22 +335,25 @@ class MSGraphCalendarProvider(BaseCalendarProvider):
 
     provider = CalendarProvider.MSGRAPH
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
-
-    def is_configured(self) -> bool:
-        s = self._settings
-        return all([s.msgraph_client_id, s.msgraph_client_secret, s.msgraph_tenant_id])
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        tenant_id: str,
+    ) -> None:
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._tenant_id = tenant_id
 
     async def _get_token(self) -> str:
         """Acquire an OAuth2 token via client credentials."""
         import httpx
 
-        url = f"https://login.microsoftonline.com/{self._settings.msgraph_tenant_id}/oauth2/v2.0/token"
+        url = f"https://login.microsoftonline.com/{self._tenant_id}/oauth2/v2.0/token"
         async with httpx.AsyncClient() as client:
             resp = await client.post(url, data={
-                "client_id": self._settings.msgraph_client_id,
-                "client_secret": self._settings.msgraph_client_secret,
+                "client_id": self._client_id,
+                "client_secret": self._client_secret,
                 "scope": "https://graph.microsoft.com/.default",
                 "grant_type": "client_credentials",
             })
@@ -480,18 +484,22 @@ class CalDAVCalendarProvider(BaseCalendarProvider):
 
     provider = CalendarProvider.CALDAV
 
-    def __init__(self) -> None:
-        self._settings = get_settings()
-
-    def is_configured(self) -> bool:
-        return bool(self._settings.caldav_url)
+    def __init__(
+        self,
+        url: str,
+        username: str,
+        password: str,
+    ) -> None:
+        self._url = url
+        self._username = username
+        self._password = password
 
     def _get_client(self):
         import caldav
         return caldav.DAVClient(
-            url=self._settings.caldav_url,
-            username=self._settings.caldav_username,
-            password=self._settings.caldav_password,
+            url=self._url,
+            username=self._username,
+            password=self._password,
         )
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
