@@ -34,9 +34,8 @@ let disconnectReason = null;
 let messageQueue = [];
 const MAX_QUEUE = 200;
 
-// Track message IDs sent by Koda2 via /send to prevent reply loops
-const sentByBot = new Set();
-const MAX_SENT_TRACK = 500;
+// Flag to prevent reply loops: true while the bot is sending a message via /send
+let isSendingReply = false;
 
 /**
  * Kill any stale Chrome/Chromium processes that hold the session lock.
@@ -114,8 +113,12 @@ async function onMessageCreate(msg) {
     }
 
     // Forward to Koda2 callback if it's a self-message (user messaging themselves)
-    // Skip messages sent by the bot itself to prevent infinite reply loops
-    if (isFromMe && isToSelf && !sentByBot.has(parsed.id)) {
+    // Skip messages sent by the bot itself to prevent infinite reply loops.
+    // isSendingReply is true while /send is executing client.sendMessage(),
+    // which triggers message_create synchronously before the send resolves.
+    if (isFromMe && isToSelf && isSendingReply) {
+        console.log(`[WhatsApp] Skipping bot's own reply (loop prevention): ${(parsed.body || '').substring(0, 50)}`);
+    } else if (isFromMe && isToSelf) {
         console.log(`[WhatsApp] Forwarding self-message to Koda2: ${(parsed.body || '').substring(0, 50)}...`);
         try {
             const resp = await fetch(CALLBACK_URL, {
@@ -209,19 +212,38 @@ app.post('/send', async (req, res) => {
         if (media_url) {
             const { MessageMedia } = require('whatsapp-web.js');
             const media = await MessageMedia.fromUrl(media_url);
+            isSendingReply = true;
             const sent = await client.sendMessage(chatId, media, { caption: media_caption || message || '' });
-            sentByBot.add(sent.id._serialized);
-            if (sentByBot.size > MAX_SENT_TRACK) { const first = sentByBot.values().next().value; sentByBot.delete(first); }
+            isSendingReply = false;
             return res.json({ status: 'sent', id: sent.id._serialized });
         }
 
+        isSendingReply = true;
         const sent = await client.sendMessage(chatId, message);
-        sentByBot.add(sent.id._serialized);
-        if (sentByBot.size > MAX_SENT_TRACK) { const first = sentByBot.values().next().value; sentByBot.delete(first); }
-        console.log(`[WhatsApp] Sent bot reply (id=${sent.id._serialized}), tracking to prevent loop`);
+        isSendingReply = false;
+        console.log(`[WhatsApp] Sent bot reply (id=${sent.id._serialized})`);
         res.json({ status: 'sent', id: sent.id._serialized });
     } catch (err) {
+        isSendingReply = false;
         console.error('Send error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/typing', async (req, res) => {
+    if (!clientReady) {
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
+    const { to } = req.body;
+    if (!to) {
+        return res.status(400).json({ error: 'Missing "to"' });
+    }
+    try {
+        const chatId = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@c.us`;
+        const chat = await client.getChatById(chatId);
+        await chat.sendStateTyping();
+        res.json({ status: 'typing' });
+    } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });

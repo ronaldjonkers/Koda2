@@ -748,8 +748,6 @@ async def add_account_submenu(wizard: AccountSetupWizard) -> None:
 
 async def setup_general_settings(wizard: AccountSetupWizard, is_first_run: bool) -> None:
     """Set up general application settings."""
-    print_header("⚙️  General Settings")
-    
     env_path = Path(".env")
     config = {}
     
@@ -760,7 +758,23 @@ async def setup_general_settings(wizard: AccountSetupWizard, is_first_run: bool)
                 key, _, value = line.partition("=")
                 config[key.strip()] = value.strip()
     
-    # Environment
+    # Personalization (ask first on first run)
+    if is_first_run:
+        print_header("👋 Let's personalize your assistant")
+        print("  Give your AI assistant a name and tell it who you are.")
+        print()
+    else:
+        print_header("👋 Personalization")
+    
+    config["ASSISTANT_NAME"] = ask("What should your AI assistant be called?", config.get("ASSISTANT_NAME", "Koda2"), required=True)
+    config["USER_NAME"] = ask("What is your name?", config.get("USER_NAME", ""), required=True)
+    
+    assistant = config["ASSISTANT_NAME"]
+    user = config["USER_NAME"]
+    print_success(f"{assistant} will address you as {user}")
+    
+    # General settings
+    print_header("⚙️  General Settings")
     config["KODA2_ENV"] = ask("Environment", config.get("KODA2_ENV", "production"))
     config["KODA2_LOG_LEVEL"] = ask("Log level", config.get("KODA2_LOG_LEVEL", "INFO"))
     config["API_PORT"] = ask("API port", config.get("API_PORT", "8000"))

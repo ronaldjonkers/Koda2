@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     koda2_secret_key: str = "change-me"
     koda2_encryption_key: str = ""
 
+    # ── Personalization ───────────────────────────────────────────────
+    assistant_name: str = "Koda2"
+    user_name: str = ""
+
     # ── API Server ───────────────────────────────────────────────────
     api_host: str = "0.0.0.0"
     api_port: int = 8000

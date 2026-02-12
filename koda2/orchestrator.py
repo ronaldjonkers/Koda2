@@ -380,6 +380,9 @@ class Orchestrator:
         user_id = parsed.get("from", "whatsapp_user")
         logger.info("orchestrator_processing_whatsapp_message", user_id=user_id, text_preview=text[:100])
         print(f"[Koda2] Processing message from {user_id}: {text[:50]}...")
+
+        # Show typing indicator while AI is thinking
+        await self.whatsapp.send_typing(user_id)
         
         result = await self.process_message(user_id, text, channel="whatsapp")
         response = result.get("response", "")

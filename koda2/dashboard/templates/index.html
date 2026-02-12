@@ -352,7 +352,47 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 
 <!-- ═══ ACCOUNTS ════════════════════════════════════════ -->
 <section class="section" id="section-accounts">
-  <div class="page-head"><h2>Accounts</h2><button class="btn btn-ghost btn-sm" onclick="loadAccounts()">Refresh</button></div>
+  <div class="page-head"><h2>Accounts</h2><div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" onclick="showAddAccount()">+ Add Account</button><button class="btn btn-ghost btn-sm" onclick="loadAccounts()">Refresh</button></div></div>
+  <!-- Add account form (hidden by default) -->
+  <div class="panel" id="acc-form-panel" style="display:none;margin-bottom:14px">
+    <div class="panel-head"><h3>Add Account</h3><button class="btn btn-ghost btn-sm" onclick="hideAddAccount()">Cancel</button></div>
+    <div class="panel-body pad" style="max-height:none">
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;color:var(--tx-2);display:block;margin-bottom:4px">Account Type</label>
+        <select id="acc-provider" class="search-input" style="width:100%" onchange="updateAccFields()">
+          <option value="">Select a provider...</option>
+          <optgroup label="Google Workspace">
+            <option value="google|calendar">Google Calendar</option>
+            <option value="google|email">Google Gmail</option>
+          </optgroup>
+          <optgroup label="Microsoft">
+            <option value="ews|calendar">Exchange Calendar (EWS)</option>
+            <option value="ews|email">Exchange Email (EWS)</option>
+            <option value="msgraph|calendar">Office 365 Calendar (Graph)</option>
+            <option value="msgraph|email">Office 365 Email (Graph)</option>
+          </optgroup>
+          <optgroup label="Email">
+            <option value="imap|email">IMAP Email</option>
+          </optgroup>
+          <optgroup label="Calendar">
+            <option value="caldav|calendar">CalDAV (Apple/Nextcloud)</option>
+          </optgroup>
+        </select>
+      </div>
+      <div style="margin-bottom:12px">
+        <label style="font-size:11px;color:var(--tx-2);display:block;margin-bottom:4px">Account Name</label>
+        <input id="acc-name" class="search-input" style="width:100%" placeholder="e.g. Work Email, Personal Calendar">
+      </div>
+      <div id="acc-fields"></div>
+      <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
+        <label style="font-size:11px;color:var(--tx-2);display:flex;align-items:center;gap:6px"><input type="checkbox" id="acc-default"> Set as default</label>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="submitAccount()">Add Account</button>
+        <span id="acc-status" style="font-size:11px;color:var(--tx-2)"></span>
+      </div>
+    </div>
+  </div>
   <div class="panel"><div class="panel-body tall" id="acc-list"><div class="empty"><div class="empty-icon">👤</div><div class="empty-title">Loading...</div></div></div></div>
 </section>
 
@@ -626,12 +666,87 @@ async function searchMemory() {
 }
 
 /* ── Accounts ───────────────────────────────────────────── */
+const PROVIDER_FIELDS = {
+    google: [
+        { key:'credentials_file', label:'Credentials JSON path', placeholder:'config/google_credentials.json', def:'config/google_credentials.json' },
+        { key:'token_file', label:'Token file path', placeholder:'config/google_token.json', def:'config/google_token.json' },
+    ],
+    ews: [
+        { key:'server', label:'EWS Server URL', placeholder:'https://mail.company.com/EWS/Exchange.asmx' },
+        { key:'username', label:'Username (DOMAIN\\\\user)', placeholder:'DOMAIN\\\\username' },
+        { key:'password', label:'Password', type:'password' },
+        { key:'email', label:'Email address', placeholder:'user@company.com' },
+    ],
+    msgraph: [
+        { key:'client_id', label:'Client ID (Application ID)', placeholder:'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx' },
+        { key:'client_secret', label:'Client Secret', type:'password' },
+        { key:'tenant_id', label:'Tenant ID', placeholder:'common', def:'common' },
+    ],
+    imap: [
+        { key:'imap_server', label:'IMAP Server', placeholder:'imap.gmail.com' },
+        { key:'imap_port', label:'IMAP Port', placeholder:'993', def:'993' },
+        { key:'username', label:'Username / Email', placeholder:'user@gmail.com' },
+        { key:'password', label:'Password / App Password', type:'password' },
+        { key:'smtp_server', label:'SMTP Server', placeholder:'smtp.gmail.com' },
+        { key:'smtp_port', label:'SMTP Port', placeholder:'587', def:'587' },
+    ],
+    caldav: [
+        { key:'url', label:'CalDAV URL', placeholder:'https://caldav.icloud.com/' },
+        { key:'username', label:'Username', placeholder:'user@icloud.com' },
+        { key:'password', label:'Password / App Password', type:'password' },
+    ],
+};
+
+function showAddAccount() { $('acc-form-panel').style.display = ''; $('acc-status').textContent = ''; }
+function hideAddAccount() { $('acc-form-panel').style.display = 'none'; }
+
+function updateAccFields() {
+    const val = $('acc-provider').value;
+    if (!val) { $('acc-fields').innerHTML = ''; return; }
+    const [provider] = val.split('|');
+    const fields = PROVIDER_FIELDS[provider] || [];
+    $('acc-fields').innerHTML = fields.map(f => `
+        <div style="margin-bottom:10px">
+            <label style="font-size:11px;color:var(--tx-2);display:block;margin-bottom:4px">${f.label}</label>
+            <input class="search-input acc-cred" data-key="${f.key}" style="width:100%" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" value="${f.def || ''}">
+        </div>`).join('');
+}
+
+async function submitAccount() {
+    const val = $('acc-provider').value;
+    const name = $('acc-name').value.trim();
+    if (!val || !name) { $('acc-status').textContent = 'Select a provider and enter a name'; $('acc-status').style.color = 'var(--red)'; return; }
+    const [provider, accType] = val.split('|');
+    const creds = {};
+    document.querySelectorAll('.acc-cred').forEach(el => { if (el.value.trim()) creds[el.dataset.key] = el.value.trim(); });
+    $('acc-status').textContent = 'Validating and saving...'; $('acc-status').style.color = 'var(--tx-2)';
+    try {
+        const r = await fetch('/api/accounts', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, account_type: accType, provider, credentials: creds, is_default: $('acc-default').checked })
+        });
+        if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Failed'); }
+        $('acc-status').textContent = 'Account added!'; $('acc-status').style.color = 'var(--green)';
+        setTimeout(() => { hideAddAccount(); loadAccounts(); }, 1000);
+    } catch(e) {
+        $('acc-status').textContent = e.message; $('acc-status').style.color = 'var(--red)';
+    }
+}
+
+async function deleteAccount(id, name) {
+    if (!confirm(`Delete account "${name}"?`)) return;
+    try {
+        await fetch(`/api/accounts/${id}`, { method: 'DELETE' });
+        loadAccounts();
+    } catch(e) { /* ignore */ }
+}
+
 async function loadAccounts() {
     try {
         const r = await fetch('/api/accounts?active_only=false');
         const accs = await r.json();
         if (accs.length === 0) {
-            $('acc-list').innerHTML = '<div class="empty"><div class="empty-icon">👤</div><div class="empty-title">No accounts configured</div><p>Use <code>koda2 --setup</code> to add accounts</p></div>';
+            $('acc-list').innerHTML = '<div class="empty"><div class="empty-icon">👤</div><div class="empty-title">No accounts configured</div><p>Click "+ Add Account" above to connect a service</p></div>';
         } else {
             const icons = { calendar:'📅', email:'📧', messaging:'💬' };
             $('acc-list').innerHTML = accs.map(a => `
@@ -642,6 +757,7 @@ async function loadAccounts() {
                         <div class="acc-detail">${esc(a.provider)} &middot; ${esc(a.account_type)}${a.is_default ? ' &middot; <span class="tag tag-blue">default</span>' : ''}</div>
                     </div>
                     <span class="tag ${a.is_active ? 'tag-green' : 'tag-red'}">${a.is_active ? 'active' : 'inactive'}</span>
+                    <button class="btn btn-ghost btn-sm" style="padding:3px 8px;font-size:10px;color:var(--red)" onclick="deleteAccount('${a.id}','${esc(a.name)}')">Delete</button>
                 </div>`).join('');
         }
     } catch(e) {

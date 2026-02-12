@@ -326,6 +326,20 @@ class WhatsAppBot:
         except Exception as exc:
             return {"status": "bridge_unavailable", "error": str(exc)}
 
+    async def send_typing(self, to: str) -> None:
+        """Send typing indicator to a WhatsApp chat."""
+        if not self.is_configured:
+            return
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(
+                    f"{self._bridge_url}/typing",
+                    json={"to": to},
+                    timeout=5,
+                )
+        except Exception:
+            pass  # typing indicator is best-effort
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10),
            retry=retry_if_not_exception_type(ValueError))
     async def send_message(self, to: str, text: str) -> dict[str, Any]:
