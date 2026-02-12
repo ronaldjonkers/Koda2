@@ -43,6 +43,7 @@ class WhatsAppBot:
         self._bridge_url = f"http://localhost:{self._settings.whatsapp_bridge_port}"
         self._command_parser: Optional[CommandParser] = None
         self._message_handler: Optional[Any] = None
+        self._monitor_task: Optional[asyncio.Task] = None
 
     def set_command_parser(self, parser: CommandParser) -> None:
         """Set the command parser for handling commands."""
@@ -86,10 +87,18 @@ class WhatsAppBot:
         return self._bridge_url
 
     async def start_bridge(self) -> None:
-        """Start the Node.js WhatsApp bridge process."""
+        """Start the Node.js WhatsApp bridge process.
+
+        Kills any stale bridge processes first, starts the bridge,
+        waits for the HTTP API to become available, and starts a
+        background health monitor that restarts the bridge on crash.
+        """
         if not self.is_configured:
             logger.info("whatsapp_disabled_skipping")
             return
+
+        # Kill any stale bridge process from a previous run
+        await self._kill_stale_bridge()
 
         if not (BRIDGE_DIR / "node_modules").exists():
             logger.info("whatsapp_bridge_installing_deps")
@@ -105,20 +114,51 @@ class WhatsAppBot:
                 logger.error("whatsapp_bridge_npm_install_failed", error=stderr)
                 return
 
+        self._spawn_bridge()
+        logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)
+
+        # Wait for bridge HTTP API to come up
+        for _ in range(60):
+            await asyncio.sleep(1)
+            # Check if process died
+            if self._bridge_process and self._bridge_process.poll() is not None:
+                rc = self._bridge_process.returncode
+                logger.error("whatsapp_bridge_crashed_on_start", returncode=rc)
+                # Retry once after crash
+                logger.info("whatsapp_bridge_retrying_after_crash")
+                await self._kill_stale_bridge()
+                await asyncio.sleep(2)
+                self._spawn_bridge()
+                continue
+            try:
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(f"{self._bridge_url}/status", timeout=2)
+                    if resp.status_code == 200:
+                        logger.info("whatsapp_bridge_ready")
+                        # Start background health monitor
+                        self._monitor_task = asyncio.create_task(self._health_monitor())
+                        return
+            except (httpx.ConnectError, httpx.ReadTimeout):
+                continue
+
+        logger.warning("whatsapp_bridge_slow_start")
+        # Start monitor anyway — bridge might still come up
+        self._monitor_task = asyncio.create_task(self._health_monitor())
+
+    def _spawn_bridge(self) -> None:
+        """Spawn the Node.js bridge subprocess."""
         env = {
             "WHATSAPP_BRIDGE_PORT": str(self._settings.whatsapp_bridge_port),
             "KODA2_CALLBACK_URL": f"http://localhost:{self._settings.api_port}/api/whatsapp/webhook",
             "WHATSAPP_AUTH_DIR": str(Path("data") / "whatsapp_session"),
             "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
         }
-
         popen_kwargs: dict[str, Any] = {
             "cwd": str(BRIDGE_DIR),
             "env": env,
             "stdout": sys.stdout,
             "stderr": sys.stderr,
         }
-        # Use a new process group on Unix so we can kill all children
         if sys.platform != "win32":
             popen_kwargs["preexec_fn"] = os.setsid
 
@@ -126,23 +166,90 @@ class WhatsAppBot:
             ["node", "bridge.js"],
             **popen_kwargs,
         )
-        logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)
 
-        for _ in range(30):
-            await asyncio.sleep(1)
+    async def _kill_stale_bridge(self) -> None:
+        """Kill any existing bridge process and stale Chrome instances."""
+        # Kill our tracked process
+        if self._bridge_process and self._bridge_process.poll() is None:
+            await self.stop()
+
+        # Kill any orphaned node bridge.js processes on this port
+        if sys.platform != "win32":
             try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(f"{self._bridge_url}/status", timeout=2)
-                    if resp.status_code == 200:
-                        logger.info("whatsapp_bridge_ready")
-                        return
-            except httpx.ConnectError:
-                continue
+                proc = await asyncio.create_subprocess_exec(
+                    "sh", "-c",
+                    f"lsof -ti :{self._settings.whatsapp_bridge_port} | xargs kill -9 2>/dev/null || true",
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(proc.wait(), timeout=5)
+            except (asyncio.TimeoutError, OSError):
+                pass
 
-        logger.warning("whatsapp_bridge_slow_start")
+    async def _health_monitor(self) -> None:
+        """Background task: monitor bridge health and restart on crash.
+
+        Checks every 15 seconds if the bridge process is still alive.
+        If it crashed, waits a bit and restarts it.
+        Also logs connection status changes (connected → disconnected).
+        """
+        was_ready = False
+        while True:
+            try:
+                await asyncio.sleep(15)
+
+                # Check if process is still running
+                if self._bridge_process and self._bridge_process.poll() is not None:
+                    rc = self._bridge_process.returncode
+                    logger.error("whatsapp_bridge_crashed", returncode=rc)
+                    await asyncio.sleep(3)
+                    await self._kill_stale_bridge()
+                    self._spawn_bridge()
+                    logger.info("whatsapp_bridge_restarted")
+                    was_ready = False
+                    continue
+
+                # Check bridge HTTP status
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.get(f"{self._bridge_url}/status", timeout=5)
+                        if resp.status_code == 200:
+                            data = resp.json()
+                            is_ready = data.get("ready", False)
+                            error = data.get("error")
+                            disconnected = data.get("disconnected")
+
+                            if was_ready and not is_ready:
+                                logger.warning(
+                                    "whatsapp_connection_lost",
+                                    error=error,
+                                    disconnected=disconnected,
+                                )
+                            elif not was_ready and is_ready:
+                                logger.info("whatsapp_connection_restored")
+
+                            was_ready = is_ready
+                except (httpx.ConnectError, httpx.ReadTimeout):
+                    if was_ready:
+                        logger.warning("whatsapp_bridge_unreachable")
+                        was_ready = False
+
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:
+                logger.error("whatsapp_health_monitor_error", error=str(exc))
 
     async def stop(self) -> None:
-        """Stop the bridge process and all its children."""
+        """Stop the health monitor and bridge process."""
+        # Cancel health monitor first
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._monitor_task = None
+
         if self._bridge_process and self._bridge_process.poll() is None:
             pgid = None
             try:

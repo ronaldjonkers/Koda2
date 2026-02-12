@@ -14,10 +14,14 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const { execSync } = require('child_process');
 
 const PORT = parseInt(process.env.WHATSAPP_BRIDGE_PORT || '3001', 10);
 const CALLBACK_URL = process.env.KODA2_CALLBACK_URL || 'http://localhost:8000/api/whatsapp/webhook';
 const AUTH_DIR = process.env.WHATSAPP_AUTH_DIR || path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_session');
+const MAX_INIT_RETRIES = 3;
+const INIT_RETRY_DELAY_MS = 3000;
 
 const app = express();
 app.use(express.json());
@@ -25,58 +29,48 @@ app.use(express.json());
 let currentQR = null;
 let clientReady = false;
 let clientInfo = null;
+let initError = null;
+let disconnectReason = null;
 let messageQueue = [];
 const MAX_QUEUE = 200;
 
-const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
-    puppeteer: {
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
-    },
-});
+/**
+ * Kill any stale Chrome/Chromium processes that hold the session lock.
+ * This prevents "The browser is already running" errors on restart.
+ */
+function killStaleChromeProcesses() {
+    const sessionDir = path.join(AUTH_DIR, 'session');
+    const lockFile = path.join(sessionDir, 'SingletonLock');
 
-// ── WhatsApp Events ─────────────────────────────────────────────────
+    // Remove lock files if they exist
+    for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+        const p = path.join(sessionDir, f);
+        try { fs.unlinkSync(p); console.log(`[Bridge] Removed stale lock: ${f}`); } catch(e) { /* ignore */ }
+    }
 
-client.on('qr', (qr) => {
-    currentQR = qr;
-    console.log('\n╔══════════════════════════════════════════╗');
-    console.log('║  Scan this QR code with WhatsApp:        ║');
-    console.log('╚══════════════════════════════════════════╝\n');
-    qrcode.generate(qr, { small: true });
-    console.log('\nOr open http://localhost:' + PORT + '/qr in your browser.\n');
-});
+    // Kill any orphaned chrome processes using this data dir
+    try {
+        if (process.platform !== 'win32') {
+            execSync(`pkill -f "user-data-dir=.*whatsapp_session" 2>/dev/null || true`, { timeout: 5000 });
+        }
+    } catch(e) { /* ignore */ }
+}
 
-client.on('ready', () => {
-    clientReady = true;
-    currentQR = null;
-    clientInfo = {
-        pushname: client.info.pushname,
-        wid: client.info.wid._serialized,
-        phone: client.info.wid.user,
-        platform: client.info.platform,
-    };
-    console.log(`\n✓ WhatsApp connected as: ${clientInfo.pushname} (${clientInfo.phone})\n`);
-});
+function createClient() {
+    return new Client({
+        authStrategy: new LocalAuth({ dataPath: AUTH_DIR }),
+        puppeteer: {
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+        },
+    });
+}
 
-client.on('authenticated', () => {
-    console.log('✓ WhatsApp authenticated (session restored)');
-    currentQR = null;
-});
+let client = createClient();
 
-client.on('auth_failure', (msg) => {
-    console.error('✗ WhatsApp auth failed:', msg);
-    clientReady = false;
-});
+// ── Message handlers (named so they can be re-attached on reconnect) ──
 
-client.on('disconnected', (reason) => {
-    console.warn('✗ WhatsApp disconnected:', reason);
-    clientReady = false;
-    clientInfo = null;
-});
-
-// Handle ALL messages including self-messages
-client.on('message_create', async (msg) => {
+async function onMessageCreate(msg) {
     const isFromMe = msg.fromMe;
     const chat = await msg.getChat();
 
@@ -133,11 +127,10 @@ client.on('message_create', async (msg) => {
             console.warn('[WhatsApp] Callback error (Koda2 might not be running):', err.message);
         }
     }
-});
+}
 
-// Also listen to regular 'message' event for incoming messages from others
-client.on('message', async (msg) => {
-    // Only process messages from others here (self-messages handled by message_create)
+async function onMessage(msg) {
+    // Only process messages from others here (self-messages handled by onMessageCreate)
     if (msg.fromMe) return;
     
     const chat = await msg.getChat();
@@ -165,7 +158,7 @@ client.on('message', async (msg) => {
     if (messageQueue.length > MAX_QUEUE) {
         messageQueue = messageQueue.slice(-MAX_QUEUE);
     }
-});
+}
 
 // ── HTTP API ────────────────────────────────────────────────────────
 
@@ -174,6 +167,9 @@ app.get('/status', (req, res) => {
         ready: clientReady,
         qr_available: currentQR !== null,
         info: clientInfo,
+        error: initError,
+        disconnected: disconnectReason,
+        needs_qr: !clientReady && !clientInfo && !initError,
     });
 });
 
@@ -261,11 +257,89 @@ app.post('/logout', async (req, res) => {
     }
 });
 
+// ── Initialization with retry ────────────────────────────────────────
+
+function setupClientEvents(c) {
+    c.on('qr', (qr) => {
+        currentQR = qr;
+        initError = null;
+        disconnectReason = null;
+        console.log('\n╔══════════════════════════════════════════╗');
+        console.log('║  Scan this QR code with WhatsApp:        ║');
+        console.log('╚══════════════════════════════════════════╝\n');
+        qrcode.generate(qr, { small: true });
+        console.log('\nOr open http://localhost:' + PORT + '/qr in your browser.\n');
+    });
+    c.on('ready', () => {
+        clientReady = true;
+        currentQR = null;
+        initError = null;
+        disconnectReason = null;
+        clientInfo = {
+            pushname: c.info.pushname,
+            wid: c.info.wid._serialized,
+            phone: c.info.wid.user,
+            platform: c.info.platform,
+        };
+        console.log(`\n✓ WhatsApp connected as: ${clientInfo.pushname} (${clientInfo.phone})\n`);
+    });
+    c.on('authenticated', () => {
+        console.log('✓ WhatsApp authenticated (session restored)');
+        currentQR = null;
+        initError = null;
+    });
+    c.on('auth_failure', (msg) => {
+        console.error('✗ WhatsApp auth failed:', msg);
+        clientReady = false;
+        initError = 'auth_failure: ' + msg;
+    });
+    c.on('disconnected', (reason) => {
+        console.warn('✗ WhatsApp disconnected:', reason);
+        clientReady = false;
+        clientInfo = null;
+        disconnectReason = reason;
+        console.log('[Bridge] Will attempt to reinitialize in 5 seconds...');
+        setTimeout(() => initializeWithRetry(), 5000);
+    });
+    c.on('message_create', onMessageCreate);
+    c.on('message', onMessage);
+}
+
+async function initializeWithRetry() {
+    for (let attempt = 1; attempt <= MAX_INIT_RETRIES; attempt++) {
+        console.log(`[Bridge] Initialization attempt ${attempt}/${MAX_INIT_RETRIES}...`);
+        initError = null;
+        disconnectReason = null;
+
+        // Clean up stale locks/processes before each attempt
+        killStaleChromeProcesses();
+
+        // Destroy old client if it exists, create fresh one
+        try { await client.destroy(); } catch(e) { /* ignore */ }
+        client = createClient();
+        setupClientEvents(client);
+
+        try {
+            await client.initialize();
+            console.log('[Bridge] Client initialized successfully');
+            return; // success
+        } catch(err) {
+            console.error(`[Bridge] Init attempt ${attempt} failed:`, err.message);
+            initError = err.message;
+
+            if (attempt < MAX_INIT_RETRIES) {
+                console.log(`[Bridge] Retrying in ${INIT_RETRY_DELAY_MS/1000}s...`);
+                await new Promise(r => setTimeout(r, INIT_RETRY_DELAY_MS));
+            }
+        }
+    }
+    console.error(`[Bridge] All ${MAX_INIT_RETRIES} init attempts failed. Bridge HTTP API still running — check /status for details.`);
+}
+
 // ── Start ───────────────────────────────────────────────────────────
 
 app.listen(PORT, () => {
     console.log(`Koda2 WhatsApp Bridge listening on http://localhost:${PORT}`);
     console.log('Initializing WhatsApp Web client...\n');
+    initializeWithRetry();
 });
-
-client.initialize();
