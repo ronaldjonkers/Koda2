@@ -97,8 +97,28 @@ else
     NEW_VERSION=$(grep __version__ koda2/__init__.py 2>/dev/null | cut -d'"' -f2 || echo "unknown")
 fi
 
-# ── 3. Virtual environment ──────────────────────────────────────────
-step "🐍 Python environment"
+# ── 3. Stop running Koda2 ──────────────────────────────────────────
+step "� Stopping Koda2 (if running)"
+
+# Stop launchd service (macOS)
+if [ -f "$HOME/Library/LaunchAgents/com.koda2.agent.plist" ]; then
+    launchctl unload "$HOME/Library/LaunchAgents/com.koda2.agent.plist" 2>/dev/null && \
+        info "Stopped launchd service" || true
+fi
+# Stop systemd service (Linux)
+if command -v systemctl &>/dev/null; then
+    systemctl --user stop koda2 2>/dev/null && \
+        info "Stopped systemd service" || true
+fi
+# Kill any running koda2 process (foreground mode)
+if pgrep -f "koda2.main" &>/dev/null; then
+    pkill -f "koda2.main" 2>/dev/null && info "Stopped foreground Koda2 process" || true
+    sleep 1
+fi
+ok "Koda2 stopped"
+
+# ── 4. Virtual environment & dependencies ─────────────────────────
+step "�🐍 Python environment"
 
 if [ ! -d ".venv" ]; then
     warn "Virtual environment missing — recreating..."
@@ -110,11 +130,14 @@ source .venv/bin/activate
 
 info "Upgrading pip..."
 pip install --upgrade pip --quiet
-info "Installing/updating dependencies..."
-pip install -e ".[dev]" --quiet
+
+# Force-sync all dependencies from pyproject.toml.
+# --upgrade ensures new deps are installed and existing ones are updated.
+info "Syncing Python dependencies (this may take a moment)..."
+pip install -e ".[dev]" --upgrade --quiet 2>&1 | tail -5 || true
 ok "Python dependencies up to date"
 
-# ── 4. WhatsApp bridge ──────────────────────────────────────────────
+# ── 5. WhatsApp bridge ──────────────────────────────────────────────
 step "📱 WhatsApp bridge"
 
 WA_DIR="koda2/modules/messaging/whatsapp_bridge"
@@ -131,7 +154,7 @@ else
     fi
 fi
 
-# ── 5. Database ─────────────────────────────────────────────────────
+# ── 6. Database ─────────────────────────────────────────────────────
 step "🗄️  Database"
 
 info "Updating database schema..."
@@ -141,7 +164,7 @@ from koda2.database import init_db
 asyncio.run(init_db())
 " 2>/dev/null && ok "Database schema up to date" || warn "Database update skipped"
 
-# ── 6. Configuration ────────────────────────────────────────────────
+# ── 7. Configuration ────────────────────────────────────────────────
 step "📝 Configuration"
 
 if [ -f ".env.example" ] && [ -f ".env" ]; then
@@ -163,7 +186,7 @@ elif [ ! -f ".env" ]; then
     warn ".env not found — run setup_wizard.py to configure"
 fi
 
-# ── 7. Directories ──────────────────────────────────────────────────
+# ── 8. Directories ──────────────────────────────────────────────────
 step "📁 Directories"
 
 for dir in data data/chroma data/generated data/whatsapp_session logs config plugins templates; do
@@ -171,7 +194,7 @@ for dir in data data/chroma data/generated data/whatsapp_session logs config plu
 done
 ok "All directories present"
 
-# ── 8. Tests ────────────────────────────────────────────────────────
+# ── 9. Tests ────────────────────────────────────────────────────────
 step "🧪 Running tests"
 
 if python -m pytest tests/ -x --tb=short -q 2>/dev/null; then
@@ -180,7 +203,7 @@ else
     warn "Some tests failed — review before deploying"
 fi
 
-# ── 9. Health check ─────────────────────────────────────────────────
+# ── 10. Health check ────────────────────────────────────────────────
 step "🔍 System health check"
 
 python -c "
@@ -192,7 +215,7 @@ wa = 'enabled' if s.whatsapp_enabled else 'disabled'
 print(f'  WhatsApp:     {wa}')
 " 2>/dev/null && ok "Config loads successfully" || warn "Config check failed"
 
-# ── 10. Docker (optional) ───────────────────────────────────────────
+# ── 11. Docker (optional) ───────────────────────────────────────────
 if [ -f "docker-compose.yml" ] && command -v docker &>/dev/null; then
     step "🐳 Docker"
     read -rp "  Rebuild Docker containers? [y/N] " REPLY
@@ -206,6 +229,23 @@ if [ -f "docker-compose.yml" ] && command -v docker &>/dev/null; then
     fi
 fi
 
+# ── 12. Restart Koda2 ────────────────────────────────────────────────
+step "🚀 Restarting Koda2"
+
+# Try to restart the service if it was running as a service
+SERVICE_RESTARTED=false
+if [ -f "$HOME/Library/LaunchAgents/com.koda2.agent.plist" ]; then
+    launchctl load "$HOME/Library/LaunchAgents/com.koda2.agent.plist" 2>/dev/null && \
+        SERVICE_RESTARTED=true && ok "Restarted launchd service" || true
+elif command -v systemctl &>/dev/null && systemctl --user is-enabled koda2 &>/dev/null; then
+    systemctl --user start koda2 2>/dev/null && \
+        SERVICE_RESTARTED=true && ok "Restarted systemd service" || true
+fi
+
+if [ "$SERVICE_RESTARTED" = false ]; then
+    info "No service configured — start manually with: koda2"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${GREEN}"
@@ -215,6 +255,10 @@ echo "  ║   ✅  Koda2 updated to v${NEW_VERSION}!                   ║"
 echo "  ║                                                  ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
-echo -e "  ${BOLD}🚀 Restart Koda2:${NC}"
-echo -e "     ${DIM}source .venv/bin/activate && koda2${NC}"
+if [ "$SERVICE_RESTARTED" = true ]; then
+    echo -e "  ${BOLD}Koda2 is running as a service.${NC}"
+else
+    echo -e "  ${BOLD}🚀 Start Koda2:${NC}"
+    echo -e "     ${DIM}source .venv/bin/activate && koda2${NC}"
+fi
 echo ""
