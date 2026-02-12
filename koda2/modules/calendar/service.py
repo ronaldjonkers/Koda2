@@ -158,7 +158,13 @@ class CalendarService:
                 except Exception as exc:
                     logger.error("list_events_failed", account=account.name, error=str(exc))
         
-        events.sort(key=lambda e: e.start)
+        # Normalize to naive UTC for sorting (some providers return tz-aware, others naive)
+        def _sort_key(e):
+            s = e.start
+            if s.tzinfo is not None:
+                s = s.replace(tzinfo=None)
+            return s
+        events.sort(key=_sort_key)
         return events
 
     async def create_event(
