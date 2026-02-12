@@ -1000,30 +1000,53 @@ async def get_google_auth_url() -> dict[str, Any]:
 
 
 @router.get("/google/oauth-callback")
-async def google_oauth_callback(code: str = Query(...), state: str = Query(None)):
+async def google_oauth_callback(code: str = Query(...), state: str = Query(None), scope: str = Query(None)):
     """Handle Google OAuth2 callback — exchange code for token and save."""
     if not GOOGLE_CREDS_PATH.exists():
         raise HTTPException(400, "Credentials file not found")
 
+    REDIRECT_URI = "http://localhost:8000/api/google/oauth-callback"
+
     try:
-        from google_auth_oauthlib.flow import Flow
-        import os
+        # Read client credentials from the uploaded JSON
+        creds_data = json.loads(GOOGLE_CREDS_PATH.read_text())
+        client_config = creds_data.get("web") or creds_data.get("installed", {})
+        client_id = client_config["client_id"]
+        client_secret = client_config["client_secret"]
+        token_uri = client_config.get("token_uri", "https://oauth2.googleapis.com/token")
 
-        # Allow scope changes — Google may return additional scopes
-        # (e.g. openid, userinfo.email) beyond what we requested.
-        os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+        # Exchange authorization code for tokens directly via HTTP
+        # (avoids oauthlib base64 padding issues with state/code params)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(token_uri, data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": REDIRECT_URI,
+                "grant_type": "authorization_code",
+            })
 
-        flow = Flow.from_client_secrets_file(
-            str(GOOGLE_CREDS_PATH),
-            scopes=GOOGLE_SCOPES,
-            redirect_uri="http://localhost:8000/api/google/oauth-callback",
-        )
-        flow.fetch_token(code=code)
-        creds = flow.credentials
+        if resp.status_code != 200:
+            error_data = resp.json() if resp.text else {}
+            error_msg = error_data.get("error_description", error_data.get("error", resp.text))
+            raise HTTPException(400, f"Token exchange failed: {error_msg}")
+
+        token_data = resp.json()
+
+        # Build token JSON in the format google-auth expects
+        token_json = {
+            "token": token_data["access_token"],
+            "refresh_token": token_data.get("refresh_token"),
+            "token_uri": token_uri,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "scopes": (scope or " ".join(GOOGLE_SCOPES)).split(),
+            "expiry": None,
+        }
 
         # Save token
         GOOGLE_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
-        GOOGLE_TOKEN_PATH.write_text(creds.to_json())
+        GOOGLE_TOKEN_PATH.write_text(json.dumps(token_json, indent=2))
 
         # Auto-create Google accounts (calendar + email)
         from koda2.modules.account.models import AccountType, ProviderType
@@ -1055,7 +1078,9 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
 
         # Redirect back to dashboard accounts page
         return RedirectResponse(url="/dashboard?section=accounts&google=connected")
-    except ImportError:
-        raise HTTPException(500, "Google auth libraries not installed")
+    except HTTPException:
+        raise
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(500, f"OAuth callback failed: {e}")
