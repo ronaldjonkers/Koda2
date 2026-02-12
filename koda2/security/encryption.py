@@ -50,6 +50,8 @@ def encrypt(plaintext: str) -> str:
 def decrypt(token: str) -> str:
     """Decrypt a base64-encoded token back to plaintext."""
     cipher = _get_cipher()
-    raw = base64.urlsafe_b64decode(token)
+    # Fix padding if missing
+    padded = token + "=" * (-len(token) % 4)
+    raw = base64.urlsafe_b64decode(padded)
     nonce, ciphertext = raw[:12], raw[12:]
     return cipher.decrypt(nonce, ciphertext, None).decode("utf-8")

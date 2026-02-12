@@ -1009,17 +1009,19 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
     REDIRECT_URI = "http://localhost:8000/api/google/oauth-callback"
 
     try:
-        # Read client credentials from the uploaded JSON
+        # Step 1: Read client credentials from the uploaded JSON
+        print("[Google OAuth] Step 1: Reading credentials file...")
         creds_data = json.loads(GOOGLE_CREDS_PATH.read_text())
         client_config = creds_data.get("web") or creds_data.get("installed", {})
         client_id = client_config["client_id"]
         client_secret = client_config["client_secret"]
         token_uri = client_config.get("token_uri", "https://oauth2.googleapis.com/token")
+        print(f"[Google OAuth] Step 1 OK: client_id={client_id[:20]}...")
 
-        # Exchange authorization code for tokens directly via HTTP
-        # (avoids oauthlib base64 padding issues with state/code params)
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(token_uri, data={
+        # Step 2: Exchange authorization code for tokens directly via HTTP
+        print("[Google OAuth] Step 2: Exchanging code for token...")
+        async with httpx.AsyncClient() as http_client:
+            resp = await http_client.post(token_uri, data={
                 "code": code,
                 "client_id": client_id,
                 "client_secret": client_secret,
@@ -1033,8 +1035,10 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
             raise HTTPException(400, f"Token exchange failed: {error_msg}")
 
         token_data = resp.json()
+        print(f"[Google OAuth] Step 2 OK: got access_token, refresh_token={'yes' if token_data.get('refresh_token') else 'no'}")
 
-        # Build token JSON in the format google-auth expects
+        # Step 3: Build and save token JSON
+        print("[Google OAuth] Step 3: Saving token...")
         token_json = {
             "token": token_data["access_token"],
             "refresh_token": token_data.get("refresh_token"),
@@ -1044,12 +1048,12 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
             "scopes": (scope or " ".join(GOOGLE_SCOPES)).split(),
             "expiry": None,
         }
-
-        # Save token
         GOOGLE_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
         GOOGLE_TOKEN_PATH.write_text(json.dumps(token_json, indent=2))
+        print("[Google OAuth] Step 3 OK: token saved")
 
-        # Auto-create Google accounts (calendar + email)
+        # Step 4: Create Google accounts in DB
+        print("[Google OAuth] Step 4: Creating accounts...")
         from koda2.modules.account.models import AccountType, ProviderType
         from koda2.modules.account.service import AccountService
 
@@ -1059,9 +1063,10 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
             "token_file": str(GOOGLE_TOKEN_PATH),
         }
 
-        # Check if Google accounts already exist to avoid duplicates
         existing = await service.get_accounts(provider=ProviderType.GOOGLE)
+        print(f"[Google OAuth] Step 4a: existing Google accounts = {len(existing)}")
         if not existing:
+            print("[Google OAuth] Step 4b: Creating Calendar account...")
             await service.create_account(
                 name="Google (Calendar)",
                 account_type=AccountType.CALENDAR,
@@ -1069,6 +1074,7 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
                 credentials=google_creds,
                 is_default=True,
             )
+            print("[Google OAuth] Step 4c: Creating Email account...")
             await service.create_account(
                 name="Google (Email)",
                 account_type=AccountType.EMAIL,
@@ -1076,6 +1082,9 @@ async def google_oauth_callback(code: str = Query(...), state: str = Query(None)
                 credentials=google_creds,
                 is_default=True,
             )
+            print("[Google OAuth] Step 4 OK: accounts created")
+        else:
+            print("[Google OAuth] Step 4 OK: accounts already exist, skipping")
 
         # Redirect back to dashboard accounts page
         return RedirectResponse(url="/dashboard?section=accounts&google=connected")
