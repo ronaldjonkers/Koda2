@@ -52,6 +52,9 @@ async def validate_ews_credentials(
 ) -> tuple[bool, str]:
     """Validate Exchange Web Services credentials.
     
+    Uses direct HTTP requests instead of exchangelib to avoid NTLM
+    handshake issues. Tests the EWS endpoint with a simple SOAP request.
+    
     Args:
         server: EWS server hostname or URL (will be normalized to hostname)
         username: Username for authentication
@@ -61,79 +64,98 @@ async def validate_ews_credentials(
     Returns:
         Tuple of (success, error_message_or_empty)
     """
+    import httpx
+
     hostname = _normalize_ews_server(server)
     if not hostname:
         return (False, "Server hostname is required.")
-    
+
+    ews_url = f"https://{hostname}/EWS/Exchange.asmx"
+
+    # Simple SOAP request to resolve a folder (Inbox) — lightweight validation
+    soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2016"/>
+  </soap:Header>
+  <soap:Body>
+    <m:ResolveNames ReturnFullContactData="false">
+      <m:UnresolvedEntry>{email}</m:UnresolvedEntry>
+    </m:ResolveNames>
+  </soap:Body>
+</soap:Envelope>"""
+
+    headers = {"Content-Type": "text/xml; charset=utf-8"}
+
+    # Try basic auth first, then NTLM via requests
+    # Basic auth
     try:
-        from exchangelib import (
-            Account, Configuration, Credentials, DELEGATE,
-            Build, Version,
-        )
-        from exchangelib.protocol import BaseProtocol
-
-        # Use a shorter timeout for the underlying requests session
-        BaseProtocol.TIMEOUT = 30
-
-        def _test_connection() -> bool:
-            creds = Credentials(username, password)
-            # Try with explicit auth_type settings.
-            # Many Exchange servers (especially behind proxies/load balancers)
-            # don't support NTLM. We try multiple auth types.
-            from exchangelib.transport import AUTH_TYPE_MAP
-            import requests.auth
-
-            last_error = None
-            for auth_type_name in ("NTLM", "basic", None):
-                try:
-                    config_kwargs = {
-                        "server": hostname,
-                        "credentials": creds,
-                    }
-                    if auth_type_name:
-                        config_kwargs["auth_type"] = auth_type_name
-
-                    config = Configuration(**config_kwargs)
-                    account = Account(
-                        email, config=config,
-                        autodiscover=False, access_type=DELEGATE,
-                    )
-                    # Try to access the calendar to validate credentials
-                    _ = account.calendar
-                    print(f"[EWS] Connection successful with auth_type={auth_type_name or 'auto'}")
-                    return True
-                except Exception as exc:
-                    last_error = exc
-                    print(f"[EWS] Auth type {auth_type_name or 'auto'} failed: {exc}")
-                    # Always try the next auth type — don't re-raise
-                    continue
-            # All auth types failed — raise the last error
-            raise last_error or RuntimeError(
-                f"Could not authenticate to {hostname}. "
-                "Tried NTLM and basic auth. Check username/password."
+        print(f"[EWS] Testing basic auth against {ews_url}...")
+        async with httpx.AsyncClient(verify=True, timeout=15) as client:
+            resp = await client.post(
+                ews_url,
+                content=soap_body,
+                headers=headers,
+                auth=(username, password),
             )
+        print(f"[EWS] Basic auth response: {resp.status_code}")
+        if resp.status_code == 200:
+            return (True, "")
+        elif resp.status_code == 401:
+            print("[EWS] Basic auth returned 401, trying NTLM...")
+        else:
+            print(f"[EWS] Basic auth returned {resp.status_code}: {resp.text[:200]}")
+    except Exception as exc:
+        print(f"[EWS] Basic auth error: {exc}")
 
-        # Run blocking EWS operations in thread
+    # NTLM auth via requests (synchronous, in thread)
+    try:
+        import requests
+        from requests_ntlm import HttpNtlmAuth
+
+        def _try_ntlm() -> tuple[bool, str]:
+            print(f"[EWS] Testing NTLM auth against {ews_url}...")
+            try:
+                resp = requests.post(
+                    ews_url,
+                    data=soap_body,
+                    headers=headers,
+                    auth=HttpNtlmAuth(username, password),
+                    timeout=15,
+                    verify=True,
+                )
+                print(f"[EWS] NTLM auth response: {resp.status_code}")
+                if resp.status_code == 200:
+                    return (True, "")
+                elif resp.status_code == 401:
+                    return (False, "Invalid username or password.")
+                else:
+                    return (False, f"EWS returned HTTP {resp.status_code}")
+            except requests.exceptions.Timeout:
+                return (False, "NTLM auth timed out. Server may not support NTLM.")
+            except Exception as exc:
+                return (False, f"NTLM auth failed: {exc}")
+
         result = await asyncio.wait_for(
-            asyncio.to_thread(_test_connection),
+            asyncio.to_thread(_try_ntlm),
             timeout=DEFAULT_TIMEOUT,
         )
-        return (True, "")
-
+        if result[0]:
+            return result
+        # If NTLM also failed with 401, return the auth error
+        if "invalid username" in result[1].lower() or "401" in result[1]:
+            return result
     except asyncio.TimeoutError:
-        return (False, "Connection timed out. Check server hostname and network access.")
+        pass
     except ImportError:
-        return (False, "exchangelib library not installed.")
-    except Exception as e:
-        error_msg = str(e).lower()
-        if "unauthorized" in error_msg or "401" in error_msg:
-            return (False, "Invalid username or password.")
-        elif "could not connect" in error_msg or "connection refused" in error_msg:
-            return (False, f"Could not connect to server '{hostname}'. Check server hostname.")
-        elif "dns" in error_msg or "name resolution" in error_msg:
-            return (False, f"Could not resolve server hostname '{hostname}'.")
-        else:
-            return (False, f"EWS connection failed: {e}")
+        print("[EWS] requests_ntlm not installed, skipping NTLM")
+    except Exception as exc:
+        print(f"[EWS] NTLM error: {exc}")
+
+    return (False, f"Could not connect to Exchange server at {hostname}. "
+            "Check hostname, username (try DOMAIN\\\\user or user@domain.com), and password.")
 
 
 async def validate_google_credentials(
