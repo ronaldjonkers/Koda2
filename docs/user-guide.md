@@ -168,8 +168,6 @@ koda2 logs --follow
 | `koda2 account list` | List configured accounts |
 | `koda2 account add` | Add new account |
 | `koda2 logs` | View logs |
-| `koda2 commit "msg"` | Commit and push changes |
-| `koda2 commit --no-push` | Commit without pushing |
 | `koda2 --setup` | Run setup wizard |
 
 ---
@@ -623,35 +621,6 @@ The setup wizard now includes:
 - **Model selection** - Choose from top 10 OpenRouter models
 - **Account naming** - Give accounts descriptive names
 - **Multi-account setup** - Add multiple Exchange, Gmail, etc.
-
-### Auto Git Commit
-
-Koda2 automatically commits and pushes changes to git:
-
-```bash
-# Check git auto-commit status
-koda2 status
-
-# Manual commit
-koda2 commit "Description of changes"
-
-# Commit without push
-koda2 commit --no-push
-```
-
-**Configuration in `.env`:**
-```env
-# Enable auto-commit (commits every 5 minutes if there are changes)
-GIT_AUTO_COMMIT=true
-
-# Enable auto-push (pushes after each commit)
-GIT_AUTO_PUSH=true
-```
-
-**What gets committed automatically:**
-- Every 5 minutes if there are uncommitted changes
-- When you shut down Koda2 (final commit)
-- Generated commit messages describe what changed
 
 ### LLM Model Check on Startup
 

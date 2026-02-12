@@ -32,7 +32,6 @@ from koda2.config import get_settings
 from koda2.dashboard.websocket import sio
 from koda2.database import close_db, init_db
 from koda2.logging_config import get_logger, setup_logging
-from koda2.modules.git_manager.auto_commit import start_auto_commit, stop_auto_commit
 from koda2.modules.metrics.service import MetricsService
 from koda2.modules.task_queue.service import TaskQueueService
 from koda2.orchestrator import Orchestrator
@@ -142,9 +141,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     asyncio.create_task(_start_messaging(_orchestrator))
     asyncio.create_task(_start_whatsapp(_orchestrator))
 
-    # Start auto-commit service
-    await start_auto_commit()
-
     await _print_status(settings, _orchestrator)
     
     # Open browser automatically (unless disabled)
@@ -164,9 +160,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     print(f"\n  {DIM}🛑 Koda2 shutting down...{NC}")
     logger.info("koda2_shutting_down")
-    
-    # Stop auto-commit service (does final commit)
-    await stop_auto_commit()
     
     if _metrics:
         await _metrics.stop()

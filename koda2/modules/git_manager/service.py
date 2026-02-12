@@ -27,8 +27,6 @@ class GitManagerService:
     def __init__(self, llm_router: Optional[Any] = None) -> None:
         self._llm = llm_router
         self._settings = get_settings()
-        self._enabled = self._settings.git_auto_commit
-        self._auto_push = self._settings.git_auto_push
 
     def set_llm_router(self, router: Any) -> None:
         """Inject LLM router for commit message generation."""
@@ -247,18 +245,14 @@ Return ONLY the commit message, no markdown formatting."""
         logger.info("git_push_success")
         return True
 
-    async def auto_commit_and_push(
+    async def commit_and_push(
         self, 
         context: Optional[str] = None,
     ) -> dict[str, Any]:
-        """Full auto-commit workflow: stage, commit, push.
+        """Commit and push changes.
         
-        This is the main entry point for the self-improvement system.
+        This is used by the self-improvement system after generating code.
         """
-        if not self._enabled:
-            logger.debug("git_auto_commit_disabled")
-            return {"committed": False, "pushed": False, "reason": "disabled"}
-
         if not await self.is_repo():
             return {"committed": False, "pushed": False, "reason": "not_a_repo"}
 
@@ -270,7 +264,7 @@ Return ONLY the commit message, no markdown formatting."""
             "pushed": False,
         }
 
-        if committed and self._auto_push:
+        if committed:
             result["pushed"] = await self.push()
 
         return result
@@ -432,7 +426,7 @@ Accepted
         )
         
         # Commit the changes
-        result = await self.auto_commit_and_push(
+        result = await self.commit_and_push(
             context=f"Auto-generate plugin: {plugin_name}"
         )
         

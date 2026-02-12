@@ -87,10 +87,6 @@ class Settings(BaseSettings):
     image_provider: str = "openai"
     stability_api_key: str = ""
 
-    # ── Git Auto-Commit ──────────────────────────────────────────────
-    git_auto_commit: bool = True
-    git_auto_push: bool = False  # Require explicit push for safety
-
     # ── Travel APIs ──────────────────────────────────────────────────
     amadeus_api_key: str = ""
     amadeus_api_secret: str = ""
@@ -122,11 +118,6 @@ class Settings(BaseSettings):
         if not self.telegram_allowed_user_ids:
             return []
         return [int(uid.strip()) for uid in self.telegram_allowed_user_ids.split(",") if uid.strip()]
-
-    @property
-    def git_auto_commit_enabled(self) -> bool:
-        """Check if auto-commit is enabled and we're in a git repo."""
-        return self.git_auto_commit
 
     def has_provider(self, provider: str) -> bool:
         """Check if a given LLM provider has credentials configured."""

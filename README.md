@@ -282,7 +282,7 @@ curl -X POST /api/documents/presentation \
 
 ---
 
-## 🔄 Self-Improvement & Auto-Commit
+## 🔄 Self-Improvement
 
 Koda2 detects missing capabilities and auto-generates code:
 
@@ -291,26 +291,6 @@ Koda2 detects missing capabilities and auto-generates code:
 3. **Test** — Automatic test generation
 4. **Commit** — Git commit with descriptive message
 5. **Activate** — Load and use immediately
-
-### Automatic Git Commit
-
-Koda2 automatically commits and pushes your changes:
-
-```bash
-# Manual commit via CLI
-koda2 commit "Description of changes"
-
-# Auto-commit is enabled by default:
-# - Commits every 5 minutes if there are changes
-# - Final commit on shutdown
-# - Auto-push if configured
-```
-
-**Configure in `.env`:**
-```env
-GIT_AUTO_COMMIT=true   # Enable auto-commit
-GIT_AUTO_PUSH=true     # Enable auto-push
-```
 
 ---
 

@@ -489,35 +489,6 @@ def version() -> None:
 
 
 @app.command()
-def commit(
-    message: Optional[str] = typer.Argument(None, help="Commit message"),
-    push: bool = typer.Option(True, "--push/--no-push", help="Push to remote"),
-) -> None:
-    """Manually trigger git commit and push."""
-    async def _commit():
-        from koda2.modules.git_manager import commit_now
-        
-        console.print("[cyan]Checking for changes to commit...[/cyan]")
-        result = await commit_now(message or "Manual commit via CLI")
-        
-        if result["committed"]:
-            console.print(f"[green]✓ Committed:[/green] {result.get('message', '').split(chr(10))[0]}")
-            if push and result.get("pushed"):
-                console.print("[green]✓ Pushed to remote[/green]")
-            elif push:
-                console.print("[yellow]⚠ Could not push to remote[/yellow]")
-        else:
-            if result.get("reason") == "disabled":
-                console.print("[yellow]Auto-commit is disabled in .env[/yellow]")
-            elif result.get("reason") == "not_a_repo":
-                console.print("[red]Not a git repository[/red]")
-            else:
-                console.print("[yellow]No changes to commit[/yellow]")
-    
-    _async_run(_commit())
-
-
-@app.command()
 def chat(
     message: Optional[str] = typer.Argument(None, help="Message to send (if not provided, enters interactive mode)"),
     user_id: str = typer.Option("cli_user", "--user", "-u", help="User ID for the conversation"),
