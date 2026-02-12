@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
+from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from koda2.logging_config import get_logger
@@ -775,6 +778,65 @@ async def create_account(request: AccountCreateRequest) -> AccountResponse:
     )
 
 
+# ── Combined Exchange Account (Calendar + Email) ─────────────────────
+
+
+class ExchangeAccountRequest(BaseModel):
+    """Request to create combined Exchange calendar + email accounts."""
+    name: str
+    server: str
+    username: str
+    password: str
+    email: str
+    is_default: bool = True
+
+
+@router.post("/accounts/exchange")
+async def create_exchange_accounts(request: ExchangeAccountRequest) -> dict[str, Any]:
+    """Create both calendar and email accounts for Exchange in one step."""
+    from koda2.modules.account.models import AccountType, ProviderType
+    from koda2.modules.account.service import AccountService
+    from koda2.modules.account.validators import validate_ews_credentials
+
+    # Validate credentials once
+    valid, error = await validate_ews_credentials(
+        request.server, request.username, request.password, request.email,
+    )
+    if not valid:
+        raise HTTPException(400, f"Exchange connection failed: {error}")
+
+    service = AccountService()
+    creds = {
+        "server": request.server,
+        "username": request.username,
+        "password": request.password,
+        "email": request.email,
+    }
+    created = []
+
+    # Create calendar account
+    cal = await service.create_account(
+        name=f"{request.name} (Calendar)",
+        account_type=AccountType.CALENDAR,
+        provider=ProviderType.EWS,
+        credentials=creds,
+        is_default=request.is_default,
+    )
+    created.append({"id": cal.id, "name": cal.name, "type": "calendar"})
+
+    # Create email account
+    mail = await service.create_account(
+        name=f"{request.name} (Email)",
+        account_type=AccountType.EMAIL,
+        provider=ProviderType.EWS,
+        credentials=creds,
+        is_default=request.is_default,
+    )
+    created.append({"id": mail.id, "name": mail.name, "type": "email"})
+
+    return {"status": "ok", "accounts": created}
+
+
 @router.patch("/accounts/{account_id}")
 async def update_account(account_id: str, request: AccountUpdateRequest) -> AccountResponse:
     """Update an existing account."""
@@ -870,3 +932,123 @@ async def set_default_account(account_id: str) -> AccountResponse:
         is_default=account.is_default,
         created_at=account.created_at.isoformat() if account.created_at else "",
     )
+
+
+# ── Google Workspace OAuth ────────────────────────────────────────────
+
+GOOGLE_SCOPES = [
+    "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/gmail.modify",
+]
+GOOGLE_CREDS_PATH = Path("config/google_credentials.json")
+GOOGLE_TOKEN_PATH = Path("config/google_token.json")
+
+
+@router.post("/google/upload-credentials")
+async def upload_google_credentials(file: UploadFile = File(...)) -> dict[str, Any]:
+    """Upload Google OAuth2 credentials JSON file."""
+    content = await file.read()
+
+    # Validate JSON
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "Invalid JSON file")
+
+    if "installed" not in data and "web" not in data:
+        raise HTTPException(400, "Invalid credentials file: missing 'installed' or 'web' section")
+
+    client_config = data.get("installed") or data.get("web")
+    required = ["client_id", "client_secret", "auth_uri", "token_uri"]
+    missing = [f for f in required if f not in client_config]
+    if missing:
+        raise HTTPException(400, f"Missing required fields: {', '.join(missing)}")
+
+    # Save to config directory
+    GOOGLE_CREDS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GOOGLE_CREDS_PATH.write_bytes(content)
+
+    return {"status": "ok", "message": "Credentials file saved", "path": str(GOOGLE_CREDS_PATH)}
+
+
+@router.get("/google/auth-url")
+async def get_google_auth_url() -> dict[str, Any]:
+    """Generate Google OAuth2 authorization URL for web-based login."""
+    if not GOOGLE_CREDS_PATH.exists():
+        raise HTTPException(400, "Upload Google credentials JSON first")
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+
+        flow = Flow.from_client_secrets_file(
+            str(GOOGLE_CREDS_PATH),
+            scopes=GOOGLE_SCOPES,
+            redirect_uri="http://localhost:8000/api/google/oauth-callback",
+        )
+        auth_url, state = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+        )
+        return {"auth_url": auth_url, "state": state}
+    except ImportError:
+        raise HTTPException(500, "Google auth libraries not installed (pip install google-auth-oauthlib)")
+    except Exception as e:
+        raise HTTPException(500, f"Failed to generate auth URL: {e}")
+
+
+@router.get("/google/oauth-callback")
+async def google_oauth_callback(code: str = Query(...), state: str = Query(None)):
+    """Handle Google OAuth2 callback — exchange code for token and save."""
+    if not GOOGLE_CREDS_PATH.exists():
+        raise HTTPException(400, "Credentials file not found")
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+
+        flow = Flow.from_client_secrets_file(
+            str(GOOGLE_CREDS_PATH),
+            scopes=GOOGLE_SCOPES,
+            redirect_uri="http://localhost:8000/api/google/oauth-callback",
+        )
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+
+        # Save token
+        GOOGLE_TOKEN_PATH.parent.mkdir(parents=True, exist_ok=True)
+        GOOGLE_TOKEN_PATH.write_text(creds.to_json())
+
+        # Auto-create Google accounts (calendar + email)
+        from koda2.modules.account.models import AccountType, ProviderType
+        from koda2.modules.account.service import AccountService
+
+        service = AccountService()
+        google_creds = {
+            "credentials_file": str(GOOGLE_CREDS_PATH),
+            "token_file": str(GOOGLE_TOKEN_PATH),
+        }
+
+        # Check if Google accounts already exist to avoid duplicates
+        existing = await service.get_accounts(provider=ProviderType.GOOGLE)
+        if not existing:
+            await service.create_account(
+                name="Google (Calendar)",
+                account_type=AccountType.CALENDAR,
+                provider=ProviderType.GOOGLE,
+                credentials=google_creds,
+                is_default=True,
+            )
+            await service.create_account(
+                name="Google (Email)",
+                account_type=AccountType.EMAIL,
+                provider=ProviderType.GOOGLE,
+                credentials=google_creds,
+                is_default=True,
+            )
+
+        # Redirect back to dashboard accounts page
+        return RedirectResponse(url="/dashboard?section=accounts&google=connected")
+    except ImportError:
+        raise HTTPException(500, "Google auth libraries not installed")
+    except Exception as e:
+        raise HTTPException(500, f"OAuth callback failed: {e}")

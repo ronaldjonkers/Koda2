@@ -28,13 +28,32 @@ def _get_error(result: tuple[bool, str]) -> str:
     return result[1]
 
 
+def _normalize_ews_server(server: str) -> str:
+    """Normalize an EWS server input to just the hostname.
+    
+    exchangelib expects a plain hostname (e.g. 'exchange.company.com'),
+    not a full URL. This strips https://, paths like /EWS/Exchange.asmx, etc.
+    """
+    s = server.strip()
+    # Remove protocol prefix
+    for prefix in ("https://", "http://"):
+        if s.lower().startswith(prefix):
+            s = s[len(prefix):]
+            break
+    # Remove path (e.g. /EWS/Exchange.asmx)
+    s = s.split("/")[0]
+    # Remove port if present
+    s = s.split(":")[0]
+    return s
+
+
 async def validate_ews_credentials(
     server: str, username: str, password: str, email: str
 ) -> tuple[bool, str]:
     """Validate Exchange Web Services credentials.
     
     Args:
-        server: EWS server URL
+        server: EWS server hostname or URL (will be normalized to hostname)
         username: Username for authentication
         password: Password for authentication
         email: Email address for the account
@@ -42,12 +61,16 @@ async def validate_ews_credentials(
     Returns:
         Tuple of (success, error_message_or_empty)
     """
+    hostname = _normalize_ews_server(server)
+    if not hostname:
+        return (False, "Server hostname is required.")
+    
     try:
         from exchangelib import Account, Configuration, Credentials
 
         def _test_connection() -> bool:
             creds = Credentials(username, password)
-            config = Configuration(server=server, credentials=creds)
+            config = Configuration(server=hostname, credentials=creds)
             account = Account(email, config=config, autodiscover=False)
             # Try to access the calendar to validate credentials
             _ = account.calendar

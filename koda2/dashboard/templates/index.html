@@ -362,33 +362,30 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
         <select id="acc-provider" class="search-input" style="width:100%" onchange="updateAccFields()">
           <option value="">Select a provider...</option>
           <optgroup label="Google Workspace">
-            <option value="google|calendar">Google Calendar</option>
-            <option value="google|email">Google Gmail</option>
+            <option value="google">Google (Calendar + Gmail)</option>
           </optgroup>
           <optgroup label="Microsoft">
-            <option value="ews|calendar">Exchange Calendar (EWS)</option>
-            <option value="ews|email">Exchange Email (EWS)</option>
-            <option value="msgraph|calendar">Office 365 Calendar (Graph)</option>
-            <option value="msgraph|email">Office 365 Email (Graph)</option>
+            <option value="ews">Exchange (Calendar + Email)</option>
+            <option value="msgraph">Office 365 (Calendar + Email)</option>
           </optgroup>
           <optgroup label="Email">
-            <option value="imap|email">IMAP Email</option>
+            <option value="imap">IMAP/SMTP Email</option>
           </optgroup>
           <optgroup label="Calendar">
-            <option value="caldav|calendar">CalDAV (Apple/Nextcloud)</option>
+            <option value="caldav">CalDAV (Apple/Nextcloud)</option>
           </optgroup>
         </select>
       </div>
-      <div style="margin-bottom:12px">
+      <div id="acc-name-row" style="margin-bottom:12px">
         <label style="font-size:11px;color:var(--tx-2);display:block;margin-bottom:4px">Account Name</label>
-        <input id="acc-name" class="search-input" style="width:100%" placeholder="e.g. Work Email, Personal Calendar">
+        <input id="acc-name" class="search-input" style="width:100%" placeholder="e.g. Work Exchange, Personal Google">
       </div>
       <div id="acc-fields"></div>
-      <div style="display:flex;align-items:center;gap:10px;margin-top:12px">
-        <label style="font-size:11px;color:var(--tx-2);display:flex;align-items:center;gap:6px"><input type="checkbox" id="acc-default"> Set as default</label>
+      <div id="acc-default-row" style="display:flex;align-items:center;gap:10px;margin-top:12px">
+        <label style="font-size:11px;color:var(--tx-2);display:flex;align-items:center;gap:6px"><input type="checkbox" id="acc-default" checked> Set as default</label>
       </div>
       <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
-        <button class="btn btn-primary btn-sm" onclick="submitAccount()">Add Account</button>
+        <button class="btn btn-primary btn-sm" id="acc-submit-btn" onclick="submitAccount()">Add Account</button>
         <span id="acc-status" style="font-size:11px;color:var(--tx-2)"></span>
       </div>
     </div>
@@ -667,13 +664,9 @@ async function searchMemory() {
 
 /* ── Accounts ───────────────────────────────────────────── */
 const PROVIDER_FIELDS = {
-    google: [
-        { key:'credentials_file', label:'Credentials JSON path', placeholder:'config/google_credentials.json', def:'config/google_credentials.json' },
-        { key:'token_file', label:'Token file path', placeholder:'config/google_token.json', def:'config/google_token.json' },
-    ],
     ews: [
-        { key:'server', label:'EWS Server URL', placeholder:'https://mail.company.com/EWS/Exchange.asmx' },
-        { key:'username', label:'Username (DOMAIN\\\\user)', placeholder:'DOMAIN\\\\username' },
+        { key:'server', label:'Exchange Server Hostname', placeholder:'exchange.company.com' },
+        { key:'username', label:'Username (DOMAIN\\\\user or email)', placeholder:'DOMAIN\\\\username' },
         { key:'password', label:'Password', type:'password' },
         { key:'email', label:'Email address', placeholder:'user@company.com' },
     ],
@@ -701,33 +694,123 @@ function showAddAccount() { $('acc-form-panel').style.display = ''; $('acc-statu
 function hideAddAccount() { $('acc-form-panel').style.display = 'none'; }
 
 function updateAccFields() {
-    const val = $('acc-provider').value;
-    if (!val) { $('acc-fields').innerHTML = ''; return; }
-    const [provider] = val.split('|');
+    const provider = $('acc-provider').value;
+    if (!provider) { $('acc-fields').innerHTML = ''; return; }
+
+    // Google uses a special OAuth flow — show upload + login button
+    if (provider === 'google') {
+        $('acc-name-row').style.display = 'none';
+        $('acc-default-row').style.display = 'none';
+        $('acc-submit-btn').style.display = 'none';
+        $('acc-fields').innerHTML = `
+            <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px;margin-bottom:12px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:8px">Step 1: Upload Google OAuth Credentials</div>
+                <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
+                    Download your OAuth2 credentials JSON from
+                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>.
+                    Enable <b>Google Calendar API</b> and <b>Gmail API</b>, then create an OAuth 2.0 Client ID (type: Web application).
+                    Add <code>http://localhost:8000/api/google/oauth-callback</code> as an authorized redirect URI.
+                </p>
+                <div style="display:flex;gap:8px;align-items:center">
+                    <input type="file" id="google-creds-file" accept=".json" style="font-size:11px">
+                    <button class="btn btn-ghost btn-sm" onclick="uploadGoogleCreds()">Upload</button>
+                </div>
+                <span id="google-upload-status" style="font-size:11px;display:block;margin-top:6px"></span>
+            </div>
+            <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px">
+                <div style="font-size:12px;font-weight:600;margin-bottom:8px">Step 2: Sign in with Google</div>
+                <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
+                    After uploading credentials, click below to sign in. This will create both Calendar and Gmail accounts automatically.
+                </p>
+                <button class="btn btn-primary btn-sm" onclick="startGoogleOAuth()">Sign in with Google</button>
+                <span id="google-oauth-status" style="font-size:11px;margin-left:8px"></span>
+            </div>`;
+        return;
+    }
+
+    // All other providers: show normal credential fields
+    $('acc-name-row').style.display = '';
+    $('acc-default-row').style.display = '';
+    $('acc-submit-btn').style.display = '';
     const fields = PROVIDER_FIELDS[provider] || [];
-    $('acc-fields').innerHTML = fields.map(f => `
+    const note = provider === 'ews' ? '<p style="font-size:11px;color:var(--tx-2);margin-bottom:10px">Calendar and Email accounts will both be created automatically.</p>' : '';
+    const noteGraph = provider === 'msgraph' ? '<p style="font-size:11px;color:var(--tx-2);margin-bottom:10px">Calendar and Email accounts will both be created automatically.</p>' : '';
+    $('acc-fields').innerHTML = (note || noteGraph) + fields.map(f => `
         <div style="margin-bottom:10px">
             <label style="font-size:11px;color:var(--tx-2);display:block;margin-bottom:4px">${f.label}</label>
             <input class="search-input acc-cred" data-key="${f.key}" style="width:100%" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" value="${f.def || ''}">
         </div>`).join('');
 }
 
+async function uploadGoogleCreds() {
+    const fileInput = document.getElementById('google-creds-file');
+    const status = document.getElementById('google-upload-status');
+    if (!fileInput.files.length) { status.textContent = 'Select a file first'; status.style.color = 'var(--red)'; return; }
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    status.textContent = 'Uploading...'; status.style.color = 'var(--tx-2)';
+    try {
+        const r = await fetch('/api/google/upload-credentials', { method: 'POST', body: form });
+        if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Upload failed'); }
+        status.textContent = 'Credentials uploaded successfully!'; status.style.color = 'var(--green)';
+    } catch(e) {
+        status.textContent = e.message; status.style.color = 'var(--red)';
+    }
+}
+
+async function startGoogleOAuth() {
+    const status = document.getElementById('google-oauth-status');
+    status.textContent = 'Getting auth URL...'; status.style.color = 'var(--tx-2)';
+    try {
+        const r = await fetch('/api/google/auth-url');
+        if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Failed'); }
+        const d = await r.json();
+        window.location.href = d.auth_url;
+    } catch(e) {
+        status.textContent = e.message; status.style.color = 'var(--red)';
+    }
+}
+
 async function submitAccount() {
-    const val = $('acc-provider').value;
+    const provider = $('acc-provider').value;
     const name = $('acc-name').value.trim();
-    if (!val || !name) { $('acc-status').textContent = 'Select a provider and enter a name'; $('acc-status').style.color = 'var(--red)'; return; }
-    const [provider, accType] = val.split('|');
+    if (!provider || !name) { $('acc-status').textContent = 'Select a provider and enter a name'; $('acc-status').style.color = 'var(--red)'; return; }
+
     const creds = {};
     document.querySelectorAll('.acc-cred').forEach(el => { if (el.value.trim()) creds[el.dataset.key] = el.value.trim(); });
-    $('acc-status').textContent = 'Validating and saving...'; $('acc-status').style.color = 'var(--tx-2)';
+    $('acc-status').textContent = 'Validating and connecting...'; $('acc-status').style.color = 'var(--tx-2)';
+
     try {
-        const r = await fetch('/api/accounts', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name, account_type: accType, provider, credentials: creds, is_default: $('acc-default').checked })
-        });
+        let r;
+        if (provider === 'ews') {
+            // Combined Exchange endpoint — creates both calendar + email
+            r = await fetch('/api/accounts/exchange', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, server: creds.server, username: creds.username, password: creds.password, email: creds.email, is_default: $('acc-default').checked })
+            });
+        } else if (provider === 'msgraph') {
+            // Office 365 — create calendar + email separately
+            r = await fetch('/api/accounts', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name + ' (Calendar)', account_type: 'calendar', provider, credentials: creds, is_default: $('acc-default').checked })
+            });
+            if (r.ok) {
+                await fetch('/api/accounts', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name + ' (Email)', account_type: 'email', provider, credentials: creds, is_default: $('acc-default').checked })
+                });
+            }
+        } else {
+            // Single account (IMAP, CalDAV)
+            const accType = provider === 'caldav' ? 'calendar' : 'email';
+            r = await fetch('/api/accounts', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, account_type: accType, provider, credentials: creds, is_default: $('acc-default').checked })
+            });
+        }
         if (!r.ok) { const e = await r.json(); throw new Error(e.detail || 'Failed'); }
-        $('acc-status').textContent = 'Account added!'; $('acc-status').style.color = 'var(--green)';
-        setTimeout(() => { hideAddAccount(); loadAccounts(); }, 1000);
+        $('acc-status').textContent = 'Account(s) added!'; $('acc-status').style.color = 'var(--green)';
+        setTimeout(() => { hideAddAccount(); loadAccounts(); }, 1200);
     } catch(e) {
         $('acc-status').textContent = e.message; $('acc-status').style.color = 'var(--red)';
     }
@@ -763,6 +846,15 @@ async function loadAccounts() {
     } catch(e) {
         $('acc-list').innerHTML = '<div class="empty"><div class="empty-icon">👤</div><div class="empty-title">Could not load accounts</div></div>';
     }
+}
+
+// Auto-open accounts section if redirected from Google OAuth
+if (new URLSearchParams(window.location.search).get('google') === 'connected') {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    document.querySelector('[data-section="accounts"]')?.classList.add('active');
+    $('section-accounts')?.classList.add('active');
+    loadAccounts();
 }
 
 /* ── Scheduler ──────────────────────────────────────────── */
