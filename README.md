@@ -64,6 +64,24 @@ irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | i
 
 These one-liners automatically install **all** prerequisites (Homebrew, Python 3.12+, Node.js 18+, Git) and set up Koda2 completely. Supports macOS (Intel + Apple Silicon), Ubuntu/Debian, Fedora/RHEL/CentOS, Arch/Manjaro, openSUSE, Alpine, and Windows 10/11.
 
+### Update — One Line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash -s -- --update
+```
+
+Windows: `$env:KODA2_ACTION='update'; irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | iex`
+
+Checks all prerequisites, pulls latest code, updates Python + Node.js deps, migrates DB, adds new .env variables, runs tests.
+
+### Uninstall — One Line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.sh | bash -s -- --uninstall
+```
+
+Windows: `$env:KODA2_ACTION='uninstall'; irm https://raw.githubusercontent.com/ronaldjonkers/Koda2/main/get-koda2.ps1 | iex`
+
 ### Custom install location
 
 ```bash

@@ -22,14 +22,65 @@ logger = get_logger(__name__)
 
 _orchestrator: Orchestrator | None = None
 
+BLUE = "\033[0;34m"
+GREEN = "\033[0;32m"
+CYAN = "\033[0;36m"
+DIM = "\033[2m"
+BOLD = "\033[1m"
+NC = "\033[0m"
+
+
+def _print_banner(settings) -> None:
+    """Print the Koda2 startup banner."""
+    print(f"""
+{BOLD}{BLUE}  ██╗  ██╗ ██████╗ ██████╗  █████╗ ██████╗
+  ██║ ██╔╝██╔═══██╗██╔══██╗██╔══██╗╚════██╗
+  █████╔╝ ██║   ██║██║  ██║███████║ █████╔╝
+  ██╔═██╗ ██║   ██║██║  ██║██╔══██║██╔═══╝
+  ██║  ██╗╚██████╔╝██████╔╝██║  ██║███████╗
+  ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝{NC}
+
+  {DIM}Professional AI Executive Assistant — v{__version__}{NC}
+""")
+
+
+def _print_status(settings, orch: Orchestrator) -> None:
+    """Print the system status after startup."""
+    llm = ", ".join(str(p) for p in orch.llm.available_providers) or "none"
+    cal = ", ".join(str(p) for p in orch.calendar.active_providers) or "none"
+    plugins = len(orch.self_improve.list_plugins())
+    tasks = len(orch.scheduler.list_tasks())
+    tg = "✔ enabled" if orch.telegram.is_configured else "✘ disabled"
+    wa = "✔ enabled" if orch.whatsapp.is_configured else "✘ disabled"
+
+    print(f"""  {BOLD}{GREEN}╔══════════════════════════════════════════════════╗
+  ║  🚀 Koda2 is running!                           ║
+  ╚══════════════════════════════════════════════════╝{NC}
+
+  {CYAN}▸{NC} Environment:  {BOLD}{settings.koda2_env}{NC}
+  {CYAN}▸{NC} API:          {BOLD}http://{settings.api_host}:{settings.api_port}{NC}
+  {CYAN}▸{NC} API docs:     {DIM}http://localhost:{settings.api_port}/docs{NC}
+  {CYAN}▸{NC} LLM:          {llm}
+  {CYAN}▸{NC} Calendar:     {cal}
+  {CYAN}▸{NC} Telegram:     {tg}
+  {CYAN}▸{NC} WhatsApp:     {wa}
+  {CYAN}▸{NC} Plugins:      {plugins} loaded
+  {CYAN}▸{NC} Scheduled:    {tasks} tasks
+""")
+    if orch.whatsapp.is_configured:
+        print(f"  {BOLD}📱 WhatsApp:{NC} Scan QR at {DIM}http://localhost:{settings.api_port}/api/whatsapp/qr{NC}")
+        print()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup and shutdown lifecycle."""
     global _orchestrator
+    settings = get_settings()
+
+    _print_banner(settings)
     logger.info("koda2_starting", version=__version__)
 
-    settings = get_settings()
     settings.data_dir
     settings.logs_dir
 
@@ -45,6 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     asyncio.create_task(_start_messaging(_orchestrator))
     asyncio.create_task(_start_whatsapp(_orchestrator))
 
+    _print_status(settings, _orchestrator)
     logger.info(
         "koda2_ready",
         version=__version__,
@@ -55,12 +107,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    print(f"\n  {DIM}🛑 Koda2 shutting down...{NC}")
     logger.info("koda2_shutting_down")
     if _orchestrator:
         await _orchestrator.telegram.stop()
         await _orchestrator.whatsapp.stop()
         await _orchestrator.scheduler.stop()
     await close_db()
+    print(f"  {GREEN}✔{NC} Koda2 stopped. Goodbye! 👋\n")
     logger.info("koda2_stopped")
 
 

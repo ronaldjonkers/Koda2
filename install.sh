@@ -11,23 +11,35 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
-info()  { echo -e "${BLUE}[INFO]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
+info()  { echo -e "  ${CYAN}▸${NC} $*"; }
+ok()    { echo -e "  ${GREEN}✔${NC} $*"; }
+warn()  { echo -e "  ${YELLOW}⚠${NC}  $*"; }
+fail()  { echo -e "  ${RED}✘${NC} $*"; exit 1; }
+step()  { echo -e "\n${BOLD}${BLUE}━━━ $* ━━━${NC}"; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo ""
-echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
-echo -e "${BLUE}       Koda2 — Installation                       ${NC}"
-echo -e "${BLUE}═══════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${BLUE}"
+echo "  ██╗  ██╗ ██████╗ ██████╗  █████╗ ██████╗ "
+echo "  ██║ ██╔╝██╔═══██╗██╔══██╗██╔══██╗╚════██╗"
+echo "  █████╔╝ ██║   ██║██║  ██║███████║ █████╔╝"
+echo "  ██╔═██╗ ██║   ██║██║  ██║██╔══██║██╔═══╝ "
+echo "  ██║  ██╗╚██████╔╝██████╔╝██║  ██║███████╗"
+echo "  ╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝"
+echo -e "${NC}"
+echo -e "  ${DIM}Professional AI Executive Assistant${NC}"
+echo -e "  ${MAGENTA}▶ Installing...${NC}"
 echo ""
 
-# ── 1. Detect OS & distro ───────────────────────────────────────────
+step "🔍 Detecting platform"
 OS="$(uname -s)"
 DISTRO="unknown"
 PKG_MGR=""
@@ -63,9 +75,9 @@ case "$OS" in
         fail "Unsupported OS: $OS. Use install.ps1 for Windows."
         ;;
 esac
-info "Platform: $PLATFORM ($DISTRO), package manager: ${PKG_MGR:-none}"
+info "Platform: ${BOLD}$PLATFORM${NC} ($DISTRO), pkg: ${PKG_MGR:-none}"
 
-# ── 2. Install Homebrew on macOS if missing ──────────────────────────
+step "🍺 Homebrew (macOS)"
 if [ "$PLATFORM" = "macos" ]; then
     if ! command -v brew &>/dev/null; then
         info "Installing Homebrew..."
@@ -80,7 +92,7 @@ if [ "$PLATFORM" = "macos" ]; then
     fi
 fi
 
-# ── 3. Install system dependencies ──────────────────────────────────
+step "📦 System dependencies"
 install_system_deps() {
     case "$PLATFORM" in
         macos)
@@ -143,7 +155,7 @@ install_system_deps() {
 
 install_system_deps
 
-# ── 4. Find Python 3.12+ ────────────────────────────────────────────
+step "🐍 Python 3.12+"
 PYTHON=""
 for candidate in python3.13 python3.12 python3; do
     if command -v "$candidate" &>/dev/null; then
@@ -158,14 +170,14 @@ for candidate in python3.13 python3.12 python3; do
 done
 
 [ -z "$PYTHON" ] && fail "Python 3.12+ not found after installation. Please install manually."
-ok "Python: $($PYTHON --version)"
+ok "Python: $($PYTHON --version) 🐍"
 
-# ── 5. Check Node.js (for WhatsApp bridge) ──────────────────────────
+step "📦 Node.js (WhatsApp bridge)"
 if command -v node &>/dev/null; then
     NODE_VER=$(node -v | sed 's/v//')
     NODE_MAJOR=$(echo "$NODE_VER" | cut -d. -f1)
     if [ "$NODE_MAJOR" -ge 18 ]; then
-        ok "Node.js: v$NODE_VER"
+        ok "Node.js v$NODE_VER 📦"
     else
         warn "Node.js $NODE_VER found, but 18+ recommended for WhatsApp bridge"
     fi
@@ -178,7 +190,7 @@ else
     fi
 fi
 
-# ── 6. Create virtual environment ───────────────────────────────────
+step "🐍 Virtual environment"
 if [ ! -d ".venv" ]; then
     info "Creating virtual environment..."
     $PYTHON -m venv .venv
@@ -189,7 +201,7 @@ fi
 
 source .venv/bin/activate
 
-# ── 7. Upgrade pip & install Koda2 ──────────────────────────────────
+step "⚙️  Installing Koda2"
 info "Upgrading pip..."
 pip install --upgrade pip --quiet
 
@@ -197,7 +209,7 @@ info "Installing Koda2 and dependencies..."
 pip install -e ".[dev]" --quiet
 ok "Dependencies installed"
 
-# ── 8. Install WhatsApp bridge dependencies ─────────────────────────
+step "📱 WhatsApp bridge"
 WA_BRIDGE_DIR="koda2/modules/messaging/whatsapp_bridge"
 if command -v npm &>/dev/null && [ -f "$WA_BRIDGE_DIR/package.json" ]; then
     info "Installing WhatsApp bridge dependencies..."
@@ -206,13 +218,13 @@ if command -v npm &>/dev/null && [ -f "$WA_BRIDGE_DIR/package.json" ]; then
         warn "WhatsApp bridge npm install failed (can retry later)"
 fi
 
-# ── 9. Create directories ───────────────────────────────────────────
+step "📁 Directories"
 for dir in data data/chroma data/generated data/whatsapp_session logs config plugins templates; do
     mkdir -p "$dir"
 done
 ok "Directories created"
 
-# ── 10. Create .env if missing ──────────────────────────────────────
+step "🔐 Configuration"
 if [ ! -f ".env" ]; then
     cp .env.example .env
     info "Created .env from .env.example — please edit with your API keys"
@@ -220,7 +232,6 @@ else
     ok ".env file exists"
 fi
 
-# ── 11. Generate encryption key if not set ───────────────────────────
 if ! grep -q "KODA2_ENCRYPTION_KEY=." .env 2>/dev/null; then
     ENC_KEY=$(python -c "
 import base64, os
@@ -235,7 +246,6 @@ print(base64.urlsafe_b64encode(os.urandom(32)).decode())
     ok "Encryption key generated"
 fi
 
-# ── 12. Generate secret key if not set ───────────────────────────────
 if grep -q "KODA2_SECRET_KEY=change-me" .env 2>/dev/null; then
     SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
     sed -i.bak "s|KODA2_SECRET_KEY=change-me|KODA2_SECRET_KEY=$SECRET|" .env
@@ -243,7 +253,7 @@ if grep -q "KODA2_SECRET_KEY=change-me" .env 2>/dev/null; then
     ok "Secret key generated"
 fi
 
-# ── 13. Initialize database ─────────────────────────────────────────
+step "🗄️  Database"
 info "Initializing database..."
 python -c "
 import asyncio
@@ -251,14 +261,13 @@ from koda2.database import init_db
 asyncio.run(init_db())
 " 2>/dev/null && ok "Database initialized" || warn "Database init skipped (run manually if needed)"
 
-# ── 14. Check Docker (optional) ─────────────────────────────────────
+step "🔍 Optional services"
 if command -v docker &>/dev/null; then
     ok "Docker available: $(docker --version | head -1)"
 else
     warn "Docker not found — optional, only needed for containerized deployment"
 fi
 
-# ── 15. Check Redis (optional) ──────────────────────────────────────
 if command -v redis-cli &>/dev/null; then
     redis-cli ping &>/dev/null 2>&1 && ok "Redis running" || \
         warn "Redis installed but not running (optional)"
@@ -266,7 +275,7 @@ else
     warn "Redis not found (optional)"
 fi
 
-# ── 16. Run smoke test ──────────────────────────────────────────────
+step "🧪 Smoke test"
 info "Running smoke test..."
 python -c "
 from koda2.config import get_settings
@@ -275,10 +284,7 @@ print(f'  Environment: {s.koda2_env}')
 print(f'  Log level: {s.koda2_log_level}')
 " && ok "Config loads successfully"
 
-# ── 17. Offer to install as system service ──────────────────────────
-echo ""
-echo -e "${BLUE}── Service Installation (optional) ──${NC}"
-echo ""
+step "🔧 Service installation (optional)"
 
 install_service() {
     if [ "$PLATFORM" = "macos" ]; then
@@ -361,7 +367,6 @@ case "$INSTALL_SVC" in
         ;;
 esac
 
-# ── 18. Offer auto-start on boot ────────────────────────────────────
 read -rp "  Enable Koda2 to start automatically at boot/login? [y/N] " AUTO_START
 case "$AUTO_START" in
     [yY]|[yY][eE][sS])
@@ -371,7 +376,7 @@ case "$AUTO_START" in
                 sed -i.bak 's|<false/>|<true/>|' "$PLIST_PATH"
                 rm -f "${PLIST_PATH}.bak"
                 launchctl load "$PLIST_PATH" 2>/dev/null || true
-                ok "Koda2 will start at login"
+                ok "Koda2 will start at login 🚀"
             else
                 warn "Service not installed. Run installer again and choose to install the service first."
             fi
@@ -379,7 +384,7 @@ case "$AUTO_START" in
             if command -v systemctl &>/dev/null; then
                 systemctl --user enable koda2 2>/dev/null || true
                 sudo loginctl enable-linger "$USER" 2>/dev/null || true
-                ok "Koda2 will start at boot"
+                ok "Koda2 will start at boot 🚀"
             fi
         fi
         ;;
@@ -390,15 +395,22 @@ esac
 
 # ── Done ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}       Koda2 installed successfully!               ${NC}"
-echo -e "${GREEN}═══════════════════════════════════════════════════${NC}"
+echo -e "${BOLD}${GREEN}"
+echo "  ╔══════════════════════════════════════════════════╗"
+echo "  ║                                                  ║"
+echo "  ║   ✅  Koda2 installed successfully!              ║"
+echo "  ║                                                  ║"
+echo "  ╚══════════════════════════════════════════════════╝"
+echo -e "${NC}"
+echo -e "  ${BOLD}🚀 Start Koda2:${NC}"
+echo -e "     ${DIM}source .venv/bin/activate && koda2${NC}"
 echo ""
-echo "Next steps:"
-echo "  1. Run the interactive setup:  python setup_wizard.py"
-echo "  2. Start the server:           source .venv/bin/activate && koda2"
-echo "  3. Or via Docker:              docker compose up -d"
-echo "  4. WhatsApp: scan QR at        http://localhost:8000/api/whatsapp/qr"
+echo -e "  ${BOLD}⚙️  Configure:${NC}"
+echo -e "     ${DIM}source .venv/bin/activate && python setup_wizard.py${NC}"
 echo ""
-echo "API docs: http://localhost:8000/docs"
+echo -e "  ${BOLD}📱 WhatsApp:${NC}"
+echo -e "     ${DIM}http://localhost:8000/api/whatsapp/qr${NC}"
+echo ""
+echo -e "  ${BOLD}📖 API docs:${NC}"
+echo -e "     ${DIM}http://localhost:8000/docs${NC}"
 echo ""
