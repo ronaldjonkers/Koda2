@@ -547,7 +547,15 @@ class EmailService:
                 from googleapiclient.discovery import build
 
                 def _fetch():
-                    creds = Credentials.from_authorized_user_file(credentials["credentials_file"])
+                    # Use token_file (has OAuth token), not credentials_file (has client secrets)
+                    token_path = credentials.get("token_file", credentials.get("credentials_file"))
+                    creds = Credentials.from_authorized_user_file(token_path)
+                    # Refresh if expired
+                    if creds and creds.expired and creds.refresh_token:
+                        from google.auth.transport.requests import Request
+                        creds.refresh(Request())
+                        from pathlib import Path
+                        Path(token_path).write_text(creds.to_json())
                     service = build("gmail", "v1", credentials=creds, cache_discovery=False)
 
                     result = service.users().messages().list(
@@ -639,11 +647,17 @@ class EmailService:
         all_emails.extend(emails)
 
         # Gmail accounts
-        emails = await self.fetch_emails_gmail(max_results=limit)
+        gmail_query = "is:unread" if unread_only else ""
+        emails = await self.fetch_emails_gmail(query=gmail_query, max_results=limit)
         all_emails.extend(emails)
 
-        # Sort by date (newest first)
-        all_emails.sort(key=lambda e: e.date, reverse=True)
+        # Sort by date (newest first), handle mixed tz-aware/naive
+        def _sort_key(e):
+            d = e.date
+            if d and d.tzinfo is not None:
+                d = d.replace(tzinfo=None)
+            return d or dt.datetime.min
+        all_emails.sort(key=_sort_key, reverse=True)
         return all_emails[:limit]
 
     # ── Attachment Operations ────────────────────────────────────────

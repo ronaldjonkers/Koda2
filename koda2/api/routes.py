@@ -211,12 +211,14 @@ async def get_inbox(
     orch = get_orchestrator()
     from koda2.modules.email.models import EmailFilter
 
-    emails = await orch.email.fetch_emails(EmailFilter(unread_only=unread_only, limit=limit))
+    emails = await orch.email.fetch_all_emails(unread_only=unread_only, limit=limit)
     return [
         {
             "id": e.id, "subject": e.subject, "sender": e.sender,
-            "date": e.date.isoformat(), "is_read": e.is_read,
+            "date": e.date.isoformat() if e.date else "",
+            "is_read": e.is_read,
             "has_attachments": e.has_attachments,
+            "account": e.account_name or "",
         }
         for e in emails
     ]
