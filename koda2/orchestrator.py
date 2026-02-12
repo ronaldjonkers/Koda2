@@ -10,6 +10,7 @@ from koda2.config import get_settings
 from koda2.logging_config import get_logger
 from koda2.modules.account.service import AccountService
 from koda2.modules.calendar import CalendarEvent, CalendarService
+from koda2.modules.contacts import ContactSyncService
 from koda2.modules.documents import DocumentService
 from koda2.modules.email import EmailMessage, EmailService
 from koda2.modules.images import ImageService
@@ -23,28 +24,32 @@ from koda2.modules.git_manager import GitManagerService
 from koda2.modules.meetings import MeetingService
 from koda2.modules.messaging import TelegramBot, WhatsAppBot
 from koda2.modules.messaging.command_parser import create_command_parser
+from koda2.modules.proactive import ProactiveService
 from koda2.modules.scheduler import SchedulerService
 from koda2.modules.self_improve import SelfImproveService
 from koda2.modules.travel import TravelService
+from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
 
 logger = get_logger(__name__)
 
 SYSTEM_PROMPT = """You are Koda2, a professional AI executive assistant functioning as a 
-director-level secretary. You help manage calendars, emails, tasks, documents, and communications.
+director-level secretary. You help manage calendars, emails, tasks, documents, communications, and more.
 
 Your capabilities include:
 - Calendar management (Google Calendar, Exchange, Office 365, CalDAV)
-- Email (Gmail, Exchange, IMAP/SMTP) — read, send, and manage emails
-- File system access — read, write, list files and directories on the computer
+- Email (Gmail, Exchange, IMAP/SMTP) — read, send, with attachments
+- File system access — read, write, list files and directories
 - File sharing — send files via WhatsApp (media) or email (attachments)
-- Document creation (DOCX, XLSX, PDF, presentations) — saved to data/generated/
-- Image generation (DALL-E, Stability AI) and image analysis (vision)
-- Messaging (WhatsApp, Telegram) — send messages and files
+- Document creation (DOCX, XLSX, PDF, PPTX) — saved to data/generated/
+- Image generation (DALL-E, Stability AI) and analysis (GPT-4 Vision)
+- Video generation (Runway, Pika, Stable Video, HeyGen avatars)
+- Messaging (WhatsApp, Telegram) — send messages, files, media
 - Shell commands (macOS) — run terminal commands safely
-- Task scheduling and reminders
-- Contact lookup (macOS Contacts)
-- Memory — you remember previous conversations and can search them
+- Contact management — unified sync from macOS, WhatsApp, Gmail, Exchange
+- Task scheduling, reminders, and cronjobs
+- Proactive alerts — meeting warnings, urgent emails, suggestions
+- Memory — remember conversations, search history, learn preferences
 
 Available actions and their parameters:
 - run_shell: {"command": "...", "cwd": "/optional/path", "timeout": 30}
@@ -54,19 +59,29 @@ Available actions and their parameters:
 - file_exists: {"path": "/some/path"}
 - send_file: {"path": "/file.pdf", "channel": "whatsapp|email", "to": "recipient", "caption": "..."}
 - send_email: {"to": ["email@example.com"], "subject": "...", "body": "..."}
+- send_email_with_attachments: {"to": [...], "subject": "...", "body": "...", "attachments": [...]}
+- download_email_attachment: {"message_id": "...", "filename": "..."}
 - check_calendar: {"start": "ISO datetime", "end": "ISO datetime"}
 - schedule_meeting: {"title": "...", "start": "...", "end": "...", "location": "..."}
-- generate_document: {"type": "docx|xlsx|pdf", "filename": "...", "title": "...", "content": [...]}
-- generate_image: {"prompt": "..."}
+- generate_document: {"type": "docx|xlsx|pdf|pptx", "filename": "...", "title": "...", "content": [...]}
+- generate_image: {"prompt": "...", "size": "1024x1024"}
+- generate_video: {"prompt": "...", "duration": 4, "aspect_ratio": "16:9"}
+- analyze_image: {"image_url": "...", "prompt": "..."}
 - search_memory: {"query": "..."}
 - find_contact: {"name": "..."}
+- sync_contacts: {"force": false}
+- search_contacts: {"query": "...", "limit": 10}
+- download_whatsapp_media: {"media_url": "...", "filename": "..."}
+- get_proactive_alerts: {}
+- start_proactive_monitoring: {}
+- stop_proactive_monitoring: {}
 - create_reminder: {"title": "...", "notes": "..."}
 
 When the user gives you a request, determine the intent and required actions. Respond in JSON format:
 {
-    "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document, 
-              generate_image, analyze_image, create_reminder, find_contact, search_memory, 
-              send_file, run_command, read_file, write_file, list_directory, general_chat, unknown",
+    "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
+              generate_image, generate_video, analyze_image, create_reminder, find_contact, search_memory,
+              send_file, sync_contacts, run_command, read_file, write_file, list_directory, general_chat",
     "entities": {
         "any extracted entities like names, dates, times, subjects, etc."
     },
@@ -105,6 +120,22 @@ class Orchestrator:
         self.meetings = MeetingService(self.llm)
         self.expenses = ExpenseService(self.llm)
         self.facilities = FacilityService()
+        
+        # New services for complete coverage
+        self.contacts = ContactSyncService(
+            macos_service=self.macos,
+            whatsapp_bot=self.whatsapp,
+            account_service=self.account_service,
+            memory_service=self.memory,
+        )
+        self.video = VideoService()
+        self.proactive = ProactiveService(
+            calendar_service=self.calendar,
+            email_service=self.email,
+            contact_service=self.contacts,
+            memory_service=self.memory,
+            whatsapp_bot=self.whatsapp,
+        )
         
         # Create unified command parser and inject into messaging bots
         self.command_parser = create_command_parser(self)
@@ -384,6 +415,91 @@ class Orchestrator:
             description = params.get("description", "")
             path = await self.self_improve.generate_plugin(capability, description)
             return {"plugin_path": path, "status": "generated"}
+
+        # New Actions for Gaps
+        elif action_name == "send_email_with_attachments":
+            success = await self.email.send_email_with_attachments(
+                to=params.get("to", []),
+                subject=params.get("subject", ""),
+                body_text=params.get("body", ""),
+                body_html=params.get("body_html", ""),
+                attachment_paths=params.get("attachments", []),
+                cc=params.get("cc"),
+                bcc=params.get("bcc"),
+            )
+            return {"sent": success}
+
+        elif action_name == "download_email_attachment":
+            path = await self.email.download_attachment(
+                message_id=params.get("message_id", ""),
+                attachment_filename=params.get("filename", ""),
+                output_dir=params.get("output_dir", "data/attachments"),
+            )
+            return {"path": path}
+
+        elif action_name == "sync_contacts":
+            counts = await self.contacts.sync_all(force=params.get("force", False))
+            summary = await self.contacts.get_contact_summary()
+            return {"synced": counts, "summary": summary}
+
+        elif action_name == "search_contacts":
+            results = await self.contacts.search(
+                query=params.get("query", ""),
+                limit=params.get("limit", 10),
+            )
+            return [{"name": c.name, "phones": [p.number for p in c.phones],
+                     "emails": [e.address for e in c.emails], "sources": [s.value for s in c.sources]}
+                    for c in results]
+
+        elif action_name == "find_contact_unified":
+            name = params.get("name", entities.get("name", ""))
+            contact = await self.contacts.find_by_name(name)
+            if contact:
+                return {
+                    "name": contact.name,
+                    "phone": contact.get_primary_phone(),
+                    "email": contact.get_primary_email(),
+                    "company": contact.company,
+                    "has_whatsapp": contact.has_whatsapp(),
+                }
+            return None
+
+        elif action_name == "generate_video":
+            result = await self.video.generate(
+                prompt=params.get("prompt", ""),
+                image_path=params.get("image_path"),
+                provider=params.get("provider"),
+                duration=params.get("duration", 4),
+                aspect_ratio=params.get("aspect_ratio", "16:9"),
+                motion=params.get("motion", "medium"),
+            )
+            return {
+                "status": result.status.value,
+                "video_url": result.video_url,
+                "video_path": result.video_path,
+                "error": result.error_message,
+            }
+
+        elif action_name == "download_whatsapp_media":
+            path = await self.whatsapp.download_media(
+                media_url=params.get("media_url", ""),
+                output_dir=params.get("output_dir", "data/whatsapp_media"),
+                filename=params.get("filename"),
+            )
+            return {"path": path}
+
+        elif action_name == "get_proactive_alerts":
+            alerts = await self.proactive.get_active_alerts()
+            return [{"id": a.id, "type": a.type.value, "title": a.title,
+                     "message": a.message, "priority": a.priority.value} for a in alerts]
+
+        elif action_name == "start_proactive_monitoring":
+            await self.proactive.start()
+            return {"status": "started"}
+
+        elif action_name == "stop_proactive_monitoring":
+            await self.proactive.stop()
+            return {"status": "stopped"}
 
         else:
             logger.warning("unknown_action", action=action_name)

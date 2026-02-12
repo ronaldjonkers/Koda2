@@ -176,14 +176,14 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         self._token_file = token_file
         self._service = None
 
-    def _get_service(self):
-        """Lazy-init Google Calendar service."""
-        if self._service is not None:
-            return self._service
+    def _get_service(self, force_refresh: bool = False):
+        """Lazy-init Google Calendar service with automatic token refresh.
+        
+        Args:
+            force_refresh: If True, refresh the token even if it appears valid.
+        """
         from pathlib import Path
-
         from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from google.auth.transport.requests import Request
         from googleapiclient.discovery import build
 
@@ -194,23 +194,44 @@ class GoogleCalendarProvider(BaseCalendarProvider):
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/drive.file",
         ]
-        creds = None
+
         token_path = Path(self._token_file)
+        needs_rebuild = force_refresh or self._service is None
+
+        if not needs_rebuild:
+            return self._service
+
+        creds = None
         if token_path.exists():
             creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
+                print("[Google] Refreshing expired token...")
                 creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    self._credentials_file, SCOPES
+                token_path.write_text(creds.to_json())
+                print("[Google] Token refreshed and saved")
+            elif not creds:
+                raise RuntimeError(
+                    "Google token not found. Re-authenticate via dashboard."
                 )
-                creds = flow.run_local_server(port=0)
-            token_path.parent.mkdir(parents=True, exist_ok=True)
-            token_path.write_text(creds.to_json())
+            else:
+                raise RuntimeError(
+                    "Google token expired and no refresh token. Re-authenticate via dashboard."
+                )
 
         self._service = build("calendar", "v3", credentials=creds)
         return self._service
+
+    async def refresh_token(self) -> bool:
+        """Proactively refresh the Google OAuth token to keep it alive."""
+        try:
+            self._service = None  # Force rebuild
+            self._get_service(force_refresh=True)
+            return True
+        except Exception as exc:
+            print(f"[Google] Token refresh failed: {exc}")
+            return False
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def list_events(
@@ -219,46 +240,66 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         import asyncio
 
         service = self._get_service()
-        cal_id = calendar_name or "primary"
 
         def _fetch():
-            result = service.events().list(
-                calendarId=cal_id,
-                timeMin=start.isoformat() + "Z",
-                timeMax=end.isoformat() + "Z",
-                singleEvents=True,
-                orderBy="startTime",
-            ).execute()
-            events = []
-            for item in result.get("items", []):
-                s = item.get("start", {})
-                e = item.get("end", {})
-                start_dt = dt.datetime.fromisoformat(
-                    s.get("dateTime", s.get("date", "")).replace("Z", "+00:00")
-                )
-                end_dt = dt.datetime.fromisoformat(
-                    e.get("dateTime", e.get("date", "")).replace("Z", "+00:00")
-                )
-                attendees = [
-                    Attendee(email=a["email"], name=a.get("displayName", ""),
-                             status=a.get("responseStatus", "needsAction"))
-                    for a in item.get("attendees", [])
-                ]
-                events.append(CalendarEvent(
-                    provider=CalendarProvider.GOOGLE,
-                    provider_id=item["id"],
-                    title=item.get("summary", ""),
-                    description=item.get("description", ""),
-                    location=item.get("location", ""),
-                    start=start_dt,
-                    end=end_dt,
-                    attendees=attendees,
-                    organizer=item.get("organizer", {}).get("email", ""),
-                    is_online="hangoutLink" in item,
-                    meeting_url=item.get("hangoutLink", ""),
-                    calendar_name=cal_id,
-                ))
-            return events
+            # If a specific calendar is requested, use it; otherwise fetch from ALL calendars
+            if calendar_name:
+                cal_ids = [calendar_name]
+            else:
+                cal_list = service.calendarList().list().execute()
+                cal_ids = [c["id"] for c in cal_list.get("items", [])]
+                if not cal_ids:
+                    cal_ids = ["primary"]
+
+            all_events = []
+            for cal_id in cal_ids:
+                try:
+                    # Get calendar display name
+                    cal_summary = cal_id
+                    try:
+                        cal_info = service.calendarList().get(calendarId=cal_id).execute()
+                        cal_summary = cal_info.get("summary", cal_id)
+                    except Exception:
+                        pass
+
+                    result = service.events().list(
+                        calendarId=cal_id,
+                        timeMin=start.isoformat() + "Z",
+                        timeMax=end.isoformat() + "Z",
+                        singleEvents=True,
+                        orderBy="startTime",
+                    ).execute()
+                    for item in result.get("items", []):
+                        s = item.get("start", {})
+                        e = item.get("end", {})
+                        start_dt = dt.datetime.fromisoformat(
+                            s.get("dateTime", s.get("date", "")).replace("Z", "+00:00")
+                        )
+                        end_dt = dt.datetime.fromisoformat(
+                            e.get("dateTime", e.get("date", "")).replace("Z", "+00:00")
+                        )
+                        attendees = [
+                            Attendee(email=a["email"], name=a.get("displayName", ""),
+                                     status=a.get("responseStatus", "needsAction"))
+                            for a in item.get("attendees", [])
+                        ]
+                        all_events.append(CalendarEvent(
+                            provider=CalendarProvider.GOOGLE,
+                            provider_id=item["id"],
+                            title=item.get("summary", ""),
+                            description=item.get("description", ""),
+                            location=item.get("location", ""),
+                            start=start_dt,
+                            end=end_dt,
+                            attendees=attendees,
+                            organizer=item.get("organizer", {}).get("email", ""),
+                            is_online="hangoutLink" in item,
+                            meeting_url=item.get("hangoutLink", ""),
+                            calendar_name=cal_summary,
+                        ))
+                except Exception as exc:
+                    print(f"[Google Calendar] Error fetching from {cal_id}: {exc}")
+            return all_events
 
         return await asyncio.to_thread(_fetch)
 

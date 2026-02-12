@@ -146,6 +146,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     _background_tasks.append(asyncio.create_task(_start_messaging(_orchestrator)))
     _background_tasks.append(asyncio.create_task(_start_whatsapp(_orchestrator)))
+    _background_tasks.append(asyncio.create_task(_periodic_token_refresh(_orchestrator)))
 
     await _print_status(settings, _orchestrator)
     
@@ -420,6 +421,36 @@ async def _start_whatsapp(orch: Orchestrator) -> None:
         await orch.setup_whatsapp()
     except Exception as exc:
         logger.error("whatsapp_start_failed", error=str(exc))
+
+
+async def _periodic_token_refresh(orch: Orchestrator) -> None:
+    """Periodically refresh Google OAuth tokens to keep connections alive.
+    
+    Runs every 45 minutes (tokens expire after 60 minutes).
+    """
+    REFRESH_INTERVAL = 45 * 60  # 45 minutes
+    # Wait a bit before first refresh to let startup complete
+    await asyncio.sleep(60)
+
+    while True:
+        try:
+            # Refresh tokens for all Google calendar providers
+            for provider in orch.calendar._providers.values():
+                if hasattr(provider, 'refresh_token'):
+                    success = await provider.refresh_token()
+                    if success:
+                        logger.info("google_token_refreshed")
+                    else:
+                        logger.warning("google_token_refresh_failed")
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            logger.error("token_refresh_error", error=str(exc))
+
+        try:
+            await asyncio.sleep(REFRESH_INTERVAL)
+        except asyncio.CancelledError:
+            break
 
 
 # Create main FastAPI app first

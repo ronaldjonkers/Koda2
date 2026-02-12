@@ -948,6 +948,18 @@ GOOGLE_CREDS_PATH = Path("config/google_credentials.json")
 GOOGLE_TOKEN_PATH = Path("config/google_token.json")
 
 
+@router.get("/google/credentials-status")
+async def google_credentials_status() -> dict[str, Any]:
+    """Check if Google credentials and token files exist."""
+    has_creds = GOOGLE_CREDS_PATH.exists()
+    has_token = GOOGLE_TOKEN_PATH.exists()
+    return {
+        "has_credentials": has_creds,
+        "has_token": has_token,
+        "ready": has_creds and has_token,
+    }
+
+
 @router.post("/google/upload-credentials")
 async def upload_google_credentials(file: UploadFile = File(...)) -> dict[str, Any]:
     """Upload Google OAuth2 credentials JSON file."""

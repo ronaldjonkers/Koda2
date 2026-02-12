@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     image_provider: str = "openai"
     stability_api_key: str = ""
 
+    # ── Video Generation ─────────────────────────────────────────────
+    video_provider: str = "runway"
+    runway_api_key: str = ""
+    pika_api_key: str = ""
+    heygen_api_key: str = ""
+
     # ── Travel APIs ──────────────────────────────────────────────────
     amadeus_api_key: str = ""
     amadeus_api_secret: str = ""

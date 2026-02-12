@@ -697,34 +697,71 @@ function updateAccFields() {
     const provider = $('acc-provider').value;
     if (!provider) { $('acc-fields').innerHTML = ''; return; }
 
-    // Google uses a special OAuth flow — show upload + login button
+    // Google uses a special OAuth flow — check if credentials already exist
     if (provider === 'google') {
         $('acc-name-row').style.display = 'none';
         $('acc-default-row').style.display = 'none';
         $('acc-submit-btn').style.display = 'none';
-        $('acc-fields').innerHTML = `
-            <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px;margin-bottom:12px">
-                <div style="font-size:12px;font-weight:600;margin-bottom:8px">Step 1: Upload Google OAuth Credentials</div>
-                <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
-                    Download your OAuth2 credentials JSON from
-                    <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>.
-                    Enable <b>Google Calendar API</b> and <b>Gmail API</b>, then create an OAuth 2.0 Client ID (type: Web application).
-                    Add <code>http://localhost:8000/api/google/oauth-callback</code> as an authorized redirect URI.
-                </p>
-                <div style="display:flex;gap:8px;align-items:center">
-                    <input type="file" id="google-creds-file" accept=".json" style="font-size:11px">
-                    <button class="btn btn-ghost btn-sm" onclick="uploadGoogleCreds()">Upload</button>
-                </div>
-                <span id="google-upload-status" style="font-size:11px;display:block;margin-top:6px"></span>
-            </div>
-            <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px">
-                <div style="font-size:12px;font-weight:600;margin-bottom:8px">Step 2: Sign in with Google</div>
-                <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
-                    After uploading credentials, click below to sign in. This will create both Calendar and Gmail accounts automatically.
-                </p>
-                <button class="btn btn-primary btn-sm" onclick="startGoogleOAuth()">Sign in with Google</button>
-                <span id="google-oauth-status" style="font-size:11px;margin-left:8px"></span>
-            </div>`;
+        $('acc-fields').innerHTML = '<div style="font-size:11px;color:var(--tx-2)">Checking Google status...</div>';
+        // Check credentials status and show appropriate UI
+        fetch('/api/google/credentials-status').then(r => r.json()).then(status => {
+            const hasCreds = status.has_credentials;
+            const hasToken = status.has_token;
+            let html = '';
+            if (!hasCreds) {
+                html += `
+                <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px;margin-bottom:12px">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px">Step 1: Upload Google OAuth Credentials</div>
+                    <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
+                        Download your OAuth2 credentials JSON from
+                        <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>.
+                        Enable <b>Google Calendar API</b> and <b>Gmail API</b>, then create an OAuth 2.0 Client ID (type: Web application).
+                        Add <code>http://localhost:8000/api/google/oauth-callback</code> as an authorized redirect URI.
+                    </p>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input type="file" id="google-creds-file" accept=".json" style="font-size:11px">
+                        <button class="btn btn-ghost btn-sm" onclick="uploadGoogleCreds()">Upload</button>
+                    </div>
+                    <span id="google-upload-status" style="font-size:11px;display:block;margin-top:6px"></span>
+                </div>`;
+            } else {
+                html += `
+                <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px;margin-bottom:12px">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px">✔ Credentials uploaded</div>
+                    <p style="font-size:11px;color:var(--green);margin-bottom:4px">Google OAuth credentials file is already configured.</p>
+                    <p style="font-size:10px;color:var(--tx-2)">Want to replace it? <a href="#" onclick="event.preventDefault();document.getElementById('google-reupload').style.display=''">Upload new file</a></p>
+                    <div id="google-reupload" style="display:none;margin-top:8px">
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input type="file" id="google-creds-file" accept=".json" style="font-size:11px">
+                            <button class="btn btn-ghost btn-sm" onclick="uploadGoogleCreds()">Upload</button>
+                        </div>
+                        <span id="google-upload-status" style="font-size:11px;display:block;margin-top:6px"></span>
+                    </div>
+                </div>`;
+            }
+            if (hasToken) {
+                html += `
+                <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px">✔ Connected to Google</div>
+                    <p style="font-size:11px;color:var(--green);margin-bottom:8px">Google Calendar and Gmail are connected.</p>
+                    <button class="btn btn-ghost btn-sm" onclick="startGoogleOAuth()">Re-authenticate</button>
+                    <span id="google-oauth-status" style="font-size:11px;margin-left:8px"></span>
+                </div>`;
+            } else {
+                html += `
+                <div style="background:var(--bg-2);border-radius:var(--r-sm);padding:14px">
+                    <div style="font-size:12px;font-weight:600;margin-bottom:8px">${hasCreds ? 'Step 2' : 'Step 2'}: Sign in with Google</div>
+                    <p style="font-size:11px;color:var(--tx-2);margin-bottom:10px;line-height:1.5">
+                        ${hasCreds ? 'Click below to sign in.' : 'After uploading credentials, click below to sign in.'} This will create both Calendar and Gmail accounts automatically.
+                    </p>
+                    <button class="btn btn-primary btn-sm" onclick="startGoogleOAuth()"${hasCreds ? '' : ' disabled'}>Sign in with Google</button>
+                    <span id="google-oauth-status" style="font-size:11px;margin-left:8px"></span>
+                </div>`;
+            }
+            $('acc-fields').innerHTML = html;
+        }).catch(() => {
+            $('acc-fields').innerHTML = '<div style="color:var(--red);font-size:11px">Could not check Google status</div>';
+        });
         return;
     }
 

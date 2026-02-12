@@ -76,12 +76,23 @@ class AccountService:
     def _decrypt_credentials(self, encrypted_credentials: str) -> dict:
         """Decrypt credentials string back to a dictionary.
         
+        Handles both encrypted credentials and plain JSON (e.g. Google
+        accounts created via OAuth callback with direct DB insert).
+        
         Args:
-            encrypted_credentials: The encrypted credentials string.
+            encrypted_credentials: The encrypted or plain JSON credentials string.
             
         Returns:
             Decrypted credentials dictionary.
         """
+        # Try plain JSON first (Google OAuth accounts stored unencrypted)
+        try:
+            result = json.loads(encrypted_credentials)
+            if isinstance(result, dict):
+                return result
+        except (json.JSONDecodeError, TypeError):
+            pass
+        # Fall back to decryption
         json_str = decrypt(encrypted_credentials)
         return json.loads(json_str)
 
