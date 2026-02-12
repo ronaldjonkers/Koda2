@@ -112,13 +112,19 @@ class WhatsAppBot:
             "PATH": "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin",
         }
 
+        popen_kwargs: dict[str, Any] = {
+            "cwd": str(BRIDGE_DIR),
+            "env": env,
+            "stdout": sys.stdout,
+            "stderr": sys.stderr,
+        }
+        # Use a new process group on Unix so we can kill all children
+        if sys.platform != "win32":
+            popen_kwargs["preexec_fn"] = os.setsid
+
         self._bridge_process = subprocess.Popen(
             ["node", "bridge.js"],
-            cwd=str(BRIDGE_DIR),
-            env=env,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            preexec_fn=os.setsid,  # new process group so we can kill all children
+            **popen_kwargs,
         )
         logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)
 
@@ -290,26 +296,52 @@ class WhatsAppBot:
         """Process incoming message from the bridge callback.
 
         Only processes messages the user sends to themselves (self-chat).
+        The bridge already filters for self-messages, but we double-check here.
+        Self-message detection uses multiple strategies:
+          1. Bridge-side isToSelf flag (compares chat ID against own WID)
+          2. fromMe + msg.to === msg.from (classic check)
+          3. fromMe + chatId === myWid (reliable for "Message yourself" chat)
         """
         try:
-            # Log ALL incoming webhooks for debugging
+            from_me = payload.get("fromMe", False)
+            is_to_self = payload.get("isToSelf", False)
+            my_wid = payload.get("myWid")
+            chat_id = payload.get("chatId")
+            from_addr = payload.get("from", "unknown")
+            to_addr = payload.get("to", "unknown")
+
             logger.info(
                 "whatsapp_webhook_received",
-                from_me=payload.get("fromMe"),
-                is_to_self=payload.get("isToSelf"),
-                from_addr=payload.get("from", "unknown"),
+                from_me=from_me,
+                is_to_self=is_to_self,
+                from_addr=from_addr,
+                to_addr=to_addr,
+                my_wid=my_wid,
+                chat_id=chat_id,
                 body_preview=payload.get("body", "")[:50],
             )
-            
-            # Also print to console for immediate visibility
-            print(f"[WhatsApp Webhook] fromMe={payload.get('fromMe')}, isToSelf={payload.get('isToSelf')}, body='{payload.get('body', '')[:50]}...'")
 
-            if not payload.get("fromMe") or not payload.get("isToSelf"):
-                logger.debug("whatsapp_webhook_ignored_not_self_message")
+            # Robust self-message detection (multiple strategies)
+            is_self = is_to_self  # trust bridge-side detection first
+            if not is_self and from_me:
+                # Fallback: check if chat ID matches our own WID
+                if my_wid and chat_id and chat_id == my_wid:
+                    is_self = True
+                # Fallback: classic to === from check
+                elif to_addr == from_addr:
+                    is_self = True
+
+            if not from_me or not is_self:
+                logger.debug(
+                    "whatsapp_webhook_ignored",
+                    reason="not_self_message",
+                    from_me=from_me,
+                    is_self=is_self,
+                )
                 return None
 
             result = {
-                "from": payload.get("from", ""),
+                "from": from_addr,
                 "type": payload.get("type", "text"),
                 "timestamp": payload.get("timestamp", ""),
                 "text": payload.get("body", ""),
@@ -323,12 +355,10 @@ class WhatsAppBot:
                 text_length=len(result["text"]),
                 preview=result["text"][:100],
             )
-            print(f"[WhatsApp] Self-message received: {result['text'][:100]}...")
             return result
 
         except (KeyError, IndexError) as exc:
             logger.error("whatsapp_webhook_parse_error", error=str(exc))
-            print(f"[WhatsApp Error] Webhook parse error: {exc}")
             return None
 
     async def logout(self) -> dict[str, Any]:

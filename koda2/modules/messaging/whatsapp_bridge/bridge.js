@@ -78,8 +78,17 @@ client.on('disconnected', (reason) => {
 // Handle ALL messages including self-messages
 client.on('message_create', async (msg) => {
     const isFromMe = msg.fromMe;
-    const isToSelf = msg.to === msg.from;
     const chat = await msg.getChat();
+
+    // Detect self-message: compare the chat's remote JID against our own WID.
+    // In WhatsApp, "Message yourself" chat has your own number as the chat ID.
+    // msg.to === msg.from is NOT reliable for this.
+    const myWid = clientInfo ? clientInfo.wid : null;
+    const isToSelf = isFromMe && (
+        msg.to === msg.from ||
+        (myWid && (msg.to === myWid || msg.from === myWid)) ||
+        (myWid && chat.id && chat.id._serialized === myWid)
+    );
 
     const parsed = {
         id: msg.id._serialized,
@@ -93,10 +102,12 @@ client.on('message_create', async (msg) => {
         timestamp: msg.timestamp,
         chatName: chat.name || msg.from,
         hasMedia: msg.hasMedia,
+        myWid: myWid,
+        chatId: chat.id ? chat.id._serialized : null,
     };
 
     // Log ALL messages for debugging (including self-messages)
-    console.log(`[WhatsApp] Message from ${parsed.from} (${isFromMe ? 'me' : 'other'}, toSelf: ${isToSelf}): ${parsed.body.substring(0, 100)}`);
+    console.log(`[WhatsApp] msg from=${parsed.from} to=${parsed.to} myWid=${myWid} chatId=${parsed.chatId} fromMe=${isFromMe} isToSelf=${isToSelf}: ${(parsed.body || '').substring(0, 100)}`);
 
     // Queue for polling
     messageQueue.push(parsed);
@@ -106,7 +117,7 @@ client.on('message_create', async (msg) => {
 
     // Forward to Koda2 callback if it's a self-message (user messaging themselves)
     if (isFromMe && isToSelf) {
-        console.log(`[WhatsApp] Forwarding self-message to Koda2: ${parsed.body.substring(0, 50)}...`);
+        console.log(`[WhatsApp] Forwarding self-message to Koda2: ${(parsed.body || '').substring(0, 50)}...`);
         try {
             const resp = await fetch(CALLBACK_URL, {
                 method: 'POST',
@@ -142,10 +153,12 @@ client.on('message', async (msg) => {
         timestamp: msg.timestamp,
         chatName: chat.name || msg.from,
         hasMedia: msg.hasMedia,
+        myWid: clientInfo ? clientInfo.wid : null,
+        chatId: chat.id ? chat.id._serialized : null,
     };
 
     // Log incoming messages from others
-    console.log(`[WhatsApp] Incoming from ${parsed.from}: ${parsed.body.substring(0, 100)}`);
+    console.log(`[WhatsApp] Incoming from ${parsed.from}: ${(parsed.body || '').substring(0, 100)}`);
 
     // Queue for polling
     messageQueue.push(parsed);

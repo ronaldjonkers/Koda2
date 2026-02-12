@@ -238,6 +238,45 @@ class TestWhatsAppBot:
         assert result is None
 
     @pytest.mark.asyncio
+    async def test_process_webhook_self_chat_via_wid(self, whatsapp) -> None:
+        """Self-message detected via chatId matching myWid (Message yourself chat)."""
+        payload = {
+            "from": "31612345678@c.us",
+            "to": "status@broadcast",
+            "fromMe": True,
+            "isToSelf": False,
+            "body": "Note to self via Koda2",
+            "type": "chat",
+            "timestamp": 1707700000,
+            "chatName": "You",
+            "hasMedia": False,
+            "myWid": "31612345678@c.us",
+            "chatId": "31612345678@c.us",
+        }
+        result = await whatsapp.process_webhook(payload)
+        assert result is not None
+        assert result["text"] == "Note to self via Koda2"
+        assert result["is_self_message"] is True
+
+    @pytest.mark.asyncio
+    async def test_process_webhook_self_chat_via_to_equals_wid(self, whatsapp) -> None:
+        """Self-message detected via msg.to matching myWid."""
+        payload = {
+            "from": "some_other_id@c.us",
+            "to": "31612345678@c.us",
+            "fromMe": True,
+            "isToSelf": False,
+            "body": "Another self note",
+            "type": "chat",
+            "timestamp": 1707700000,
+            "myWid": "31612345678@c.us",
+            "chatId": "31612345678@c.us",
+        }
+        result = await whatsapp.process_webhook(payload)
+        assert result is not None
+        assert result["is_self_message"] is True
+
+    @pytest.mark.asyncio
     async def test_get_messages_empty(self, whatsapp) -> None:
         """get_messages returns empty when bridge is down."""
         with patch("httpx.AsyncClient") as mock_client:
