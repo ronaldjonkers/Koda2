@@ -52,8 +52,11 @@ async def validate_ews_credentials(
 ) -> tuple[bool, str]:
     """Validate Exchange Web Services credentials.
     
-    Uses direct HTTP requests instead of exchangelib to avoid NTLM
-    handshake issues. Tests the EWS endpoint with a simple SOAP request.
+    Uses httpx with httpx-ntlm for NTLM auth (requests_ntlm is broken
+    on Python 3.13 / modern urllib3). Falls back to basic auth if NTLM
+    is not available.
+    
+    Automatically tries DOMAIN\\username variants if plain username fails.
     
     Args:
         server: EWS server hostname or URL (will be normalized to hostname)
@@ -72,7 +75,7 @@ async def validate_ews_credentials(
 
     ews_url = f"https://{hostname}/EWS/Exchange.asmx"
 
-    # Simple SOAP request to resolve a folder (Inbox) — lightweight validation
+    # Simple SOAP request to resolve the user — lightweight validation
     soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
                xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
@@ -89,73 +92,63 @@ async def validate_ews_credentials(
 
     headers = {"Content-Type": "text/xml; charset=utf-8"}
 
-    # Try basic auth first, then NTLM via requests
-    # Basic auth
-    try:
-        print(f"[EWS] Testing basic auth against {ews_url}...")
-        async with httpx.AsyncClient(verify=True, timeout=15) as client:
-            resp = await client.post(
-                ews_url,
-                content=soap_body,
-                headers=headers,
-                auth=(username, password),
-            )
-        print(f"[EWS] Basic auth response: {resp.status_code}")
-        if resp.status_code == 200:
-            return (True, "")
-        elif resp.status_code == 401:
-            print("[EWS] Basic auth returned 401, trying NTLM...")
-        else:
-            print(f"[EWS] Basic auth returned {resp.status_code}: {resp.text[:200]}")
-    except Exception as exc:
-        print(f"[EWS] Basic auth error: {exc}")
+    # Build list of username variants to try
+    # If username already contains \ or @, use as-is; otherwise try domain variants
+    username_variants = [username]
+    if "\\" not in username and "@" not in username:
+        # Extract domain from email (e.g. "gosettle" from "r.jonkers@gosettle.com")
+        domain = email.split("@")[-1].split(".")[0].upper() if "@" in email else ""
+        # Extract domain from server hostname (e.g. "CMDZ" from "exchange.cmdz.com")
+        server_domain = hostname.split(".")[-2].upper() if "." in hostname else ""
+        if domain:
+            username_variants.insert(0, f"{domain}\\{username}")
+        if server_domain and server_domain != domain:
+            username_variants.append(f"{server_domain}\\{username}")
+        username_variants.append(email)
 
-    # NTLM auth via requests (synchronous, in thread)
+    # ── Try NTLM auth via httpx-ntlm (works with Python 3.13) ────────
     try:
-        import requests
-        from requests_ntlm import HttpNtlmAuth
+        from httpx_ntlm import HttpNtlmAuth
 
-        def _try_ntlm() -> tuple[bool, str]:
-            print(f"[EWS] Testing NTLM auth against {ews_url}...")
+        for user in username_variants:
             try:
-                resp = requests.post(
-                    ews_url,
-                    data=soap_body,
-                    headers=headers,
-                    auth=HttpNtlmAuth(username, password),
-                    timeout=15,
-                    verify=True,
-                )
-                print(f"[EWS] NTLM auth response: {resp.status_code}")
+                print(f"[EWS] Testing NTLM auth: {user} @ {ews_url}...")
+                auth = HttpNtlmAuth(user, password)
+                with httpx.Client(verify=True, timeout=15) as client:
+                    resp = client.post(ews_url, content=soap_body, headers=headers, auth=auth)
+                print(f"[EWS] NTLM response for {user}: {resp.status_code}")
                 if resp.status_code == 200:
+                    print(f"[EWS] ✅ Connected with NTLM ({user})")
                     return (True, "")
                 elif resp.status_code == 401:
-                    return (False, "Invalid username or password.")
-                else:
-                    return (False, f"EWS returned HTTP {resp.status_code}")
-            except requests.exceptions.Timeout:
-                return (False, "NTLM auth timed out. Server may not support NTLM.")
+                    continue
+            except httpx.TimeoutException:
+                print(f"[EWS] NTLM timeout for {user}")
+                continue
             except Exception as exc:
-                return (False, f"NTLM auth failed: {exc}")
-
-        result = await asyncio.wait_for(
-            asyncio.to_thread(_try_ntlm),
-            timeout=DEFAULT_TIMEOUT,
-        )
-        if result[0]:
-            return result
-        # If NTLM also failed with 401, return the auth error
-        if "invalid username" in result[1].lower() or "401" in result[1]:
-            return result
-    except asyncio.TimeoutError:
-        pass
+                print(f"[EWS] NTLM error for {user}: {exc}")
+                continue
     except ImportError:
-        print("[EWS] requests_ntlm not installed, skipping NTLM")
-    except Exception as exc:
-        print(f"[EWS] NTLM error: {exc}")
+        print("[EWS] httpx-ntlm not installed, skipping NTLM")
 
-    return (False, f"Could not connect to Exchange server at {hostname}. "
-            "Check hostname, username (try DOMAIN\\\\user or user@domain.com), and password.")
+    # ── Fallback: basic auth via httpx ────────────────────────────────
+    for user in username_variants:
+        try:
+            print(f"[EWS] Testing basic auth: {user} @ {ews_url}...")
+            async with httpx.AsyncClient(verify=True, timeout=15) as client:
+                resp = await client.post(
+                    ews_url, content=soap_body, headers=headers,
+                    auth=(user, password),
+                )
+            print(f"[EWS] Basic auth response for {user}: {resp.status_code}")
+            if resp.status_code == 200:
+                print(f"[EWS] ✅ Connected with basic auth ({user})")
+                return (True, "")
+        except Exception as exc:
+            print(f"[EWS] Basic auth error for {user}: {exc}")
+
+    return (False, f"Could not authenticate to Exchange server at {hostname}. "
+            "Check username (try DOMAIN\\\\user), password, and server hostname.")
 
 
 async def validate_google_credentials(
