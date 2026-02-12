@@ -29,11 +29,24 @@ def _get_cipher() -> AESGCM:
         key = AESGCM.generate_key(bit_length=256)
         logger.info("ephemeral_key_generated", key_b64=base64.urlsafe_b64encode(key).decode())
     else:
-        # Fix base64 padding if missing (common with copy-paste or env var issues)
-        padded = key_b64 + "=" * (-len(key_b64) % 4)
-        key = base64.urlsafe_b64decode(padded)
-        if len(key) != 32:
-            raise ValueError("KODA2_ENCRYPTION_KEY must be a 32-byte base64-encoded value")
+        # Try to decode the key from base64. If it fails, the key might be
+        # a raw string or invalid — generate a proper key and warn.
+        try:
+            padded = key_b64 + "=" * (-len(key_b64) % 4)
+            key = base64.urlsafe_b64decode(padded)
+            if len(key) != 32:
+                raise ValueError(f"Key is {len(key)} bytes, need 32")
+        except Exception as e:
+            logger.warning(
+                "encryption_key_invalid",
+                error=str(e),
+                msg="Generating new key. Update KODA2_ENCRYPTION_KEY in .env",
+            )
+            key = AESGCM.generate_key(bit_length=256)
+            new_key_b64 = base64.urlsafe_b64encode(key).decode()
+            logger.warning("new_encryption_key", key=new_key_b64)
+            print(f"\n⚠️  KODA2_ENCRYPTION_KEY is invalid. A new key was generated.")
+            print(f"   Update your .env file with:\n   KODA2_ENCRYPTION_KEY={new_key_b64}\n")
 
     _cipher = AESGCM(key)
     return _cipher

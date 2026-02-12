@@ -83,14 +83,14 @@ async def validate_ews_credentials(
             from exchangelib.transport import AUTH_TYPE_MAP
             import requests.auth
 
-            for auth_type_name in ("BASIC", "NTLM", None):
+            for auth_type_name in ("basic", "NTLM", None):
                 try:
                     config_kwargs = {
                         "server": hostname,
                         "credentials": creds,
                     }
-                    if auth_type_name == "BASIC":
-                        config_kwargs["auth_type"] = "BASIC"
+                    if auth_type_name == "basic":
+                        config_kwargs["auth_type"] = "basic"
                     elif auth_type_name == "NTLM":
                         config_kwargs["auth_type"] = "NTLM"
                     # else: let exchangelib auto-detect
