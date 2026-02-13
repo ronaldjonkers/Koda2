@@ -235,6 +235,7 @@ async def get_inbox(
             "is_read": e.is_read,
             "has_attachments": e.has_attachments,
             "account": e.account_name or "",
+            "provider": e.provider.value if e.provider else "unknown",
         }
         for e in emails
     ]

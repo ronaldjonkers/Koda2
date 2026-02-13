@@ -359,6 +359,7 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 <!-- ═══ EMAIL ═══════════════════════════════════════════ -->
 <section class="section" id="section-email">
   <div class="page-head"><h2>Email</h2><button class="btn btn-ghost btn-sm" onclick="loadEmail()">Refresh</button></div>
+  <div style="font-size:10px;color:var(--tx-3);padding:0 4px 6px" id="email-summary"></div>
   <div class="panel"><div class="panel-body tall" id="email-inbox"><div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Loading...</div></div></div></div>
 </section>
 
@@ -777,14 +778,26 @@ async function loadEmail() {
         if (emails.length === 0) {
             $('email-inbox').innerHTML = '<div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Inbox is empty</div></div>';
         } else {
-            $('email-inbox').innerHTML = emails.map(e => `
-                <div class="data-row" style="gap:8px">
+            // Count emails per account for summary
+            const acctCounts = {};
+            emails.forEach(e => { const a = e.account || 'unknown'; acctCounts[a] = (acctCounts[a] || 0) + 1; });
+            const acctSummary = Object.entries(acctCounts).map(([k,v]) => `${k}: ${v}`).join(' · ');
+            const unreadCount = emails.filter(e => !e.is_read).length;
+            const summaryEl = document.getElementById('email-summary');
+            if (summaryEl) summaryEl.textContent = `${emails.length} emails · ${unreadCount} unread · ${acctSummary}`;
+
+            $('email-inbox').innerHTML = emails.map(e => {
+                const provCls = {'gmail':'tag-red','ews':'tag-amber','imap_smtp':'tag-blue','office365':'tag-purple'}[e.provider] || 'tag-blue';
+                const acct = e.account ? `<span class="tag ${provCls}" style="font-size:8px;padding:0 4px;flex-shrink:0">${esc(e.account)}</span>` : '';
+                return `<div class="data-row" style="gap:8px">
                     <span style="width:6px;height:6px;border-radius:50%;background:${e.is_read ? 'var(--tx-3)' : 'var(--blue)'};flex-shrink:0"></span>
+                    ${acct}
                     <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:${e.is_read ? '400' : '500'}">${esc(e.subject || '(no subject)')}</span>
                     <span style="font-size:10px;color:var(--tx-2);flex-shrink:0">${esc((e.sender || '').split('@')[0])}</span>
                     <span style="font-size:10px;color:var(--tx-3);flex-shrink:0">${fmtDate(e.date)}</span>
                     ${e.has_attachments ? '<span style="font-size:11px">📎</span>' : ''}
-                </div>`).join('');
+                </div>`;
+            }).join('');
         }
     } catch(e) {
         $('email-inbox').innerHTML = '<div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Could not load inbox</div><p>Email may not be configured</p></div>';
