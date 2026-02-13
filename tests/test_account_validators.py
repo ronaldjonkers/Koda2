@@ -300,13 +300,12 @@ class TestValidateEWSCredentials:
     """Tests for validate_ews_credentials."""
 
     @pytest.mark.asyncio
-    async def test_import_error(self) -> None:
-        """Missing exchangelib returns appropriate error."""
+    async def test_unreachable_server(self) -> None:
+        """Unreachable EWS server returns appropriate error."""
         from koda2.modules.account.validators import validate_ews_credentials
 
-        with patch.dict("sys.modules", {"exchangelib": None}):
-            result = await validate_ews_credentials(
-                "https://ews.test.com", "user", "pass", "user@test.com"
-            )
-            assert result[0] is False
-            assert "exchangelib" in result[1].lower()
+        result = await validate_ews_credentials(
+            "https://ews.test.com", "user", "pass", "user@test.com"
+        )
+        assert result[0] is False
+        assert "authenticate" in result[1].lower() or "exchange" in result[1].lower()

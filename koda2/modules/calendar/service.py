@@ -167,19 +167,10 @@ class CalendarService:
         account_id: Optional[str] = None,
         calendar_name: Optional[str] = None,
     ) -> list[CalendarEvent]:
-        """List events — serves from local cache, falls back to live fetch."""
-        # Try cache first
-        try:
-            cached = await self._cache.get_events(start, end)
-            if cached:
-                return cached
-        except Exception as exc:
-            logger.warning("cache_read_failed", error=str(exc))
-
-        # Cache empty — do a live fetch and cache the results
+        """List events — always fetches live from all providers."""
         events = await self._fetch_events_live(start, end, account_id, calendar_name)
 
-        # Store in cache (non-blocking, best-effort)
+        # Update cache in the background (best-effort)
         if events:
             try:
                 accounts = await self.get_accounts()
@@ -365,9 +356,10 @@ class CalendarService:
         event: CalendarEvent,
         prep_minutes: int = 15,
         account_id: Optional[str] = None,
+        account_name: Optional[str] = None,
     ) -> tuple[CalendarEvent, Optional[CalendarEvent]]:
         """Create an event and optionally a prep-time block before it."""
-        created = await self.create_event(event, account_id)
+        created = await self.create_event(event, account_id, account_name)
 
         prep_event = None
         if prep_minutes > 0:
@@ -380,7 +372,7 @@ class CalendarService:
                     end=event.start,
                     calendar_name=event.calendar_name,
                 )
-                prep_event = await self.create_event(prep_event, account_id)
+                prep_event = await self.create_event(prep_event, account_id, account_name)
                 logger.info("prep_time_scheduled", minutes=prep_minutes, event_title=event.title)
 
         return created, prep_event

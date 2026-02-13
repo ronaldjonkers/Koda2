@@ -160,6 +160,11 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 .evt-info{flex:1;min-width:0}
 .evt-title{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .evt-loc{font-size:10px;color:var(--tx-2)}
+.evt-cal{font-size:9px;padding:1px 6px;border-radius:3px;font-weight:600;white-space:nowrap;flex-shrink:0}
+.evt-cal-google{background:var(--blue-dim);color:var(--blue)}
+.evt-cal-ews{background:var(--amber-dim);color:var(--amber)}
+.evt-cal-msgraph{background:var(--green-dim);color:var(--green)}
+.evt-cal-caldav{background:var(--bg-3);color:var(--tx-2)}
 
 /* ── Account rows ───────────────────────────────────────── */
 .acc{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--border)}
@@ -581,24 +586,34 @@ async function loadCalendar() {
         if (events.length === 0) {
             $('cal-events').innerHTML = '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No events in the next 7 days</div></div>';
         } else {
-            $('cal-events').innerHTML = events.map(e => `
-                <div class="evt">
+            $('cal-events').innerHTML = events.map(e => {
+                const prov = (e.provider || '').replace('CalendarProvider.','');
+                const calLabel = e.calendar_name || prov || '';
+                const provCls = prov.toLowerCase() || 'caldav';
+                return `<div class="evt">
                     <div class="evt-time">${fmtTime(e.start)}</div>
                     <div class="evt-info">
                         <div class="evt-title">${esc(e.title)}</div>
                         <div class="evt-loc">${fmtDate(e.start)}${e.location ? ' &middot; ' + esc(e.location) : ''}</div>
                     </div>
-                </div>`).join('');
+                    ${calLabel ? `<span class="evt-cal evt-cal-${provCls}">${esc(calLabel)}</span>` : ''}
+                </div>`;
+            }).join('');
         }
 
         // Dashboard upcoming events
         $('dash-events').innerHTML = events.length === 0
             ? '<div class="empty"><div class="empty-icon">📅</div><div class="empty-title">No upcoming events</div></div>'
-            : events.slice(0, 4).map(e => `
-                <div class="evt">
+            : events.slice(0, 4).map(e => {
+                const prov = (e.provider || '').replace('CalendarProvider.','');
+                const calLabel = e.calendar_name || prov || '';
+                const provCls = prov.toLowerCase() || 'caldav';
+                return `<div class="evt">
                     <div class="evt-time">${fmtTime(e.start)}</div>
                     <div class="evt-info"><div class="evt-title">${esc(e.title)}</div><div class="evt-loc">${fmtDate(e.start)}</div></div>
-                </div>`).join('');
+                    ${calLabel ? `<span class="evt-cal evt-cal-${provCls}">${esc(calLabel)}</span>` : ''}
+                </div>`;
+            }).join('');
 
         // Calendar list
         const entries = Object.entries(cals);

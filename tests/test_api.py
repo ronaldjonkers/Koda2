@@ -39,6 +39,7 @@ def mock_orchestrator():
     orch.email.imap_configured = AsyncMock(return_value=False)
     orch.email.smtp_configured = AsyncMock(return_value=False)
     orch.email.fetch_emails = AsyncMock(return_value=[])
+    orch.email.fetch_all_emails = AsyncMock(return_value=[])
     orch.email.send_email = AsyncMock(return_value=True)
 
     # Mock LLM

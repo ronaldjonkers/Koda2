@@ -50,6 +50,7 @@ class EventRequest(BaseModel):
     location: str = ""
     attendees: list[str] = Field(default_factory=list)
     prep_minutes: int = 15
+    account_name: str = ""  # Target a specific calendar account by name
 
 
 class EmailRequest(BaseModel):
@@ -200,7 +201,8 @@ async def create_event(request: EventRequest) -> dict[str, Any]:
         location=request.location,
         attendees=[Attendee(email=a) for a in request.attendees],
     )
-    created, prep = await orch.calendar.schedule_with_prep(event, request.prep_minutes)
+    account_name = request.account_name or None
+    created, prep = await orch.calendar.schedule_with_prep(event, request.prep_minutes, account_name=account_name)
     return {
         "event": {"id": created.id, "title": created.title, "provider_id": created.provider_id},
         "prep_event": {"id": prep.id, "title": prep.title} if prep else None,

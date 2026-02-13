@@ -53,6 +53,17 @@ Your capabilities include:
 - Proactive alerts — meeting warnings, urgent emails, suggestions
 - Memory — remember conversations, search history, learn preferences
 
+When a user asks you to send a file, document, or media:
+1. First check if you have access to the file path
+2. Use send_file action with the appropriate channel (whatsapp or email)
+3. For WhatsApp, the "to" parameter should be a phone number like "+31612345678"
+4. You can search contacts to find the right recipient if not specified
+
+Examples of file sending requests:
+- "Stuur dat rapport naar Jan" → use send_file to Jan's number
+- "Email deze PDF naar het team" → use send_email_with_attachments
+- "Deel deze foto op WhatsApp" → use send_file via whatsapp
+
 Available actions and their parameters:
 - run_shell: {"command": "...", "cwd": "/optional/path", "timeout": 30}
 - list_directory: {"path": "/some/path"}
@@ -87,13 +98,19 @@ When the user gives you a request, determine the intent and required actions. Re
               find_contact, search_memory, send_file, sync_contacts, run_command, read_file, 
               write_file, list_directory, general_chat",
     "entities": {
-        "any extracted entities like names, dates, times, subjects, etc."
+        "any extracted entities like names, dates, times, subjects, file paths, recipient names, etc."
     },
     "response": "A natural language response to the user",
     "actions": [
         {"action": "action_name", "params": {"key": "value"}}
     ]
 }
+
+If the user wants to send a file but doesn't specify a phone number or email:
+1. First use find_contact or search_contacts to locate the recipient
+2. Then use send_file with the found contact's phone/email
+
+If the user mentions sending/sharing/delivering a file, always use the send_file action.
 
 Be helpful, proactive, and concise. If you need clarification, ask in the response field.
 Always try to extract as much information as possible from the user's message."""
@@ -258,6 +275,60 @@ class Orchestrator:
                 "actions": [],
             }
 
+    def _clean_response_for_user(self, text: str) -> str:
+        """Clean LLM response for user display by removing JSON artifacts.
+        
+        This removes:
+        - JSON code blocks (```json {...}```)
+        - Standalone JSON objects that appear in the text
+        - Extracts just the 'response' field if the entire text is JSON
+        
+        Returns clean human-readable text.
+        """
+        if not text:
+            return text
+        
+        text = text.strip()
+        
+        # Case 1: Entire text is a JSON object - extract response field
+        if text.startswith("{") and text.endswith("}"):
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict) and "response" in data:
+                    return data["response"].strip()
+            except json.JSONDecodeError:
+                pass
+        
+        # Case 2: Text contains JSON code blocks - remove them
+        import re
+        
+        # Remove JSON markdown code blocks
+        text = re.sub(r'```json\s*\{.*?\}\s*```', '', text, flags=re.DOTALL)
+        text = re.sub(r'```\s*\{.*?\}\s*```', '', text, flags=re.DOTALL)
+        
+        # Remove standalone JSON objects (but keep surrounding text)
+        # This handles cases where JSON is embedded in natural language
+        def extract_json_response(match):
+            try:
+                data = json.loads(match.group(0))
+                if isinstance(data, dict) and "response" in data:
+                    return data["response"]
+            except:
+                pass
+            return ''
+        
+        # Replace JSON objects with their response field if available
+        text = re.sub(r'\{[^{}]*"response"[^{}]*\}', extract_json_response, text)
+        
+        # Clean up any remaining empty JSON objects
+        text = re.sub(r'\{\s*\}', '', text)
+        
+        # Clean up excessive whitespace
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = text.strip()
+        
+        return text
+
     async def _execute_action(
         self,
         user_id: str,
@@ -399,15 +470,35 @@ class Orchestrator:
             channel = params.get("channel", "whatsapp")
             to = params.get("to", "")
             caption = params.get("caption", "")
-            if channel == "whatsapp" and to:
+            
+            # If 'to' looks like a name rather than a phone/email, try to find contact
+            recipient = to
+            if to and channel == "whatsapp" and not to.startswith("+") and not to.isdigit():
+                # Try to find contact by name
+                contact = await self.contacts.find_by_name(to)
+                if contact and contact.get_primary_phone():
+                    recipient = contact.get_primary_phone()
+                    logger.info("resolved_contact_to_phone", name=to, phone=recipient)
+                else:
+                    return {"status": "error", "message": f"Could not find phone number for contact: {to}"}
+            elif to and channel == "email" and "@" not in to:
+                # Try to find contact by name for email
+                contact = await self.contacts.find_by_name(to)
+                if contact and contact.get_primary_email():
+                    recipient = contact.get_primary_email()
+                    logger.info("resolved_contact_to_email", name=to, email=recipient)
+                else:
+                    return {"status": "error", "message": f"Could not find email for contact: {to}"}
+            
+            if channel == "whatsapp" and recipient:
                 # Use send_file for local files (more reliable than file:// URLs)
                 result = await self.whatsapp.send_file(
-                    to, file_path, caption=caption,
+                    recipient, file_path, caption=caption,
                 )
                 return result
             elif channel == "email":
                 success = await self.email.send_email_with_attachments(
-                    to=params.get("to_email", [to]) if to else [],
+                    to=[recipient] if recipient else [],
                     subject=params.get("subject", "File from Koda2"),
                     body_text=caption or "See attached file.",
                     attachment_paths=[file_path],
@@ -618,6 +709,9 @@ class Orchestrator:
                 user_id = result.get("from", "whatsapp_user")
                 response = result["response"]
                 
+                # Clean response - remove any JSON artifacts
+                response = self._clean_response_for_user(response)
+                
                 # Send response
                 await self.whatsapp.send_typing(user_id)
                 logger.info("orchestrator_sending_whatsapp_reply_with_analysis", 
@@ -648,6 +742,9 @@ class Orchestrator:
         
         result = await self.process_message(user_id, text, channel="whatsapp")
         response = result.get("response", "")
+
+        # Clean response - remove any JSON artifacts before sending
+        response = self._clean_response_for_user(response)
 
         # Send the response back to the user's own chat
         if response:
@@ -725,6 +822,9 @@ Guidelines:
         try:
             llm_response = await self.llm.complete(request)
             response_text = llm_response.content
+            
+            # Clean response - remove any JSON artifacts
+            response_text = self._clean_response_for_user(response_text)
             
             # Store the response
             await self.memory.add_conversation(
