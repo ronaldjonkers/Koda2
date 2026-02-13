@@ -56,56 +56,131 @@ class MacOSService:
     # ── Apple Contacts ───────────────────────────────────────────────
 
     async def get_contacts(self, search: Optional[str] = None) -> list[dict[str, Any]]:
-        """Retrieve contacts from Apple Contacts.app."""
+        """Retrieve contacts from Apple Contacts.app.
+        
+        Returns list of contacts with name, emails, phones, company, job title, etc.
+        """
+        # Build AppleScript with more comprehensive field extraction
+        base_script = '''
+        tell application "Contacts"
+            {search_clause}
+            set results to {}
+            repeat with p in {target}
+                set pName to ""
+                try
+                    set pName to name of p
+                end try
+                
+                set pEmails to {}
+                try
+                    set pEmails to value of every email of p
+                end try
+                
+                set pPhones to {}
+                try
+                    set pPhones to value of every phone of p
+                end try
+                
+                set pCompany to ""
+                try
+                    set pCompany to organization of p
+                end try
+                
+                set pJobTitle to ""
+                try
+                    set pJobTitle to job title of p
+                end try
+                
+                set pBday to ""
+                try
+                    set pBday to birth date of p as string
+                end try
+                
+                set pAddress to ""
+                try
+                    set pAddr to first address of p
+                    set pAddress to (street address of pAddr) & ", " & (city of pAddr)
+                end try
+                
+                -- Build pipe-delimited string: name|emails|phones|company|job|birthday|address
+                set recordStr to pName & "¬" & (pEmails as string) & "¬" & (pPhones as string) & "¬" & pCompany & "¬" & pJobTitle & "¬" & pBday & "¬" & pAddress
+                set end of results to recordStr
+            end repeat
+            return results as string
+        end tell
+        '''
+        
         if search:
-            script = f'''
-            tell application "Contacts"
-                set matchingPeople to (every person whose name contains "{search}")
-                set results to {{}}
-                repeat with p in matchingPeople
-                    set pName to name of p
-                    set pEmails to value of every email of p
-                    set pPhones to value of every phone of p
-                    set pBday to ""
-                    try
-                        set pBday to birth date of p as string
-                    end try
-                    set end of results to pName & "|" & (pEmails as string) & "|" & (pPhones as string) & "|" & pBday
-                end repeat
-                return results as string
-            end tell
-            '''
+            search_clause = f'set target to (every person whose name contains "{search}")'
+            script = base_script.format(search_clause=search_clause, target="target")
         else:
-            script = '''
-            tell application "Contacts"
-                set results to {}
-                repeat with p in (every person)
-                    set pName to name of p
-                    set pEmails to value of every email of p
-                    set pPhones to value of every phone of p
-                    set pBday to ""
-                    try
-                        set pBday to birth date of p as string
-                    end try
-                    set end of results to pName & "|" & (pEmails as string) & "|" & (pPhones as string) & "|" & pBday
-                end repeat
-                return results as string
-            end tell
-            '''
-        raw = await self.run_applescript(script)
+            script = base_script.format(search_clause="", target="every person")
+        
+        try:
+            raw = await self.run_applescript(script)
+        except Exception as exc:
+            logger.error("applescript_contacts_failed", error=str(exc))
+            return []
+        
         contacts = []
+        # AppleScript returns items separated by ", " when casting list to string
+        # But we use a special delimiter (¬) for fields
+        if not raw or raw == "":
+            return contacts
+            
         for line in raw.split(", "):
-            parts = line.split("|")
-            if len(parts) >= 1:
-                contact: dict[str, Any] = {"name": parts[0].strip()}
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Split by our custom delimiter
+            parts = line.split("¬")
+            if len(parts) >= 1 and parts[0].strip():
+                contact: dict[str, Any] = {
+                    "name": parts[0].strip(),
+                    "id": "",  # Apple Contacts doesn't expose stable IDs via AppleScript easily
+                }
+                
                 if len(parts) > 1:
-                    contact["emails"] = [e.strip() for e in parts[1].split(",") if e.strip()]
+                    emails = [e.strip() for e in parts[1].split(",") if e.strip()]
+                    if emails:
+                        contact["emails"] = emails
+                
                 if len(parts) > 2:
-                    contact["phones"] = [p.strip() for p in parts[2].split(",") if p.strip()]
+                    phones = [p.strip() for p in parts[2].split(",") if p.strip()]
+                    if phones:
+                        contact["phones"] = phones
+                
                 if len(parts) > 3 and parts[3].strip():
-                    contact["birthday"] = parts[3].strip()
+                    contact["company"] = parts[3].strip()
+                
+                if len(parts) > 4 and parts[4].strip():
+                    contact["job_title"] = parts[4].strip()
+                
+                if len(parts) > 5 and parts[5].strip():
+                    contact["birthday"] = parts[5].strip()
+                
+                if len(parts) > 6 and parts[6].strip():
+                    contact["address"] = parts[6].strip()
+                
                 contacts.append(contact)
+        
+        logger.info("macos_contacts_retrieved", count=len(contacts), search=search)
         return contacts
+    
+    async def get_contact_count(self) -> int:
+        """Get total number of contacts in Apple Contacts.app."""
+        script = '''
+        tell application "Contacts"
+            return count of people
+        end tell
+        '''
+        try:
+            result = await self.run_applescript(script)
+            return int(result.strip())
+        except Exception as exc:
+            logger.error("contact_count_failed", error=str(exc))
+            return 0
 
     async def find_contact(self, name: str) -> Optional[dict[str, Any]]:
         """Find a single contact by name."""

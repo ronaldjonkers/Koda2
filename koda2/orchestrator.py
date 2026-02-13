@@ -815,6 +815,28 @@ class Orchestrator:
         await self.whatsapp.start_bridge()
         logger.info("whatsapp_integration_ready")
 
+    async def startup(self) -> None:
+        """Run startup tasks - sync contacts, start proactive monitoring, etc."""
+        logger.info("orchestrator_startup_begin")
+        
+        # Sync contacts from all sources (including macOS Contacts.app)
+        try:
+            logger.info("syncing_contacts_on_startup")
+            counts = await self.contacts.sync_all(force=False, persist_to_db=True)
+            if counts:
+                logger.info("contacts_synced_on_startup", counts=counts)
+        except Exception as exc:
+            logger.error("contact_sync_on_startup_failed", error=str(exc))
+        
+        # Start proactive monitoring
+        try:
+            await self.proactive.start()
+            logger.info("proactive_monitoring_started")
+        except Exception as exc:
+            logger.error("proactive_start_failed", error=str(exc))
+        
+        logger.info("orchestrator_startup_complete")
+
     async def handle_whatsapp_message(self, payload: dict[str, Any]) -> Optional[str]:
         """Handle an incoming WhatsApp self-message with automatic document analysis.
 

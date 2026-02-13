@@ -118,9 +118,13 @@ class ContactSyncService:
         
         return None
     
-    async def sync_all(self, force: bool = False) -> dict[str, int]:
+    async def sync_all(self, force: bool = False, persist_to_db: bool = True) -> dict[str, int]:
         """Sync contacts from all available sources.
         
+        Args:
+            force: Force a new sync even if recent sync exists
+            persist_to_db: Save synced contacts to database for persistence
+            
         Returns:
             Dict with counts per source
         """
@@ -161,8 +165,47 @@ class ContactSyncService:
             self._cache = self._merge_contacts(all_contacts)
             self._last_full_sync = dt.datetime.now(dt.UTC)
             
+            # Persist to database if requested
+            if persist_to_db and self._memory:
+                await self._persist_contacts_to_db()
+            
             logger.info("contact_sync_complete", total=len(self._cache), counts=counts)
             return counts
+    
+    async def _persist_contacts_to_db(self) -> None:
+        """Save all cached contacts to the database for persistence."""
+        if not self._memory:
+            return
+        
+        persisted = 0
+        updated = 0
+        
+        for contact in self._cache.values():
+            try:
+                # Check if contact already exists in DB
+                existing = await self._memory.find_contact("default", contact.name)
+                
+                if existing:
+                    # Update existing contact with new info
+                    # Note: We're not updating here to avoid conflicts,
+                    # but we could implement merge logic
+                    updated += 1
+                else:
+                    # Add new contact
+                    await self._memory.add_contact(
+                        user_id="default",
+                        name=contact.name,
+                        email=contact.get_primary_email(),
+                        phone=contact.get_primary_phone(),
+                        company=contact.company,
+                        notes=f"Synced from: {', '.join(s.value for s in contact.sources)}",
+                    )
+                    persisted += 1
+                    
+            except Exception as exc:
+                logger.error("contact_persist_failed", name=contact.name, error=str(exc))
+        
+        logger.info("contacts_persisted_to_db", new=persisted, updated=updated)
     
     async def _sync_macos(self) -> list[UnifiedContact]:
         """Sync from macOS Contacts.app."""
@@ -180,13 +223,32 @@ class ContactSyncService:
                     for e in mc.get("emails", [])
                 ]
                 
+                # Parse birthday string to date if possible
+                birthday = None
+                if mc.get("birthday"):
+                    try:
+                        # AppleScript returns dates in various formats
+                        bday_str = mc["birthday"]
+                        # Try common formats
+                        for fmt in ["%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y", "%B %d, %Y"]:
+                            try:
+                                birthday = dt.datetime.strptime(bday_str, fmt).date()
+                                break
+                            except ValueError:
+                                continue
+                    except Exception:
+                        pass
+                
                 contact = UnifiedContact(
                     name=mc.get("name", "Unknown"),
                     phones=phones,
                     emails=emails,
-                    birthday=mc.get("birthday"),
+                    company=mc.get("company"),
+                    job_title=mc.get("job_title"),
+                    address=mc.get("address"),
+                    birthday=birthday,
                     sources=[ContactSource.MACOS],
-                    source_ids={"macos": mc.get("id", "")},
+                    source_ids={"macos": mc.get("name", "")},  # Use name as ID since AppleScript doesn't expose stable IDs
                     last_synced=dt.datetime.now(dt.UTC),
                 )
                 contacts.append(contact)
