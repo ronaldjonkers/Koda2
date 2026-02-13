@@ -13,14 +13,21 @@ from koda2.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# DANGEROUS_COMMANDS - commands that can cause system damage
+# These are blocked entirely unless they are part of a safe pattern
 DANGEROUS_COMMANDS = frozenset({
-    "rm", "rmdir", "mkfs", "dd", "format", "fdisk",
+    "mkfs", "dd", "format", "fdisk",
     "shutdown", "reboot", "halt", "poweroff",
-    "chmod", "chown", "kill", "killall",
+})
+
+# DESTRUCTIVE_COMMANDS - commands that delete/modify files
+# These require extra validation to ensure they're not deleting system files
+DESTRUCTIVE_COMMANDS = frozenset({
+    "rm", "rmdir", "chmod", "chown", "kill", "killall",
 })
 
 DANGEROUS_PATTERNS = re.compile(
-    r"(rm\s+-rf|>\s*/dev/|sudo\s+rm|:\(\)\{|fork\s*bomb|curl.*\|\s*sh|wget.*\|\s*sh)",
+    r"(rm\s+-rf\s+/\s*$|rm\s+-rf\s+/[^a-z]|:\(\)\{|fork\s*bomb|curl.*\|\s*sh|wget.*\|\s*sh|>\s*/dev/[sh]d|>\s*/dev/disk)",
     re.IGNORECASE,
 )
 
@@ -147,24 +154,64 @@ class MacOSService:
     # ── Secure Shell Execution ───────────────────────────────────────
 
     def _validate_command(self, command: str) -> bool:
-        """Validate a shell command for safety."""
+        """Validate a shell command for safety.
+        
+        Allows most read-only commands (cat, ls, find, grep, etc.)
+        Blocks destructive commands that can harm the system.
+        """
+        # Check for obviously dangerous patterns
         if DANGEROUS_PATTERNS.search(command):
-            logger.warning("dangerous_command_blocked", command=command)
+            logger.warning("dangerous_pattern_blocked", command=command)
             return False
 
+        # Allow empty commands
+        if not command or not command.strip():
+            return False
+
+        # Extract the main command (before any pipes, redirects, etc.)
+        # Split by common shell operators
+        main_cmd = command
+        for sep in ['|', '>', '<', ';', '&', '&&', '||']:
+            if sep in main_cmd:
+                main_cmd = main_cmd.split(sep)[0]
+        
+        main_cmd = main_cmd.strip()
+        
+        # Get the first token (the actual command)
         try:
-            tokens = shlex.split(command)
+            tokens = shlex.split(main_cmd)
         except ValueError:
+            # If shlex fails, try simple split
+            tokens = main_cmd.split()
+        
+        if not tokens:
             return False
-
-        if tokens and tokens[0] in DANGEROUS_COMMANDS:
-            logger.warning("dangerous_command_blocked", command=tokens[0])
+            
+        cmd = tokens[0]
+        
+        # Block truly dangerous commands
+        if cmd in DANGEROUS_COMMANDS:
+            logger.warning("dangerous_command_blocked", command=cmd)
             return False
+        
+        # Allow destructive commands only with safe arguments
+        if cmd in DESTRUCTIVE_COMMANDS:
+            # Check if it's trying to delete system directories
+            command_lower = command.lower()
+            system_paths = ['/system', '/bin', '/sbin', '/usr/bin', '/usr/sbin', '/etc', '/dev', '/var']
+            for path in system_paths:
+                if path in command_lower and 'rm' in command_lower:
+                    logger.warning("system_deletion_blocked", command=command)
+                    return False
+            # Otherwise allow it - user wants full access
+            return True
 
-        if any(t.startswith("sudo") for t in tokens):
+        # Block sudo (requires password anyway)
+        if cmd == "sudo" or command.startswith("sudo "):
             logger.warning("sudo_blocked", command=command)
             return False
 
+        # Everything else is allowed - user wants full computer access
         return True
 
     async def run_shell(

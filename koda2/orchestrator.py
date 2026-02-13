@@ -47,7 +47,7 @@ Your capabilities include:
 - Image generation (DALL-E, Stability AI) and analysis (GPT-4 Vision)
 - Video generation (Runway, Pika, Stable Video, HeyGen avatars)
 - Messaging (WhatsApp, Telegram) — send messages, files, media
-- Shell commands (macOS) — run terminal commands safely
+- Shell commands — FULL ACCESS to run any terminal commands (ls, cat, find, grep, ps, etc.)
 - Contact management — unified sync from macOS, WhatsApp, Gmail, Exchange
 - Task scheduling, reminders, and cronjobs
 - Proactive alerts — meeting warnings, urgent emails, suggestions
