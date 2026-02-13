@@ -403,6 +403,7 @@ app.post('/download', async (req, res) => {
             } else {
                 // Generate filename from mimetype
                 let ext = '';
+                console.log('[WhatsApp] No filename provided, generating from mimetype:', media.mimetype);
                 if (media.mimetype) {
                     const mimeToExt = {
                         'image/jpeg': '.jpg',
@@ -420,13 +421,14 @@ app.post('/download', async (req, res) => {
                         'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
                     };
                     ext = mimeToExt[media.mimetype] || '.bin';
+                    console.log('[WhatsApp] Mimetype lookup:', media.mimetype, '->', ext);
                 }
                 finalFilename = `media_${Date.now()}${ext}`;
                 console.log('[WhatsApp] Generated filename from mimetype:', finalFilename);
             }
             
-            // Save to downloads directory
-            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_downloads');
+            // Save to downloads directory (use whatsapp_received to match Python expectations)
+            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_received');
             fs.mkdirSync(downloadDir, { recursive: true });
             const filePath = path.join(downloadDir, finalFilename);
             fs.writeFileSync(filePath, media.data, 'base64');
@@ -456,7 +458,7 @@ app.post('/download', async (req, res) => {
             }
             const finalFilename = filename || `download_${Date.now()}${ext}`;
             
-            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_downloads');
+            const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_received');
             fs.mkdirSync(downloadDir, { recursive: true });
             const filePath = path.join(downloadDir, finalFilename);
             fs.writeFileSync(filePath, media.data, 'base64');

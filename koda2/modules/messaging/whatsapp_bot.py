@@ -629,6 +629,7 @@ class WhatsAppBot:
             # 1. If WhatsApp gives us a filename with extension, use that
             # 2. If not, let the bridge try to determine from msg.filename
             # 3. Only as last resort, use mimetype to generate extension
+            # IMPORTANT: Never generate a .bin filename - let bridge handle it
             
             filename = None  # Let bridge use original filename by default
             
@@ -637,13 +638,22 @@ class WhatsAppBot:
                 if "." in original_filename:
                     timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
                     filename = f"{timestamp}_{original_filename}"
+                    logger.info("using_whatsapp_filename", filename=filename)
                 else:
                     # No extension in original filename, try to add from mimetype
-                    ext = self._mime_to_extension(mimetype)
-                    timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
-                    filename = f"{timestamp}_{original_filename}{ext}"
+                    # But skip if mimetype is generic octet-stream
+                    if mimetype != "application/octet-stream":
+                        ext = self._mime_to_extension(mimetype)
+                        timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
+                        filename = f"{timestamp}_{original_filename}{ext}"
+                        logger.info("added_extension_from_mimetype", filename=filename)
+                    else:
+                        logger.info("no_extension_and_generic_mimetype, letting_bridge_handle")
+            else:
+                logger.info("no_original_filename, letting_bridge_handle")
             
-            logger.info("downloading_media", message_id=message_id, filename=filename or "using_original")
+            logger.info("downloading_media", message_id=message_id[:30] if message_id else None, 
+                       filename=filename or "using_bridge_logic")
             
             # Download the file using message_id
             download_path = await self.download_media(
@@ -656,6 +666,17 @@ class WhatsAppBot:
                 logger.error("whatsapp_media_download_failed")
                 base_result["media_error"] = "Failed to download media"
                 return base_result
+            
+            # Fix extension if it's .bin but we have a better mimetype
+            if download_path.endswith('.bin') and mimetype != 'application/octet-stream':
+                from pathlib import Path
+                path_obj = Path(download_path)
+                new_ext = self._mime_to_extension(mimetype)
+                if new_ext != '.bin':
+                    new_path = path_obj.with_suffix(new_ext)
+                    path_obj.rename(new_path)
+                    download_path = str(new_path)
+                    logger.info("renamed_file_extension", old=path_obj.name, new=new_path.name)
             
             base_result["downloaded_path"] = download_path
             base_result["mime_type"] = mimetype

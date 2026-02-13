@@ -684,19 +684,24 @@ class Orchestrator:
         await self.memory.add_conversation(user_id, "user", original_message or text, channel=platform)
         
         # Create a special system prompt for document analysis
-        doc_system_prompt = SYSTEM_PROMPT + """
+        # Note: We don't use SYSTEM_PROMPT here because it asks for JSON format
+        # For document analysis, we want natural language responses
+        doc_system_prompt = """You are Koda2, a professional AI executive assistant.
 
-You have just received a document from the user via WhatsApp. The document content
-has been analyzed and extracted for you. Consider the document content carefully
-when responding to the user's message.
+You have just received a document from the user via WhatsApp along with their question about it.
+The document content has been analyzed and provided to you below.
 
-When responding about a document:
-- Summarize key points if the user asks for a summary
-- Answer specific questions about the content
+Your task is to respond to the user's question about the document in a natural, helpful way.
+Do NOT use JSON format. Just write a normal text response.
+
+Guidelines:
+- Answer the user's specific question about the document
+- Summarize key points if asked for a summary
 - Suggest action items if relevant
-- If it's an image, describe what you see
-- If the document requires a response (like an invitation or request), draft one
+- If it's an image, describe what you see and any text in it
+- If the document requires a response (like an invitation), draft a polite reply
 - Be concise but thorough
+- Write in the same language as the user's message
 """
         
         # Retrieve context

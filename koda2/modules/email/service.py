@@ -629,6 +629,243 @@ class EmailService:
 
         return all_emails
 
+    # ── EWS (Exchange) Email ─────────────────────────────────────────
+
+    async def ews_configured(self) -> bool:
+        """Check if any EWS email account is configured."""
+        accounts = await self._get_email_accounts()
+        return any(acc.provider == ProviderType.EWS.value for acc in accounts)
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
+    async def fetch_emails_ews(
+        self,
+        unread_only: bool = False,
+        limit: int = 50,
+        account_id: Optional[str] = None,
+    ) -> list[EmailMessage]:
+        """Fetch emails from Exchange via EWS SOAP + httpx-ntlm."""
+        if not self._account_service:
+            return []
+
+        if account_id:
+            account = await self._account_service.get_account(account_id)
+            accounts = [account] if account else []
+        else:
+            all_accounts = await self._get_email_accounts()
+            accounts = [a for a in all_accounts if a.provider == ProviderType.EWS.value]
+
+        if not accounts:
+            return []
+
+        all_emails: list[EmailMessage] = []
+
+        for account in accounts:
+            try:
+                credentials = self._account_service.decrypt_credentials(account)
+                emails = await asyncio.to_thread(
+                    self._fetch_ews_inbox,
+                    credentials,
+                    account.name,
+                    unread_only,
+                    limit,
+                )
+                all_emails.extend(emails)
+            except Exception as exc:
+                logger.error("ews_fetch_failed", account=account.name, error=str(exc))
+
+        return all_emails
+
+    def _fetch_ews_inbox(
+        self,
+        credentials: dict,
+        account_name: str,
+        unread_only: bool,
+        limit: int,
+    ) -> list[EmailMessage]:
+        """Synchronous EWS inbox fetch via SOAP + httpx-ntlm."""
+        import xml.etree.ElementTree as ET
+
+        try:
+            from httpx_ntlm import HttpNtlmAuth
+        except ImportError:
+            logger.error("httpx_ntlm_not_installed")
+            return []
+
+        from koda2.modules.account.validators import _normalize_ews_server, _discover_ews_servers
+
+        server = _normalize_ews_server(credentials["server"])
+        username = credentials["username"]
+        password = credentials["password"]
+        email_addr = credentials["email"]
+
+        # Build NTLM auth with domain prefix
+        user = username
+        if "\\" not in user and "@" not in user:
+            domain = email_addr.split("@")[-1].split(".")[0].upper() if "@" in email_addr else ""
+            if domain:
+                user = f"{domain}\\{username}"
+
+        auth = HttpNtlmAuth(user, password)
+        ews_url = f"https://{server}/EWS/Exchange.asmx"
+        headers = {"Content-Type": "text/xml; charset=utf-8"}
+
+        # Build restriction for unread-only
+        restriction_xml = ""
+        if unread_only:
+            restriction_xml = """<m:Restriction>
+        <t:IsEqualTo>
+          <t:FieldURI FieldURI="message:IsRead"/>
+          <t:FieldURIOrConstant>
+            <t:Constant Value="false"/>
+          </t:FieldURIOrConstant>
+        </t:IsEqualTo>
+      </m:Restriction>"""
+
+        soap = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2016"/>
+  </soap:Header>
+  <soap:Body>
+    <m:FindItem Traversal="Shallow">
+      <m:ItemShape>
+        <t:BaseShape>Default</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject"/>
+          <t:FieldURI FieldURI="item:DateTimeReceived"/>
+          <t:FieldURI FieldURI="message:From"/>
+          <t:FieldURI FieldURI="message:IsRead"/>
+          <t:FieldURI FieldURI="item:HasAttachments"/>
+          <t:FieldURI FieldURI="message:ToRecipients"/>
+          <t:FieldURI FieldURI="message:CcRecipients"/>
+          <t:FieldURI FieldURI="item:Body"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:IndexedPageItemView MaxEntriesReturned="{limit}" Offset="0" BasePoint="Beginning"/>
+      <m:SortOrder>
+        <t:FieldOrder Order="Descending">
+          <t:FieldURI FieldURI="item:DateTimeReceived"/>
+        </t:FieldOrder>
+      </m:SortOrder>
+      {restriction_xml}
+      <m:ParentFolderIds>
+        <t:DistinguishedFolderId Id="inbox"/>
+      </m:ParentFolderIds>
+    </m:FindItem>
+  </soap:Body>
+</soap:Envelope>"""
+
+        # Try configured server first, autodiscover if it fails
+        resp = None
+        for srv in [server] + _discover_ews_servers(server, email_addr):
+            url = f"https://{srv}/EWS/Exchange.asmx"
+            try:
+                with httpx.Client(verify=True, timeout=30) as client:
+                    resp = client.post(url, content=soap, headers=headers, auth=auth)
+                if resp.status_code == 200:
+                    ews_url = url
+                    break
+            except Exception:
+                continue
+
+        if resp is None or resp.status_code != 200:
+            logger.error("ews_email_fetch_http_failed", server=server)
+            return []
+
+        # Parse response
+        ns = {
+            "t": "http://schemas.microsoft.com/exchange/services/2006/types",
+            "m": "http://schemas.microsoft.com/exchange/services/2006/messages",
+        }
+        root = ET.fromstring(resp.text)
+        messages = root.findall(".//t:Message", ns)
+
+        emails: list[EmailMessage] = []
+        for msg in messages:
+            def _text(tag: str) -> str:
+                el = msg.find(f"t:{tag}", ns)
+                return el.text if el is not None and el.text else ""
+
+            # Parse sender
+            sender_name = ""
+            sender_email = ""
+            from_name = msg.find(".//t:From/t:Mailbox/t:Name", ns)
+            from_email = msg.find(".//t:From/t:Mailbox/t:EmailAddress", ns)
+            if from_name is not None and from_name.text:
+                sender_name = from_name.text
+            if from_email is not None and from_email.text:
+                sender_email = from_email.text
+
+            # Parse recipients
+            recipients = []
+            for recip in msg.findall(".//t:ToRecipients/t:Mailbox", ns):
+                e = recip.find("t:EmailAddress", ns)
+                if e is not None and e.text:
+                    recipients.append(e.text)
+
+            # Parse CC
+            cc = []
+            for recip in msg.findall(".//t:CcRecipients/t:Mailbox", ns):
+                e = recip.find("t:EmailAddress", ns)
+                if e is not None and e.text:
+                    cc.append(e.text)
+
+            # Parse date
+            date_str = _text("DateTimeReceived")
+            try:
+                date = dt.datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+            except (ValueError, AttributeError):
+                date = dt.datetime.now(dt.UTC)
+
+            # Parse read status
+            is_read = _text("IsRead").lower() == "true"
+
+            # Parse attachments flag
+            has_attachments = _text("HasAttachments").lower() == "true"
+
+            # Parse ItemId
+            item_id_el = msg.find("t:ItemId", ns)
+            item_id = item_id_el.get("Id", "") if item_id_el is not None else ""
+
+            # Parse body
+            body_text = ""
+            body_html = ""
+            body_el = msg.find("t:Body", ns)
+            if body_el is not None and body_el.text:
+                body_type = body_el.get("BodyType", "Text")
+                if body_type == "HTML":
+                    body_html = body_el.text
+                else:
+                    body_text = body_el.text
+
+            sender_display = f"{sender_name} <{sender_email}>" if sender_email else sender_name
+
+            attachments = []
+            if has_attachments:
+                attachments = [EmailAttachment(filename="(attachment)", content_type="application/octet-stream")]
+
+            emails.append(EmailMessage(
+                provider=EmailProvider.EWS,
+                provider_id=item_id,
+                account_name=account_name,
+                subject=_text("Subject"),
+                sender=sender_display,
+                sender_name=sender_name,
+                recipients=recipients,
+                cc=cc,
+                body_text=body_text,
+                body_html=body_html,
+                is_read=is_read,
+                attachments=attachments,
+                date=date,
+                folder="INBOX",
+            ))
+
+        logger.info("ews_emails_fetched", account=account_name, count=len(emails))
+        return emails
+
     # ── Unified Email Operations ─────────────────────────────────────
 
     async def fetch_all_emails(
@@ -650,6 +887,10 @@ class EmailService:
         # Gmail accounts
         gmail_query = "is:unread" if unread_only else ""
         emails = await self.fetch_emails_gmail(query=gmail_query, max_results=limit)
+        all_emails.extend(emails)
+
+        # EWS (Exchange) accounts
+        emails = await self.fetch_emails_ews(unread_only=unread_only, limit=limit)
         all_emails.extend(emails)
 
         # Sort by date (newest first), handle mixed tz-aware/naive

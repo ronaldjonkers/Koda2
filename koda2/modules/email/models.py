@@ -25,6 +25,7 @@ class EmailProvider(StrEnum):
 
     IMAP_SMTP = "imap_smtp"
     GMAIL = "gmail"
+    EWS = "ews"
 
 
 class EmailAttachment(BaseModel):
