@@ -159,6 +159,24 @@ async def supervisor_status() -> dict[str, Any]:
     else:
         result["repair_counts"] = {}
 
+    # Learner state
+    from pathlib import Path as _Path
+    learner_state_file = _Path("data/supervisor/learner_state.json")
+    if learner_state_file.exists():
+        try:
+            ls = _json.loads(learner_state_file.read_text())
+            result["learner"] = {
+                "cycle_count": ls.get("cycle_count", 0),
+                "improvements_applied": len(ls.get("improvements_applied", [])),
+                "failed_ideas": len(ls.get("failed_ideas", [])),
+                "recent_improvements": ls.get("improvements_applied", [])[-5:],
+                "last_updated": ls.get("updated_at"),
+            }
+        except Exception:
+            result["learner"] = {"cycle_count": 0}
+    else:
+        result["learner"] = {"cycle_count": 0}
+
     # Recent audit entries
     if AUDIT_LOG_FILE.exists():
         try:
@@ -190,6 +208,18 @@ async def supervisor_improve(request: dict[str, Any]) -> dict[str, Any]:
     engine = EvolutionEngine(safety)
     success, message = await engine.implement_improvement(description)
     return {"success": success, "message": message}
+
+
+@router.post("/supervisor/learn")
+async def supervisor_learn() -> dict[str, Any]:
+    """Trigger one learning cycle: analyze logs + conversations and auto-improve."""
+    from koda2.supervisor.safety import SafetyGuard
+    from koda2.supervisor.learner import ContinuousLearner
+
+    safety = SafetyGuard()
+    learner = ContinuousLearner(safety)
+    summary = await learner.run_cycle()
+    return summary
 
 
 # ── Chat ─────────────────────────────────────────────────────────────

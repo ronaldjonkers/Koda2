@@ -18,16 +18,20 @@ console = Console()
 def run(
     no_repair: bool = typer.Option(False, "--no-repair", help="Disable auto-repair on crash"),
     no_evolution: bool = typer.Option(False, "--no-evolution", help="Disable evolution loop"),
+    no_learning: bool = typer.Option(False, "--no-learning", help="Disable continuous learning loop"),
+    notify_user: str = typer.Option("", "--notify", help="WhatsApp user ID to notify on improvements"),
 ) -> None:
     """Start Koda2 under the self-healing supervisor."""
     from koda2.supervisor.safety import SafetyGuard
     from koda2.supervisor.monitor import ProcessMonitor
     from koda2.supervisor.repair import RepairEngine
+    from koda2.supervisor.learner import ContinuousLearner
 
     console.print("\n[bold cyan]🧬 Koda2 Self-Healing Supervisor[/bold cyan]\n")
 
     safety = SafetyGuard()
     repair = RepairEngine(safety) if not no_repair else None
+    learner = ContinuousLearner(safety, notify_user_id=notify_user or None) if not no_learning else None
 
     async def on_crash(stderr: str, exit_code: int) -> None:
         """Handle a crash — attempt self-repair."""
@@ -50,6 +54,8 @@ def run(
     # Handle Ctrl+C gracefully
     def signal_handler(sig, frame):
         console.print("\n[yellow]Shutting down supervisor...[/yellow]")
+        if learner:
+            learner.stop()
         monitor.shutdown()
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -58,14 +64,26 @@ def run(
     console.print("[green]Starting Koda2 with self-healing enabled...[/green]")
     console.print(f"  Auto-repair: {'[green]ON[/green]' if repair else '[red]OFF[/red]'}")
     console.print(f"  Evolution:   {'[green]ON[/green]' if not no_evolution else '[red]OFF[/red]'}")
+    console.print(f"  Learning:    {'[green]ON[/green]' if learner else '[red]OFF[/red]'}")
+    if notify_user:
+        console.print(f"  Notify:      [green]{notify_user}[/green]")
     console.print()
 
     safety.audit("supervisor_cli_start", {
         "repair": not no_repair,
         "evolution": not no_evolution,
+        "learning": not no_learning,
+        "notify_user": notify_user or None,
     })
 
-    asyncio.run(monitor.run())
+    async def _run_all():
+        """Run monitor and learner concurrently."""
+        tasks = [monitor.run()]
+        if learner:
+            tasks.append(learner.run_forever())
+        await asyncio.gather(*tasks)
+
+    asyncio.run(_run_all())
 
 
 @app.command()
@@ -125,6 +143,37 @@ def improve(
 
 
 @app.command()
+def learn(
+    notify_user: str = typer.Option("", "--notify", help="WhatsApp user ID to notify on improvements"),
+) -> None:
+    """Run one learning cycle manually (analyze logs + conversations → improve)."""
+    from koda2.supervisor.safety import SafetyGuard
+    from koda2.supervisor.learner import ContinuousLearner
+
+    safety = SafetyGuard()
+    learner = ContinuousLearner(safety, notify_user_id=notify_user or None)
+
+    console.print("\n[cyan]🧠 Running learning cycle...[/cyan]\n")
+
+    async def _learn():
+        summary = await learner.run_cycle()
+        console.print(f"[bold]Cycle #{summary['cycle']}[/bold]")
+        console.print(f"  Signals gathered:     {summary['signals_gathered']}")
+        console.print(f"  Proposals generated:  {summary['proposals']}")
+        console.print(f"  Improvements applied: {summary['improvements_applied']}")
+        console.print(f"  Improvements failed:  {summary['improvements_failed']}")
+        if summary.get('version_bumped'):
+            console.print(f"  [green]Version bumped to: {summary.get('new_version')}[/green]")
+        if summary.get('user_notified'):
+            console.print(f"  [green]User notified via WhatsApp[/green]")
+        if summary.get('error'):
+            console.print(f"  [red]Error: {summary['error']}[/red]")
+        console.print()
+
+    asyncio.run(_learn())
+
+
+@app.command()
 def status() -> None:
     """Show supervisor status and recent activity."""
     from koda2.supervisor.safety import AUDIT_LOG_FILE, REPAIR_STATE_FILE
@@ -148,6 +197,22 @@ def status() -> None:
             console.print("[yellow]Could not read repair state[/yellow]")
     else:
         console.print("[green]No repair state (clean)[/green]")
+
+    # Learner state
+    learner_state = Path("data/supervisor/learner_state.json")
+    console.print()
+    if learner_state.exists():
+        try:
+            ls = json.loads(learner_state.read_text())
+            console.print(f"[bold]Learning Loop:[/bold]")
+            console.print(f"  Cycles completed: {ls.get('cycle_count', 0)}")
+            console.print(f"  Improvements applied: {len(ls.get('improvements_applied', []))}")
+            console.print(f"  Failed ideas (skipped): {len(ls.get('failed_ideas', []))}")
+            console.print(f"  Last updated: {ls.get('updated_at', 'unknown')}")
+        except Exception:
+            console.print("[yellow]Could not read learner state[/yellow]")
+    else:
+        console.print("[dim]No learning cycles yet[/dim]")
 
     # Recent audit log
     console.print()

@@ -499,6 +499,19 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
     </div>
   </div>
 
+  <!-- Learning loop -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="panel-body" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0;font-size:13px;font-weight:600">Continuous Learning Loop</h3>
+        <button class="btn btn-ghost btn-sm" onclick="triggerLearnCycle()" id="learn-btn" style="font-size:10px">Run Cycle Now</button>
+      </div>
+      <div id="sv-learner-state" style="font-size:11px;color:var(--tx-2)">Loading...</div>
+      <div id="sv-learner-improvements" style="margin-top:6px;font-size:11px"></div>
+      <div id="learn-result" style="margin-top:6px;font-size:11px;display:none"></div>
+    </div>
+  </div>
+
   <!-- Repair state -->
   <div class="panel" style="margin-bottom:14px">
     <div class="panel-body" style="padding:12px">
@@ -1328,6 +1341,28 @@ async function loadSupervisor() {
             ).join('');
         }
 
+        // Learner state
+        const learner = data.learner || {};
+        if (learner.cycle_count > 0) {
+            $('sv-learner-state').innerHTML = `
+                <div style="display:flex;gap:16px;flex-wrap:wrap">
+                    <span>🧠 <strong>${learner.cycle_count}</strong> cycles</span>
+                    <span>✅ <strong>${learner.improvements_applied || 0}</strong> improvements applied</span>
+                    <span>❌ <strong>${learner.failed_ideas || 0}</strong> skipped ideas</span>
+                    ${learner.last_updated ? `<span style="color:var(--tx-3)">Last: ${learner.last_updated.substring(0,19).replace('T',' ')}</span>` : ''}
+                </div>`;
+            const recent = learner.recent_improvements || [];
+            if (recent.length > 0) {
+                $('sv-learner-improvements').innerHTML = '<div style="margin-top:4px;color:var(--tx-3);font-size:10px">Recent:</div>' +
+                    recent.reverse().map(i => `<div style="padding:2px 0;font-size:10px">
+                        <span class="tag tag-green" style="font-size:8px;padding:0 4px">${esc(i.type || 'improvement')}</span>
+                        ${esc((i.description || '').substring(0,80))}
+                    </div>`).join('');
+            }
+        } else {
+            $('sv-learner-state').innerHTML = '<span style="color:var(--tx-3)">No learning cycles yet — runs automatically every hour when supervisor is active</span>';
+        }
+
         // Audit summary
         $('sv-audit-summary').textContent = `${data.audit_total || 0} total entries` +
             (data.last_updated ? ` · Last updated: ${data.last_updated}` : '');
@@ -1355,6 +1390,34 @@ async function loadSupervisor() {
     } catch(e) {
         $('sv-repair-state').innerHTML = '<span style="color:var(--tx-3)">Could not load supervisor status</span>';
         $('sv-audit-list').innerHTML = '<div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Supervisor not available</div></div>';
+    }
+}
+
+async function triggerLearnCycle() {
+    const btn = $('learn-btn');
+    const result = $('learn-result');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing...';
+    result.style.display = 'block';
+    result.innerHTML = '<span style="color:var(--accent)">🧠 Reading logs, conversations, and errors... this may take a minute.</span>';
+
+    try {
+        const r = await fetch('/api/supervisor/learn', { method: 'POST' });
+        const data = await r.json();
+        const parts = [];
+        parts.push(`Signals: ${data.signals_gathered || 0}`);
+        parts.push(`Proposals: ${data.proposals || 0}`);
+        parts.push(`Applied: ${data.improvements_applied || 0}`);
+        if (data.improvements_failed) parts.push(`Failed: ${data.improvements_failed}`);
+        if (data.new_version) parts.push(`Version: v${data.new_version}`);
+        const color = (data.improvements_applied || 0) > 0 ? '#22c55e' : 'var(--tx-2)';
+        result.innerHTML = `<span style="color:${color}">Cycle #${data.cycle || '?'} complete — ${parts.join(' · ')}</span>`;
+        loadSupervisor();
+    } catch(e) {
+        result.innerHTML = `<span style="color:#ef4444">❌ ${esc(e.message)}</span>`;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run Cycle Now';
     }
 }
 
