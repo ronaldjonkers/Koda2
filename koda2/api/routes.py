@@ -138,6 +138,60 @@ async def health_check() -> dict[str, Any]:
     }
 
 
+# ── Supervisor ───────────────────────────────────────────────────────
+
+@router.get("/supervisor/status")
+async def supervisor_status() -> dict[str, Any]:
+    """Get self-healing supervisor status, repair state, and recent audit log."""
+    import json as _json
+    from koda2.supervisor.safety import AUDIT_LOG_FILE, REPAIR_STATE_FILE
+
+    result: dict[str, Any] = {"supervisor": "available"}
+
+    # Repair state
+    if REPAIR_STATE_FILE.exists():
+        try:
+            state = _json.loads(REPAIR_STATE_FILE.read_text())
+            result["repair_counts"] = state.get("repair_counts", {})
+            result["last_updated"] = state.get("updated_at")
+        except Exception:
+            result["repair_counts"] = {}
+    else:
+        result["repair_counts"] = {}
+
+    # Recent audit entries
+    if AUDIT_LOG_FILE.exists():
+        try:
+            lines = AUDIT_LOG_FILE.read_text().strip().splitlines()
+            recent = lines[-20:] if len(lines) > 20 else lines
+            result["audit_total"] = len(lines)
+            result["audit_recent"] = [_json.loads(l) for l in recent]
+        except Exception:
+            result["audit_total"] = 0
+            result["audit_recent"] = []
+    else:
+        result["audit_total"] = 0
+        result["audit_recent"] = []
+
+    return result
+
+
+@router.post("/supervisor/improve")
+async def supervisor_improve(request: dict[str, Any]) -> dict[str, Any]:
+    """Trigger a self-improvement via the evolution engine."""
+    description = request.get("request", request.get("description", ""))
+    if not description:
+        return {"error": "No improvement request provided"}
+
+    from koda2.supervisor.safety import SafetyGuard
+    from koda2.supervisor.evolution import EvolutionEngine
+
+    safety = SafetyGuard()
+    engine = EvolutionEngine(safety)
+    success, message = await engine.implement_improvement(description)
+    return {"success": success, "message": message}
+
+
 # ── Chat ─────────────────────────────────────────────────────────────
 
 @router.post("/chat", response_model=ChatResponse)
