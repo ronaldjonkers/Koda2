@@ -35,11 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Service mode uses supervisor** — install.sh now wires launchd/systemd to `koda2-supervisor run`
 - **Improvement Queue** (`koda2/supervisor/improvement_queue.py`):
   - Persistent chronological queue for self-improvement tasks (`data/supervisor/improvement_queue.json`)
-  - Background asyncio worker processes items by priority then age
+  - **Concurrent multi-agent workers** (default 3): LLM planning runs in parallel, git operations serialized via shared lock
+  - New `planning` status — visible in dashboard when workers are computing plans
+  - Configurable `max_workers` via API and constructor
   - Sources: user (dashboard), learner (auto-observations), supervisor, system
   - API: `GET /api/supervisor/queue`, `POST /api/supervisor/queue/start|stop`, `POST /api/supervisor/queue/{id}/cancel`
-  - Dashboard panel with live queue view, worker toggle, cancel buttons
+  - Dashboard panel with live queue view, active agent count, worker toggle, cancel buttons
   - ContinuousLearner now queues proposals instead of executing directly
+- **EvolutionEngine split** — `plan_improvement` (parallel-safe LLM) and `apply_plan` (serialized git/test/commit) are now separate methods
 
 ### Fixed
 - **Evolution Engine 400 error** — replaced invalid OpenRouter model `anthropic/claude-sonnet-4-20250514` with settings-configured model (fallback `anthropic/claude-3.5-sonnet`), added response body logging on API errors

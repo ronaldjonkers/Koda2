@@ -249,20 +249,22 @@ async def supervisor_queue_cancel(item_id: str) -> dict[str, Any]:
 
 
 @router.post("/supervisor/queue/start")
-async def supervisor_queue_start() -> dict[str, Any]:
-    """Start the improvement queue worker."""
+async def supervisor_queue_start(request: dict[str, Any] = {}) -> dict[str, Any]:
+    """Start the improvement queue workers."""
     from koda2.supervisor.improvement_queue import get_improvement_queue
 
     queue = get_improvement_queue()
+    if request.get("max_workers"):
+        queue.max_workers = int(request["max_workers"])
     if queue.is_running:
-        return {"status": "already_running"}
+        return {"status": "already_running", "workers": queue.max_workers}
     queue.start_worker()
-    return {"status": "started"}
+    return {"status": "started", "workers": queue.max_workers}
 
 
 @router.post("/supervisor/queue/stop")
 async def supervisor_queue_stop() -> dict[str, Any]:
-    """Stop the improvement queue worker."""
+    """Stop all improvement queue workers."""
     from koda2.supervisor.improvement_queue import get_improvement_queue
 
     queue = get_improvement_queue()

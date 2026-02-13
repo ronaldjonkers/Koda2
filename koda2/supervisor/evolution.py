@@ -163,7 +163,7 @@ Plan the minimal changes needed. Return JSON only."""
         """
         self._safety.audit("evolution_start", {"request": request})
 
-        # Step 1: Plan
+        # Phase 1: Plan (LLM call — safe to run concurrently)
         plan = await self.plan_improvement(request)
 
         if not plan.get("changes"):
@@ -179,14 +179,21 @@ Plan the minimal changes needed. Return JSON only."""
             "risk": plan.get("risk", "unknown"),
         })
 
-        # Step 2: Backup
+        # Phase 2: Apply (git/files/tests — must be serialized)
+        return await self.apply_plan(plan)
+
+    async def apply_plan(self, plan: dict[str, Any]) -> tuple[bool, str]:
+        """Apply a pre-computed plan: stash → write files → test → commit or rollback.
+
+        This method touches git and the filesystem and must NOT run concurrently.
+        The ImprovementQueue holds a git lock to enforce this.
+        """
         self._safety.git_stash("pre-evolution-backup")
 
-        all_success = True
-        messages = []
+        messages: list[str] = []
 
         try:
-            # Step 3: Apply changes
+            # Apply changes
             for change in plan["changes"]:
                 action = change.get("action", "modify")
                 file_path = change.get("file", "")
@@ -197,7 +204,6 @@ Plan the minimal changes needed. Return JSON only."""
                 full_path = self._root / file_path
 
                 if action == "create":
-                    # Create new file
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text(change.get("content", ""))
                     messages.append(f"Created {file_path}")
@@ -219,18 +225,16 @@ Plan the minimal changes needed. Return JSON only."""
                     messages.append(f"Modified {file_path}")
                     self._safety.audit("evolution_file_modified", {"file": file_path})
 
-            # Step 4: Run tests
+            # Run tests
             passed, test_output = self._safety.run_tests()
 
             if passed:
-                # Step 5: Commit
                 commit_msg = f"feat(evolution): {plan['summary'][:80]}"
                 self._safety.git_commit(commit_msg)
                 self._safety.git_push()
                 self._safety.audit("evolution_success", {"summary": plan["summary"]})
                 return True, f"Improvement applied: {plan['summary']}\nChanges: {'; '.join(messages)}"
             else:
-                # Rollback
                 self._safety.git_reset_hard()
                 self._safety.audit("evolution_rollback", {"test_output": test_output[:500]})
                 return False, f"Tests failed after changes — rolled back.\n{test_output[:300]}"

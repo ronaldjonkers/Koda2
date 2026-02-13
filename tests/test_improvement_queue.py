@@ -148,6 +148,19 @@ class TestImprovementQueue:
             q = ImprovementQueue()
             assert q.get_item("abc")["status"] == QueueItemStatus.PENDING
 
+    def test_load_resets_planning_to_pending(self, tmp_path: Path) -> None:
+        queue_file = tmp_path / "queue.json"
+        items = [{"id": "def", "request": "stuck planning", "status": "planning",
+                  "source": "user", "priority": 5, "created_at": "2025-01-01",
+                  "started_at": None, "finished_at": None, "result_message": None,
+                  "success": None, "metadata": {}}]
+        queue_file.write_text(json.dumps(items))
+
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", tmp_path), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", queue_file):
+            q = ImprovementQueue()
+            assert q.get_item("def")["status"] == QueueItemStatus.PENDING
+
     def test_prune_old(self, tmp_path: Path) -> None:
         queue = self._make_queue(tmp_path)
         item = queue.add("Old item")
@@ -177,6 +190,71 @@ class TestImprovementQueue:
         queue.stop_worker()
         assert not queue.is_running
 
+    def test_default_max_workers(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        assert queue.max_workers == 3
+
+    def test_custom_max_workers(self, tmp_path: Path) -> None:
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", tmp_path), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", tmp_path / "queue.json"):
+            queue = ImprovementQueue(max_workers=5)
+            assert queue.max_workers == 5
+
+    def test_max_workers_minimum_one(self, tmp_path: Path) -> None:
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", tmp_path), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", tmp_path / "queue.json"):
+            queue = ImprovementQueue(max_workers=0)
+            assert queue.max_workers == 1
+
+    def test_max_workers_setter(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        queue.max_workers = 7
+        assert queue.max_workers == 7
+        queue.max_workers = 0
+        assert queue.max_workers == 1
+
+    def test_stats_includes_worker_info(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        stats = queue.stats()
+        assert "max_workers" in stats
+        assert "active_workers" in stats
+        assert stats["max_workers"] == 3
+        assert stats["active_workers"] == 0
+
+    def test_stats_includes_planning(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        item = queue.add("Planning item")
+        item["status"] = QueueItemStatus.PLANNING
+        stats = queue.stats()
+        assert stats["planning"] == 1
+
+    @pytest.mark.asyncio
+    async def test_pick_item_marks_as_planning(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        queue.add("Pick me")
+        item = await queue._pick_item()
+        assert item is not None
+        assert item["status"] == QueueItemStatus.PLANNING
+        assert item["started_at"] is not None
+
+    @pytest.mark.asyncio
+    async def test_pick_item_returns_none_when_empty(self, tmp_path: Path) -> None:
+        queue = self._make_queue(tmp_path)
+        item = await queue._pick_item()
+        assert item is None
+
+    @pytest.mark.asyncio
+    async def test_pick_item_no_double_pick(self, tmp_path: Path) -> None:
+        """Two concurrent picks should return different items."""
+        queue = self._make_queue(tmp_path)
+        queue.add("Item A")
+        queue.add("Item B")
+        item1 = await queue._pick_item()
+        item2 = await queue._pick_item()
+        assert item1 is not None
+        assert item2 is not None
+        assert item1["id"] != item2["id"]
+
 
 class TestGetImprovementQueue:
     """Tests for the singleton accessor."""
@@ -193,6 +271,7 @@ class TestQueueItemEnums:
 
     def test_status_values(self) -> None:
         assert QueueItemStatus.PENDING == "pending"
+        assert QueueItemStatus.PLANNING == "planning"
         assert QueueItemStatus.IN_PROGRESS == "in_progress"
         assert QueueItemStatus.COMPLETED == "completed"
         assert QueueItemStatus.FAILED == "failed"

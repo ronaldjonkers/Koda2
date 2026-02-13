@@ -1482,17 +1482,18 @@ async function loadQueue() {
         const stats = data.stats || {};
         const running = data.worker_running;
 
-        // Update worker toggle button
-        $('queue-toggle-btn').textContent = running ? 'Stop Worker' : 'Start Worker';
+        // Update worker toggle button + status
+        $('queue-toggle-btn').textContent = running ? 'Stop Workers' : 'Start Workers';
         $('queue-worker-status').innerHTML = running
-            ? '<span style="color:#22c55e">● Running</span>'
+            ? `<span style="color:#22c55e">● ${stats.active_workers || 0}/${stats.max_workers || 3} agents</span>`
             : '<span style="color:var(--tx-3)">● Stopped</span>';
 
         // Stats bar
         const parts = [];
         if (stats.pending) parts.push(`⏳ ${stats.pending} pending`);
-        if (stats.in_progress) parts.push(`🔄 ${stats.in_progress} in progress`);
-        if (stats.completed) parts.push(`✅ ${stats.completed} completed`);
+        if (stats.planning) parts.push(`🧠 ${stats.planning} planning`);
+        if (stats.in_progress) parts.push(`🔄 ${stats.in_progress} applying`);
+        if (stats.completed) parts.push(`✅ ${stats.completed} done`);
         if (stats.failed) parts.push(`❌ ${stats.failed} failed`);
         $('queue-stats').innerHTML = parts.length ? parts.join(' · ') : 'Queue empty';
 
@@ -1505,11 +1506,11 @@ async function loadQueue() {
 
         $('queue-list').innerHTML = items.map(i => {
             const statusColors = {
-                pending: '#f59e0b', in_progress: '#3b82f6',
+                pending: '#f59e0b', planning: '#8b5cf6', in_progress: '#3b82f6',
                 completed: '#22c55e', failed: '#ef4444', skipped: 'var(--tx-3)'
             };
             const statusIcons = {
-                pending: '⏳', in_progress: '🔄',
+                pending: '⏳', planning: '🧠', in_progress: '🔄',
                 completed: '✅', failed: '❌', skipped: '⏭'
             };
             const color = statusColors[i.status] || 'var(--tx-2)';
@@ -1524,6 +1525,9 @@ async function loadQueue() {
             const sourceTag = i.source !== 'user'
                 ? `<span class="tag" style="font-size:8px;padding:0 4px;background:var(--bg-3);margin-left:4px">${esc(i.source)}</span>`
                 : '';
+            const workerTag = i.worker_id
+                ? `<span style="font-size:8px;color:var(--tx-3);margin-left:2px">W${i.worker_id}</span>`
+                : '';
 
             return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
                 <div style="display:flex;align-items:center;gap:4px">
@@ -1531,6 +1535,7 @@ async function loadQueue() {
                     <span style="flex:1">${esc(i.request.substring(0, 80))}${i.request.length > 80 ? '...' : ''}</span>
                     ${sourceTag}
                     <span style="color:${color};font-size:10px;font-weight:600">${esc(i.status)}</span>
+                    ${workerTag}
                     ${cancelBtn}
                 </div>
                 <div style="font-size:9px;color:var(--tx-3);padding-left:18px">${ts} · #${i.id}</div>
@@ -1557,7 +1562,7 @@ async function toggleQueueWorker() {
     btn.disabled = true;
     try {
         const endpoint = isRunning ? '/api/supervisor/queue/stop' : '/api/supervisor/queue/start';
-        await fetch(endpoint, { method: 'POST' });
+        await fetch(endpoint, { method: 'POST', headers: {'Content-Type':'application/json'}, body: '{}' });
         await loadQueue();
     } catch(e) {
         console.error('Toggle worker failed', e);

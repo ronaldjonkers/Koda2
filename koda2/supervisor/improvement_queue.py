@@ -1,7 +1,10 @@
 """Improvement Queue — persistent, chronological queue for self-improvement tasks.
 
-Stores improvement requests in a JSON file and processes them one-by-one
-in a background asyncio task. Items can be added by:
+Supports multiple concurrent worker agents:
+- LLM planning runs in parallel across workers (IO-bound, safe)
+- Git/file/test operations are serialized via a shared lock (not concurrent-safe)
+
+Items can be added by:
 - Users via the dashboard ("Request Self-Improvement")
 - The ContinuousLearner (auto-detected observations)
 - The supervisor (error patterns, recurring crashes)
@@ -23,12 +26,14 @@ logger = get_logger(__name__)
 
 QUEUE_DIR = Path("data/supervisor")
 QUEUE_FILE = QUEUE_DIR / "improvement_queue.json"
+DEFAULT_MAX_WORKERS = 3
 
 
 class QueueItemStatus(StrEnum):
     """Status of a queued improvement item."""
 
     PENDING = "pending"
+    PLANNING = "planning"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -45,13 +50,23 @@ class QueueItemSource(StrEnum):
 
 
 class ImprovementQueue:
-    """Persistent, chronological improvement queue with background processing."""
+    """Persistent queue with multiple concurrent workers.
 
-    def __init__(self) -> None:
+    Architecture:
+        ┌──────────────────────────────────────────────┐
+        │  Worker 1: plan (LLM) ──┐                    │
+        │  Worker 2: plan (LLM) ──┼─► git_lock ──► apply/test/commit
+        │  Worker 3: plan (LLM) ──┘   (1 at a time)   │
+        └──────────────────────────────────────────────┘
+    """
+
+    def __init__(self, max_workers: int = DEFAULT_MAX_WORKERS) -> None:
         self._items: list[dict[str, Any]] = []
         self._running = False
-        self._worker_task: Optional[asyncio.Task] = None
-        self._lock = asyncio.Lock()
+        self._max_workers = max(1, max_workers)
+        self._worker_tasks: list[asyncio.Task] = []
+        self._pick_lock = asyncio.Lock()
+        self._git_lock = asyncio.Lock()
         QUEUE_DIR.mkdir(parents=True, exist_ok=True)
         self._load()
 
@@ -62,9 +77,9 @@ class ImprovementQueue:
         if QUEUE_FILE.exists():
             try:
                 self._items = json.loads(QUEUE_FILE.read_text())
-                # Reset any stuck in_progress items back to pending
+                # Reset any stuck items back to pending on load
                 for item in self._items:
-                    if item.get("status") == QueueItemStatus.IN_PROGRESS:
+                    if item.get("status") in (QueueItemStatus.IN_PROGRESS, QueueItemStatus.PLANNING):
                         item["status"] = QueueItemStatus.PENDING
             except Exception as exc:
                 logger.error("queue_load_failed", error=str(exc))
@@ -165,88 +180,147 @@ class ImprovementQueue:
         return {
             "total": len(self._items),
             "pending": counts.get(QueueItemStatus.PENDING, 0),
+            "planning": counts.get(QueueItemStatus.PLANNING, 0),
             "in_progress": counts.get(QueueItemStatus.IN_PROGRESS, 0),
             "completed": counts.get(QueueItemStatus.COMPLETED, 0),
             "failed": counts.get(QueueItemStatus.FAILED, 0),
             "skipped": counts.get(QueueItemStatus.SKIPPED, 0),
+            "max_workers": self._max_workers,
+            "active_workers": len([t for t in self._worker_tasks if not t.done()]),
         }
 
-    # ── Background Worker ────────────────────────────────────────────
+    # ── Background Workers ───────────────────────────────────────────
 
-    async def _process_one(self, item: dict[str, Any]) -> None:
-        """Process a single queue item through the EvolutionEngine."""
+    async def _pick_item(self) -> Optional[dict[str, Any]]:
+        """Atomically pick the next pending item and mark it as planning.
+
+        Uses _pick_lock so two workers never grab the same item.
+        """
+        async with self._pick_lock:
+            item = self._next_pending()
+            if item:
+                item["status"] = QueueItemStatus.PLANNING
+                item["started_at"] = dt.datetime.now().isoformat()
+                self._save()
+            return item
+
+    async def _process_one(self, worker_id: int, item: dict[str, Any]) -> None:
+        """Process a single queue item: plan in parallel, apply under git lock.
+
+        Phase 1 — Planning (parallel-safe):
+            Call LLM to produce an improvement plan. Multiple workers
+            can plan simultaneously.
+
+        Phase 2 — Applying (serialized via git_lock):
+            Stash → write files → run tests → commit/push or rollback.
+            Only one worker can do this at a time.
+        """
         from koda2.supervisor.safety import SafetyGuard
         from koda2.supervisor.evolution import EvolutionEngine
 
-        item["status"] = QueueItemStatus.IN_PROGRESS
-        item["started_at"] = dt.datetime.now().isoformat()
-        self._save()
-
-        logger.info("queue_processing", id=item["id"], request=item["request"][:100])
+        item["worker_id"] = worker_id
+        logger.info("queue_planning", worker=worker_id, id=item["id"], request=item["request"][:80])
 
         try:
             safety = SafetyGuard()
             engine = EvolutionEngine(safety)
-            success, message = await engine.implement_improvement(item["request"])
+
+            # Phase 1: Plan (parallel — no lock needed)
+            safety.audit("evolution_start", {"request": item["request"], "worker": worker_id})
+            plan = await engine.plan_improvement(item["request"])
+
+            if not plan.get("changes"):
+                item["success"] = False
+                item["status"] = QueueItemStatus.FAILED
+                item["result_message"] = f"No changes planned. {plan.get('summary', '')}"[:500]
+                item["finished_at"] = dt.datetime.now().isoformat()
+                self._save()
+                return
+
+            if plan.get("risk") == "high":
+                item["success"] = False
+                item["status"] = QueueItemStatus.FAILED
+                item["result_message"] = f"High-risk — needs manual review. {plan['summary']}"[:500]
+                item["finished_at"] = dt.datetime.now().isoformat()
+                self._save()
+                return
+
+            # Phase 2: Apply (serialized — acquire git lock)
+            item["status"] = QueueItemStatus.IN_PROGRESS
+            self._save()
+            logger.info("queue_applying", worker=worker_id, id=item["id"], summary=plan["summary"][:80])
+
+            async with self._git_lock:
+                success, message = await engine.apply_plan(plan)
 
             item["success"] = success
             item["status"] = QueueItemStatus.COMPLETED if success else QueueItemStatus.FAILED
             item["result_message"] = message[:500]
+
         except Exception as exc:
             item["success"] = False
             item["status"] = QueueItemStatus.FAILED
             item["result_message"] = f"Error: {exc}"[:500]
-            logger.error("queue_item_error", id=item["id"], error=str(exc))
+            logger.error("queue_item_error", worker=worker_id, id=item["id"], error=str(exc))
 
         item["finished_at"] = dt.datetime.now().isoformat()
         self._save()
-        logger.info(
-            "queue_item_done",
-            id=item["id"],
-            success=item["success"],
-            status=item["status"],
-        )
+        logger.info("queue_item_done", worker=worker_id, id=item["id"], success=item["success"])
 
-    async def _worker_loop(self) -> None:
-        """Background worker that processes the queue chronologically."""
-        logger.info("improvement_queue_worker_started")
+    async def _worker_loop(self, worker_id: int) -> None:
+        """Background worker loop. Multiple instances run concurrently."""
+        logger.info("queue_worker_started", worker=worker_id)
         while self._running:
             try:
-                async with self._lock:
-                    item = self._next_pending()
+                item = await self._pick_item()
 
                 if item:
-                    await self._process_one(item)
-                    # Small pause between items to avoid overload
-                    await asyncio.sleep(5)
+                    await self._process_one(worker_id, item)
+                    await asyncio.sleep(2)
                 else:
-                    # No pending items — poll every 30 seconds
-                    await asyncio.sleep(30)
+                    # No pending items — poll every 15 seconds
+                    await asyncio.sleep(15)
 
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.error("queue_worker_error", error=str(exc))
-                await asyncio.sleep(30)
+                logger.error("queue_worker_error", worker=worker_id, error=str(exc))
+                await asyncio.sleep(15)
 
-        logger.info("improvement_queue_worker_stopped")
+        logger.info("queue_worker_stopped", worker=worker_id)
 
     def start_worker(self) -> None:
-        """Start the background worker task."""
+        """Start the background worker pool."""
         if self._running:
             return
         self._running = True
-        self._worker_task = asyncio.create_task(self._worker_loop())
+        # Clean up any old done tasks
+        self._worker_tasks = [t for t in self._worker_tasks if not t.done()]
+        # Spawn workers up to max
+        for i in range(self._max_workers):
+            task = asyncio.create_task(self._worker_loop(i + 1))
+            self._worker_tasks.append(task)
+        logger.info("queue_workers_started", count=self._max_workers)
 
     def stop_worker(self) -> None:
-        """Stop the background worker."""
+        """Stop all background workers."""
         self._running = False
-        if self._worker_task and not self._worker_task.done():
-            self._worker_task.cancel()
+        for task in self._worker_tasks:
+            if not task.done():
+                task.cancel()
+        self._worker_tasks.clear()
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def max_workers(self) -> int:
+        return self._max_workers
+
+    @max_workers.setter
+    def max_workers(self, value: int) -> None:
+        self._max_workers = max(1, value)
 
     # ── Cleanup ──────────────────────────────────────────────────────
 
