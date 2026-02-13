@@ -188,6 +188,14 @@ class TelegramBot:
             self._app = None
             logger.info("telegram_bot_stopped")
 
+    async def send_typing(self, chat_id: int | str) -> None:
+        """Send typing indicator to a Telegram chat."""
+        if self._app:
+            try:
+                await self._app.bot.send_chat_action(chat_id=chat_id, action="typing")
+            except Exception:
+                pass  # typing indicator is best-effort
+
     async def send_message(self, chat_id: int | str, text: str, parse_mode: str = "Markdown") -> None:
         """Send a message to a specific chat."""
         if self._app:

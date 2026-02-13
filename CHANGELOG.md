@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New email tools for LLM** — `get_email_detail` (full body), `reply_email` (with reply_all), `search_email` (keyword search across all accounts)
 - **Account-aware email sending** — `send_email` now supports `account` parameter to choose which account to send from, plus `cc` support
 - **OFFICE365** added to `EmailProvider` enum (was missing, caused runtime errors for MSGraph accounts)
+- **`/cancel <id>` command** — cancel scheduled tasks, queue tasks, or agent tasks from WhatsApp/Telegram (prefix match on IDs)
+- **Full memory management** — dashboard shows all memories with add/delete, `/memory` WhatsApp command, `store_memory`/`list_memories`/`delete_memory` LLM tools, API endpoints
+- **Session management** — `/new` (reset session), `/compact` (summarize + prune old messages to save tokens), `/usage` (token stats + cost estimate)
+- **Typing indicators** — WhatsApp and Telegram show "typing..." while the agent processes requests and executes tools
+- **SOUL.md / TOOLS.md workspace files** — customizable personality and tool guidelines loaded from `workspace/` directory. Falls back to built-in defaults.
+- **Webhooks** — `POST /api/webhook/{hook_id}` receives external triggers (GitHub, Stripe, etc.), stores as memory, optionally processes through agent and notifies via WhatsApp/Telegram
+- **Browser control** — `BrowserService` with Playwright/Chrome CDP: `browse_url` (navigate + extract text), `browser_action` (click, type, scroll, screenshot, evaluate JS). LLM can now browse the web.
+- **`koda2 doctor`** — CLI health check command that validates environment, dependencies, database, LLM providers, messaging, workspace files, and security configuration
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:

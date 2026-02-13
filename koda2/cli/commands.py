@@ -46,6 +46,155 @@ def setup(
 
 
 @app.command()
+def doctor() -> None:
+    """Run health checks on the Koda2 installation."""
+    import shutil
+    from pathlib import Path
+
+    console.print("\n[bold cyan]🩺 Koda2 Doctor[/bold cyan]\n")
+    issues = 0
+    warnings = 0
+
+    def ok(msg: str) -> None:
+        console.print(f"  [green]✓[/green] {msg}")
+
+    def warn(msg: str) -> None:
+        nonlocal warnings
+        warnings += 1
+        console.print(f"  [yellow]⚠[/yellow] {msg}")
+
+    def fail(msg: str) -> None:
+        nonlocal issues
+        issues += 1
+        console.print(f"  [red]✗[/red] {msg}")
+
+    # ── Environment ──
+    console.print("[bold]Environment[/bold]")
+    try:
+        from koda2.config import get_settings
+        settings = get_settings()
+        ok(f"Config loaded (env={settings.koda2_env})")
+    except Exception as exc:
+        fail(f"Config failed: {exc}")
+        settings = None
+
+    env_file = Path(".env")
+    if env_file.exists():
+        ok(".env file found")
+    else:
+        warn(".env file missing — using defaults")
+
+    # ── Python deps ──
+    console.print("\n[bold]Dependencies[/bold]")
+    for pkg in ["fastapi", "sqlalchemy", "chromadb", "httpx", "apscheduler", "pydantic"]:
+        try:
+            __import__(pkg)
+            ok(f"{pkg} installed")
+        except ImportError:
+            fail(f"{pkg} NOT installed")
+
+    # Optional deps
+    for pkg, label in [("playwright", "Browser control"), ("google.oauth2", "Google APIs"), ("anthropic", "Anthropic LLM")]:
+        try:
+            __import__(pkg)
+            ok(f"{label} ({pkg}) available")
+        except ImportError:
+            warn(f"{label} ({pkg}) not installed — optional")
+
+    # ── Database ──
+    console.print("\n[bold]Database[/bold]")
+    if settings:
+        db_path = settings.database_url.replace("sqlite+aiosqlite:///", "")
+        if Path(db_path).exists():
+            size_mb = Path(db_path).stat().st_size / 1024 / 1024
+            ok(f"SQLite DB exists ({size_mb:.1f} MB): {db_path}")
+        else:
+            warn(f"SQLite DB not found: {db_path} (will be created on first run)")
+
+        chroma_dir = Path(settings.chroma_persist_dir)
+        if chroma_dir.exists():
+            ok(f"ChromaDB dir exists: {settings.chroma_persist_dir}")
+        else:
+            warn(f"ChromaDB dir missing: {settings.chroma_persist_dir} (will be created)")
+
+    # ── LLM Providers ──
+    console.print("\n[bold]LLM Providers[/bold]")
+    if settings:
+        if settings.openai_api_key:
+            ok("OpenAI API key configured")
+        else:
+            warn("OpenAI API key not set")
+        if settings.anthropic_api_key:
+            ok("Anthropic API key configured")
+        else:
+            warn("Anthropic API key not set")
+        if settings.google_ai_api_key:
+            ok("Google AI API key configured")
+        else:
+            warn("Google AI API key not set")
+        if settings.openrouter_api_key:
+            ok("OpenRouter API key configured")
+        else:
+            warn("OpenRouter API key not set")
+
+        has_any = any([settings.openai_api_key, settings.anthropic_api_key, settings.google_ai_api_key, settings.openrouter_api_key])
+        if not has_any:
+            fail("No LLM provider configured — assistant cannot function")
+
+    # ── Messaging ──
+    console.print("\n[bold]Messaging[/bold]")
+    if settings:
+        if getattr(settings, "telegram_bot_token", ""):
+            ok("Telegram bot token configured")
+        else:
+            warn("Telegram not configured")
+        if getattr(settings, "whatsapp_enabled", False):
+            ok("WhatsApp enabled")
+            node = shutil.which("node")
+            if node:
+                ok(f"Node.js found: {node}")
+            else:
+                fail("Node.js not found — WhatsApp bridge needs it")
+        else:
+            warn("WhatsApp not enabled")
+
+    # ── Workspace ──
+    console.print("\n[bold]Workspace[/bold]")
+    ws = Path("workspace")
+    if ws.exists():
+        ok("workspace/ directory exists")
+        for f in ["SOUL.md", "TOOLS.md"]:
+            if (ws / f).exists():
+                ok(f"workspace/{f} found")
+            else:
+                warn(f"workspace/{f} missing — using defaults")
+    else:
+        warn("workspace/ directory missing — using default prompts")
+
+    # ── Security ──
+    console.print("\n[bold]Security[/bold]")
+    if settings:
+        if settings.koda2_secret_key and settings.koda2_secret_key != "change-me":
+            ok("Secret key configured")
+        else:
+            fail("Secret key is default 'change-me' — change it!")
+        if settings.koda2_encryption_key:
+            ok("Encryption key configured")
+        else:
+            warn("Encryption key not set — credentials stored unencrypted")
+
+    # ── Summary ──
+    console.print()
+    if issues == 0 and warnings == 0:
+        console.print("[bold green]All checks passed! ✨[/bold green]")
+    elif issues == 0:
+        console.print(f"[bold yellow]{warnings} warning(s), no critical issues.[/bold yellow]")
+    else:
+        console.print(f"[bold red]{issues} issue(s), {warnings} warning(s) — fix the red items above.[/bold red]")
+    console.print()
+
+
+@app.command()
 def status() -> None:
     """Show Koda2 status."""
     from koda2.config import get_settings

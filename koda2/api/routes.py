@@ -356,6 +356,63 @@ async def delete_memory(memory_id: str) -> dict[str, Any]:
     return {"deleted": True, "id": memory_id}
 
 
+# ── Webhooks ──────────────────────────────────────────────────────────
+
+class WebhookPayload(BaseModel):
+    """Incoming webhook payload."""
+    event: str = ""
+    source: str = ""
+    message: str = ""
+    data: dict[str, Any] = Field(default_factory=dict)
+    notify_channel: str = ""  # "whatsapp", "telegram", or "" for no notification
+    notify_to: str = ""  # recipient for notification
+
+
+@router.post("/webhook/{hook_id}")
+async def receive_webhook(hook_id: str, payload: WebhookPayload) -> dict[str, Any]:
+    """Receive an external webhook and optionally trigger the agent.
+
+    Examples:
+        POST /api/webhook/github  {"event": "push", "source": "github", "message": "New push to main by ronald"}
+        POST /api/webhook/stripe  {"event": "payment", "data": {"amount": 100}, "notify_channel": "whatsapp", "notify_to": "me"}
+    """
+    orch = get_orchestrator()
+    logger.info("webhook_received", hook_id=hook_id, event=payload.event, source=payload.source)
+
+    # Store as memory
+    content = f"Webhook [{hook_id}] {payload.event}: {payload.message}" if payload.message else f"Webhook [{hook_id}] {payload.event}"
+    await orch.memory.store_memory(
+        "default", "webhook", content, importance=0.6, source=f"webhook:{hook_id}",
+    )
+
+    result: dict[str, Any] = {"received": True, "hook_id": hook_id, "event": payload.event}
+
+    # If a message is provided, process it through the agent
+    if payload.message:
+        agent_result = await orch.process_message(
+            "default", f"[Webhook {hook_id}/{payload.event}] {payload.message}", channel="webhook",
+        )
+        result["agent_response"] = agent_result.get("response", "")
+
+    # Optionally notify via a channel
+    if payload.notify_channel and (payload.message or payload.event):
+        notify_text = payload.message or f"Webhook: {payload.event} from {payload.source}"
+        if result.get("agent_response"):
+            notify_text = result["agent_response"]
+        to = payload.notify_to or "me"
+        try:
+            if payload.notify_channel == "whatsapp" and orch.whatsapp.is_configured:
+                await orch.whatsapp.send_message(to, notify_text)
+                result["notified"] = "whatsapp"
+            elif payload.notify_channel == "telegram" and orch.telegram.is_configured:
+                await orch.telegram.send_message(to, notify_text)
+                result["notified"] = "telegram"
+        except Exception as exc:
+            result["notify_error"] = str(exc)
+
+    return result
+
+
 # ── Plugins / Self-Improvement ───────────────────────────────────────
 
 @router.get("/plugins")

@@ -238,7 +238,10 @@ class CommonCommands:
             "/memory [text] — List memories or store a new one\n"
             "/contacts [name] — Search contacts\n"
             "/accounts — Manage accounts (list/add/test/delete)\n"
-            "/config — View settings\n\n"
+            "/config — View settings\n"
+            "/new — Reset conversation (fresh session)\n"
+            "/compact — Compact session context (saves tokens)\n"
+            "/usage — Show token usage and cost\n\n"
             "*Or just send a message:*\n"
             "• \"Schedule a meeting with John tomorrow at 2pm\"\n"
             "• \"Send an email to Ronald about the report\"\n"
@@ -246,6 +249,99 @@ class CommonCommands:
             "• \"Create a Meet link and send it to Jan via WhatsApp\""
         )
     
+    async def handle_new(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Reset conversation — start a fresh session."""
+        from koda2.database import get_session
+        from sqlalchemy import select, delete as sa_delete
+        from koda2.modules.memory.models import Conversation, UserProfile
+
+        async with get_session() as session:
+            result = await session.execute(
+                select(UserProfile).where(UserProfile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+            if profile:
+                await session.execute(
+                    sa_delete(Conversation).where(Conversation.profile_id == profile.id)
+                )
+                await session.flush()
+
+        return "🔄 *Session reset*\n\nConversation history cleared. Starting fresh!"
+
+    async def handle_compact(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Compact session — summarize old context to save tokens."""
+        recent = await self._orch.memory.get_recent_conversations(user_id, limit=50)
+        if len(recent) < 6:
+            return "📦 Session is already compact (fewer than 6 messages)."
+
+        # Build transcript of older messages (keep last 4)
+        old_messages = recent[:-4]
+        transcript = "\n".join(f"{c.role}: {c.content[:200]}" for c in old_messages)
+
+        # Ask LLM to summarize
+        from koda2.modules.llm.models import ChatMessage, LLMRequest
+        summary_request = LLMRequest(
+            messages=[ChatMessage(role="user", content=f"Summarize this conversation in 3-5 bullet points. Be concise:\n\n{transcript[:4000]}")],
+            system_prompt="You are a conversation summarizer. Output only bullet points.",
+            temperature=0.2,
+        )
+        try:
+            resp = await self._orch.llm.complete(summary_request)
+            summary = resp.content or "(no summary)"
+        except Exception:
+            summary = "(summary failed)"
+
+        # Delete old conversations, store summary as a memory
+        from koda2.database import get_session
+        from sqlalchemy import select, delete as sa_delete
+        from koda2.modules.memory.models import Conversation, UserProfile
+
+        async with get_session() as session:
+            result = await session.execute(
+                select(UserProfile).where(UserProfile.user_id == user_id)
+            )
+            profile = result.scalar_one_or_none()
+            if profile:
+                old_ids = [c.id for c in old_messages]
+                if old_ids:
+                    await session.execute(
+                        sa_delete(Conversation).where(Conversation.id.in_(old_ids))
+                    )
+                    await session.flush()
+
+        # Store summary in memory for future recall
+        await self._orch.memory.store_memory(
+            user_id, "session_summary", summary, importance=0.6, source="compact",
+        )
+
+        kept = len(recent) - len(old_messages)
+        return (
+            f"📦 *Session compacted*\n\n"
+            f"Removed {len(old_messages)} old messages, kept {kept} recent.\n"
+            f"Summary stored in memory:\n{summary[:500]}"
+        )
+
+    async def handle_usage(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Show token usage and estimated cost."""
+        recent = await self._orch.memory.get_recent_conversations(user_id, limit=50)
+        total_tokens = sum(c.tokens_used for c in recent if c.tokens_used)
+        msg_count = len(recent)
+        # Rough cost estimate ($0.005 per 1K tokens for GPT-4o)
+        cost = (total_tokens / 1000) * 0.005
+        mem_stats = await self._orch.memory.get_memory_stats(user_id)
+
+        return (
+            f"📊 *Usage Stats*\n\n"
+            f"*Session:*\n"
+            f"Messages: {msg_count}\n"
+            f"Tokens used: {total_tokens:,}\n"
+            f"Est. cost: ${cost:.4f}\n\n"
+            f"*Memory:*\n"
+            f"Stored memories: {mem_stats.get('total', 0)}\n"
+            f"Vector entries: {mem_stats.get('vector_count', 0)}\n"
+            f"Categories: {', '.join(f'{k}({v})' for k, v in mem_stats.get('categories', {}).items()) or 'none'}"
+        )
+
     async def handle_schedule(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle schedule command."""
         if not args:
@@ -977,6 +1073,10 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("accounts", common.handle_accounts, "Manage accounts (list/add/enable/disable/test)")
     parser.register("meet", common.handle_meet, "Create a Google Meet link")
     parser.register("contacts", common.handle_contacts, "Search contacts")
+    parser.register("new", common.handle_new, "Reset conversation session")
+    parser.register("reset", common.handle_new, "Reset conversation session")
+    parser.register("compact", common.handle_compact, "Compact session context")
+    parser.register("usage", common.handle_usage, "Show token usage and cost")
 
     # Register wizard handlers for step-by-step account setup
     parser.register_wizard("add_exchange", _wizard_add_exchange)

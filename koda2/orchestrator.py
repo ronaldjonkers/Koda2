@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Optional
 
 from koda2.config import get_settings
@@ -32,21 +33,21 @@ from koda2.modules.self_improve import SelfImproveService
 from koda2.modules.task_queue import TaskQueueService
 from koda2.modules.travel import TravelService
 from koda2.modules.agent import AgentService
+from koda2.modules.browser import BrowserService
 from koda2.modules.commands import get_registry
 from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """You are Koda2, a professional AI executive assistant functioning as a director-level secretary.
+# Fallback system prompt (used when workspace/SOUL.md is not found)
+_DEFAULT_SYSTEM_PROMPT = """You are Koda2, a personal AI executive assistant. You help the user by executing actions using the available tools.
 
-You have tools available to take real actions. When the user asks you to do something, USE THE TOOLS — don't just describe what you would do. Execute the actions directly.
-
-Your capabilities (all available as tools):
-- Calendar: check events, schedule meetings (Google, Exchange, Office 365, CalDAV)
-- Email: read inbox, send emails with/without attachments (Gmail, Exchange, IMAP)
-- WhatsApp: send messages and files to contacts or phone numbers
-- Files: read, write, list directories, check existence
+Available capabilities:
+- Calendar: list events, create events, schedule meetings with prep
+- Email: read inbox, send emails, search, reply, forward
+- WhatsApp: send messages and files to contacts
+- Scheduling: create recurring tasks, one-time tasks, interval tasks
 - Shell: run any terminal command (ls, cat, find, grep, git, python, etc.)
 - Documents: create DOCX, XLSX, PDF, PPTX; analyze PDF/DOCX/images
 - Images: generate with AI, analyze with vision
@@ -66,11 +67,16 @@ IMPORTANT RULES:
 7. Be concise and helpful. Respond in the user's language.
 8. Today's date/time context will be provided when available."""
 
-# Maximum tool-calling loop iterations to prevent runaway
-MAX_TOOL_ITERATIONS = 15
+# Workspace directory for personality/tool files
+_WORKSPACE_DIR = Path("workspace")
 
-# If the first LLM response has more than this many tool calls, offload to background agent
-AGENT_AUTO_THRESHOLD = 4
+
+def _load_workspace_file(name: str) -> str:
+    """Load a markdown file from the workspace directory."""
+    path = _WORKSPACE_DIR / name
+    if path.exists():
+        return path.read_text(encoding="utf-8").strip()
+    return ""
 
 
 class Orchestrator:
@@ -107,6 +113,7 @@ class Orchestrator:
             memory_service=self.memory,
         )
         self.video = VideoService()
+        self.browser = BrowserService()
         self.proactive = ProactiveService(
             calendar_service=self.calendar,
             email_service=self.email,
@@ -135,9 +142,27 @@ class Orchestrator:
         self.whatsapp.set_message_handler(self.process_message)
 
     def _get_system_prompt(self) -> str:
-        """Generate the full system prompt with date/time context."""
+        """Generate the full system prompt from workspace files + date/time context."""
+        soul = _load_workspace_file("SOUL.md")
+        tools_md = _load_workspace_file("TOOLS.md")
+        base = soul if soul else _DEFAULT_SYSTEM_PROMPT
+        if tools_md:
+            base += f"\n\n{tools_md}"
         now = dt.datetime.now()
-        return SYSTEM_PROMPT + f"\n\nCurrent date/time: {now.strftime('%A %d %B %Y, %H:%M')} (Europe/Amsterdam)"
+        base += f"\n\nCurrent date/time: {now.strftime('%A %d %B %Y, %H:%M')} (Europe/Amsterdam)"
+        if self._settings.user_name:
+            base += f"\nUser: {self._settings.user_name}"
+        return base
+
+    async def _send_typing(self, user_id: str, channel: str) -> None:
+        """Send typing indicator on the originating channel (best-effort)."""
+        try:
+            if channel == "whatsapp" and self.whatsapp.is_configured:
+                await self.whatsapp.send_typing(user_id)
+            elif channel == "telegram" and self.telegram.is_configured:
+                await self.telegram.send_typing(user_id)
+        except Exception:
+            pass  # typing indicators are best-effort
 
     def _get_tool_definitions(self) -> list[dict[str, Any]]:
         """Get OpenAI-format tool definitions from the command registry."""
@@ -161,6 +186,9 @@ class Orchestrator:
         """
         await self.memory.add_conversation(user_id, "user", message, channel=channel)
         await log_action(user_id, "message_received", "orchestrator", {"channel": channel, "length": len(message)})
+
+        # Send typing indicator on the originating channel
+        await self._send_typing(user_id, channel)
 
         # Build context
         context = self.memory.recall(message, user_id=user_id, n=3)
@@ -186,6 +214,10 @@ class Orchestrator:
         # ── Agent Loop ────────────────────────────────────────────────
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
+
+            # Refresh typing indicator each iteration so user sees activity
+            if iteration > 1:
+                await self._send_typing(user_id, channel)
 
             request = LLMRequest(
                 messages=history_messages,
@@ -751,6 +783,22 @@ class Orchestrator:
             if success:
                 return {"deleted": True}
             return {"error": "Memory not found"}
+
+        elif action_name == "browse_url":
+            result = await self.browser.browse_url(
+                url=params.get("url", ""),
+                wait_for=params.get("wait_for", "load"),
+            )
+            return result
+
+        elif action_name == "browser_action":
+            result = await self.browser.browser_action(
+                action=params.get("action", ""),
+                selector=params.get("selector", ""),
+                text=params.get("text", ""),
+                url=params.get("url", ""),
+            )
+            return result
 
         elif action_name == "run_shell":
             result = await self.macos.run_shell(

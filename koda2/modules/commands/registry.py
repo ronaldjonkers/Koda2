@@ -474,6 +474,37 @@ COMMANDS: dict[str, Command] = {
         ],
     ),
     
+    # ── Browser Commands ────────────────────────────────────────────────────────
+    "browse_url": Command(
+        name="browse_url",
+        category="browser",
+        description="Open a URL in a headless browser and return the page title, text content, and screenshot. Use this to read web pages, check websites, or gather information from the internet.",
+        parameters=[
+            CommandParameter("url", "string", True, description="URL to navigate to"),
+            CommandParameter("wait_for", "string", False, "load", "Wait condition: load, domcontentloaded, or networkidle"),
+        ],
+        examples=[
+            '{"action": "browse_url", "params": {"url": "https://news.ycombinator.com"}}',
+        ],
+    ),
+
+    "browser_action": Command(
+        name="browser_action",
+        category="browser",
+        description="Perform an action in the browser: click, type, scroll, screenshot, evaluate JS, navigate back/forward. Use after browse_url to interact with the page.",
+        parameters=[
+            CommandParameter("action", "string", True, description="Action: click, type, scroll, screenshot, evaluate, goto, back, forward, get_text"),
+            CommandParameter("selector", "string", False, None, "CSS selector for click/type"),
+            CommandParameter("text", "string", False, None, "Text to type, JS code for evaluate, or scroll direction (up/down)"),
+            CommandParameter("url", "string", False, None, "URL for goto action"),
+        ],
+        examples=[
+            '{"action": "browser_action", "params": {"action": "click", "selector": "#search-button"}}',
+            '{"action": "browser_action", "params": {"action": "type", "selector": "input[name=q]", "text": "Koda2 AI assistant"}}',
+            '{"action": "browser_action", "params": {"action": "screenshot"}}',
+        ],
+    ),
+
     # ── Task Queue Commands ─────────────────────────────────────────────────────
     "get_task_status": Command(
         name="get_task_status",
