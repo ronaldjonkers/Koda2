@@ -31,6 +31,7 @@ from koda2.modules.scheduler import SchedulerService
 from koda2.modules.self_improve import SelfImproveService
 from koda2.modules.task_queue import TaskQueueService
 from koda2.modules.travel import TravelService
+from koda2.modules.agent import AgentService
 from koda2.modules.commands import get_registry
 from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
@@ -111,6 +112,31 @@ Available actions and their parameters:
 - get_task_status: {"task_id": "..."}
 - list_tasks: {"status": "pending|running|completed|failed", "limit": 10}
 
+AGENT MODE - AUTONOMOUS TASK EXECUTION:
+For complex multi-step tasks, use the AGENT to work autonomously:
+- run_agent_task: {"request": "Create a React website with login page"} - Start autonomous task
+- get_agent_task: {"task_id": "..."} - Check task status
+- list_agent_tasks: {"status": "running"} - List running tasks
+- cancel_agent_task: {"task_id": "..."} - Cancel a task
+- provide_clarification: {"task_id": "...", "answers": {...}} - Answer agent questions
+
+The AGENT will:
+1. Create a detailed execution plan
+2. Execute steps autonomously with feedback loops
+3. Handle failures with retries and alternatives
+4. Notify you when complete (even if you're away)
+5. Ask for clarification if stuck
+
+WHEN TO USE AGENT MODE:
+- Multi-step projects (building apps, writing reports, data analysis)
+- Tasks that take >5 minutes
+- Tasks that can run while user is away
+- Complex workflows with many dependencies
+
+SIMPLE vs AGENT tasks:
+SIMPLE (use direct actions): "Send email to John" → use send_email
+AGENT (use run_agent_task): "Build a complete website" → use run_agent_task
+
 COMMAND SELF-DISCOVERY:
 If you need details on any command, you can use:
 - describe_command: {"command": "send_whatsapp"} - Get full details about a command
@@ -121,7 +147,7 @@ When the user gives you a request, determine the intent and required actions. Re
     "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
               generate_image, generate_video, analyze_image, analyze_document, create_reminder, 
               find_contact, search_memory, send_file, send_whatsapp, sync_contacts, run_command, read_file, 
-              write_file, list_directory, describe_command, list_command_categories, general_chat",
+              write_file, list_directory, describe_command, list_command_categories, run_agent_task, general_chat",
     "entities": {
         "any extracted entities like names, dates, times, subjects, file paths, recipient names, etc."
     },
@@ -193,6 +219,12 @@ class Orchestrator:
         
         # Command registry for action documentation
         self.commands = get_registry()
+        
+        # Agent service for autonomous task execution
+        self.agent = AgentService(
+            llm_router=self.llm,
+            orchestrator=self,
+        )
         
         # Create unified command parser and inject into messaging bots
         self.command_parser = create_command_parser(self)
@@ -305,6 +337,15 @@ class Orchestrator:
                         action_feedback.append("✅ WhatsApp message sent!")
                     else:
                         action_feedback.append(f"❌ Failed to send WhatsApp: {result.get('error', 'Unknown error')}")
+                elif action_name == "run_agent_task":
+                    if isinstance(result, dict) and result.get("status") == "waiting":
+                        questions = result.get("questions", [])
+                        action_feedback.append(f"⏸️ Agent task waiting for clarification:\n" + "\n".join(f"  - {q}" for q in questions))
+                    elif isinstance(result, dict) and result.get("task_id"):
+                        steps = result.get("plan_steps", 0)
+                        action_feedback.append(f"🤖 Agent task started with {steps} steps. You'll be notified when complete!")
+                    else:
+                        action_feedback.append(f"❌ Failed to start agent task: {result.get('error', 'Unknown error')}")
                         
             except Exception as exc:
                 logger.error("action_failed", action=action, error=str(exc))
@@ -865,6 +906,74 @@ class Orchestrator:
                 },
             }
 
+        elif action_name == "run_agent_task":
+            """Create and start an autonomous agent task."""
+            request = params.get("request", "")
+            auto_start = params.get("auto_start", True)
+            
+            task = await self.agent.create_task(
+                user_id=user_id,
+                request=request,
+                auto_start=auto_start,
+            )
+            
+            # If waiting for clarification, return questions
+            if task.status.value == "waiting":
+                return {
+                    "task_id": task.id,
+                    "status": task.status.value,
+                    "questions": task.context.get("clarification_questions", []),
+                    "message": "I need some clarification before I can proceed.",
+                }
+            
+            return {
+                "task_id": task.id,
+                "status": task.status.value,
+                "plan_steps": len(task.plan),
+                "message": f"Started autonomous task with {len(task.plan)} steps. You'll be notified when complete.",
+            }
+
+        elif action_name == "get_agent_task":
+            """Get status of an agent task."""
+            task_id = params.get("task_id", "")
+            task = await self.agent.get_task(task_id)
+            if task:
+                return task.to_dict()
+            return {"error": "Task not found", "task_id": task_id}
+
+        elif action_name == "list_agent_tasks":
+            """List agent tasks for user."""
+            tasks = await self.agent.list_tasks(
+                user_id=user_id,
+                status=params.get("status"),
+                limit=params.get("limit", 10),
+            )
+            return {
+                "tasks": [t.to_dict() for t in tasks],
+                "total": len(tasks),
+            }
+
+        elif action_name == "cancel_agent_task":
+            """Cancel a running agent task."""
+            task_id = params.get("task_id", "")
+            task = await self.agent.cancel_task(task_id)
+            return {
+                "task_id": task.id,
+                "status": task.status.value,
+                "message": "Task cancelled",
+            }
+
+        elif action_name == "provide_clarification":
+            """Provide clarification for a waiting agent task."""
+            task_id = params.get("task_id", "")
+            answers = params.get("answers", {})
+            task = await self.agent.provide_clarification(task_id, answers)
+            return {
+                "task_id": task.id,
+                "status": task.status.value,
+                "message": "Clarification received, continuing execution",
+            }
+
         elif action_name == "analyze_document":
             file_path = params.get("file_path", "")
             user_message = params.get("message", "")
@@ -986,11 +1095,43 @@ class Orchestrator:
         except Exception as exc:
             logger.error("task_queue_start_failed", error=str(exc))
         
+        # Register agent callbacks for notifications
+        try:
+            async def on_agent_update(task):
+                # Notify user of agent task completion via WhatsApp
+                if task.status.value in ("completed", "failed"):
+                    message = f"🤖 Agent Task {task.status.value.upper()}\n\n"
+                    message += f"Request: {task.original_request[:100]}...\n"
+                    message += f"Progress: {task._calculate_progress()}%\n"
+                    if task.result_summary:
+                        message += f"\nResult: {task.result_summary}"
+                    if task.error_message:
+                        message += f"\nError: {task.error_message[:200]}"
+                    
+                    # Send to user's WhatsApp if available
+                    try:
+                        if self.whatsapp.is_configured:
+                            await self.whatsapp.send_message(task.user_id, message)
+                    except Exception as e:
+                        logger.error("agent_notification_failed", error=str(e))
+            
+            self.agent.register_callback(on_agent_update)
+            logger.info("agent_callbacks_registered")
+        except Exception as exc:
+            logger.error("agent_callback_registration_failed", error=str(exc))
+        
         logger.info("orchestrator_startup_complete")
     
     async def shutdown(self) -> None:
         """Gracefully shutdown all services."""
         logger.info("orchestrator_shutdown_begin")
+        
+        # Stop agent service (pauses running tasks)
+        try:
+            await self.agent.shutdown()
+            logger.info("agent_service_stopped")
+        except Exception as exc:
+            logger.error("agent_shutdown_failed", error=str(exc))
         
         # Stop task queue
         try:

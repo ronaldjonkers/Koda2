@@ -388,6 +388,113 @@ async def whatsapp_logout() -> dict[str, Any]:
     return await orch.whatsapp.logout()
 
 
+# ── Agent Mode ───────────────────────────────────────────────────────
+
+class AgentTaskRequest(BaseModel):
+    """Request to create an agent task."""
+    request: str
+    auto_start: bool = True
+
+
+class AgentClarificationRequest(BaseModel):
+    """Request to provide clarification for an agent task."""
+    answers: dict[str, str]
+
+
+@router.post("/agent/tasks")
+async def create_agent_task(
+    req: AgentTaskRequest,
+    user_id: str = "default",
+) -> dict[str, Any]:
+    """Create and start an autonomous agent task."""
+    orch = get_orchestrator()
+    task = await orch.agent.create_task(
+        user_id=user_id,
+        request=req.request,
+        auto_start=req.auto_start,
+    )
+    return task.to_dict()
+
+
+@router.get("/agent/tasks")
+async def list_agent_tasks(
+    user_id: str = "default",
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> dict[str, Any]:
+    """List agent tasks for a user."""
+    orch = get_orchestrator()
+    from koda2.modules.agent.models import AgentStatus
+    
+    task_status = AgentStatus(status) if status else None
+    tasks = await orch.agent.list_tasks(
+        user_id=user_id,
+        status=task_status,
+        limit=limit,
+    )
+    return {
+        "tasks": [t.to_dict() for t in tasks],
+        "total": len(tasks),
+    }
+
+
+@router.get("/agent/tasks/{task_id}")
+async def get_agent_task(task_id: str) -> dict[str, Any]:
+    """Get details of a specific agent task."""
+    orch = get_orchestrator()
+    task = await orch.agent.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Agent task not found")
+    return task.to_dict()
+
+
+@router.post("/agent/tasks/{task_id}/cancel")
+async def cancel_agent_task(task_id: str) -> dict[str, Any]:
+    """Cancel a running or pending agent task."""
+    orch = get_orchestrator()
+    try:
+        task = await orch.agent.cancel_task(task_id)
+        return {"cancelled": True, "task": task.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/agent/tasks/{task_id}/pause")
+async def pause_agent_task(task_id: str) -> dict[str, Any]:
+    """Pause a running agent task."""
+    orch = get_orchestrator()
+    try:
+        task = await orch.agent.pause_task(task_id)
+        return {"paused": True, "task": task.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/agent/tasks/{task_id}/resume")
+async def resume_agent_task(task_id: str) -> dict[str, Any]:
+    """Resume a paused agent task."""
+    orch = get_orchestrator()
+    try:
+        task = await orch.agent.resume_task(task_id)
+        return {"resumed": True, "task": task.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/agent/tasks/{task_id}/clarify")
+async def provide_clarification(
+    task_id: str,
+    req: AgentClarificationRequest,
+) -> dict[str, Any]:
+    """Provide clarification for a waiting agent task."""
+    orch = get_orchestrator()
+    try:
+        task = await orch.agent.provide_clarification(task_id, req.answers)
+        return {"clarified": True, "task": task.to_dict()}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 # ── Scheduler ────────────────────────────────────────────────────────
 
 @router.get("/scheduler/tasks")
