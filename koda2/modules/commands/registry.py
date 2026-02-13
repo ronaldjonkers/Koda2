@@ -224,7 +224,7 @@ COMMANDS: dict[str, Command] = {
         ],
         examples=[
             '{"action": "run_shell", "params": {"command": "ls -la ~/Documents"}}',
-            '{"action": "run_shell", "params": {"command": "find . -name '*.pdf'"}}',
+            '{"action": "run_shell", "params": {"command": "find . -name *.pdf"}}',
         ],
         notes="Safe commands: cat, ls, find, grep, ps, etc. Blocked: sudo, rm on system paths, mkfs, dd, shutdown",
     ),

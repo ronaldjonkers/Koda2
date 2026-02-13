@@ -111,12 +111,17 @@ Available actions and their parameters:
 - get_task_status: {"task_id": "..."}
 - list_tasks: {"status": "pending|running|completed|failed", "limit": 10}
 
+COMMAND SELF-DISCOVERY:
+If you need details on any command, you can use:
+- describe_command: {"command": "send_whatsapp"} - Get full details about a command
+- list_command_categories: {} - See all command categories
+
 When the user gives you a request, determine the intent and required actions. Respond in JSON format:
 {
     "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
               generate_image, generate_video, analyze_image, analyze_document, create_reminder, 
               find_contact, search_memory, send_file, send_whatsapp, sync_contacts, run_command, read_file, 
-              write_file, list_directory, general_chat",
+              write_file, list_directory, describe_command, list_command_categories, general_chat",
     "entities": {
         "any extracted entities like names, dates, times, subjects, file paths, recipient names, etc."
     },
@@ -129,6 +134,10 @@ When the user gives you a request, determine the intent and required actions. Re
 If the user wants to send a file but doesn't specify a phone number or email:
 1. First use find_contact or search_contacts to locate the recipient
 2. Then use send_file with the found contact's phone/email
+
+If you're unsure about a command or its parameters:
+1. Use describe_command to get full documentation
+2. Reference the AVAILABLE COMMANDS REFERENCE section below
 
 If the user mentions sending/sharing/delivering a file, always use the send_file action.
 
@@ -837,6 +846,24 @@ class Orchestrator:
                 limit=params.get("limit", 10),
             )
             return [t.to_dict() for t in tasks]
+
+        elif action_name == "describe_command":
+            """Get detailed info about a command - used by LLM for self-discovery."""
+            cmd_name = params.get("command", "")
+            cmd = self.commands.get(cmd_name)
+            if cmd:
+                return cmd.to_dict()
+            return {"error": f"Command '{cmd_name}' not found", "available": [c.name for c in self.commands.list_all()[:20]]}
+
+        elif action_name == "list_command_categories":
+            """List all command categories."""
+            return {
+                "categories": self.commands.categories(),
+                "command_counts": {
+                    cat: len(self.commands.list_by_category(cat))
+                    for cat in self.commands.categories()
+                },
+            }
 
         elif action_name == "analyze_document":
             file_path = params.get("file_path", "")

@@ -21,6 +21,10 @@ app.add_typer(account_app, name="account")
 service_app = typer.Typer(help="Manage services", no_args_is_help=True)
 app.add_typer(service_app, name="service")
 
+# Commands subcommand
+cmd_app = typer.Typer(help="Browse available commands", no_args_is_help=True)
+app.add_typer(cmd_app, name="commands")
+
 
 def _async_run(coro):
     """Run an async coroutine."""
@@ -458,6 +462,103 @@ def service_logs(
         content = log_file.read_text().split("\n")
         for line in content[-lines:]:
             console.print(line)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Commands Commands (browse available actions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@cmd_app.command("list")
+def commands_list(
+    category: Optional[str] = typer.Option(None, "--category", "-c", help="Filter by category"),
+    search: Optional[str] = typer.Option(None, "--search", "-s", help="Search commands"),
+) -> None:
+    """List all available assistant commands."""
+    from koda2.modules.commands import get_registry
+    
+    registry = get_registry()
+    
+    if search:
+        commands = registry.search(search)
+        title = f"Commands matching '{search}'"
+    elif category:
+        commands = registry.list_by_category(category)
+        title = f"Commands in category '{category}'"
+    else:
+        commands = registry.list_all()
+        title = "All Available Commands"
+    
+    if not commands:
+        console.print("[yellow]No commands found.[/yellow]")
+        return
+    
+    table = Table(title=title)
+    table.add_column("Command", style="cyan", no_wrap=True)
+    table.add_column("Category", style="yellow")
+    table.add_column("Description", style="green")
+    
+    for cmd in commands:
+        table.add_row(cmd.name, cmd.category, cmd.description[:60] + "..." if len(cmd.description) > 60 else cmd.description)
+    
+    console.print(table)
+    console.print(f"\nTotal: {len(commands)} commands")
+    console.print(f"Categories: {', '.join(registry.categories())}")
+    console.print("\nUse 'koda2 commands show <name>' for detailed info on a command.")
+
+
+@cmd_app.command("show")
+def commands_show(
+    command_name: str = typer.Argument(..., help="Command name to show details for"),
+) -> None:
+    """Show detailed information about a specific command."""
+    from koda2.modules.commands import get_registry
+    
+    registry = get_registry()
+    cmd = registry.get(command_name)
+    
+    if not cmd:
+        console.print(f"[red]Command '{command_name}' not found.[/red]")
+        console.print(f"Available commands: {', '.join(c.name for c in registry.list_all()[:10])}...")
+        raise typer.Exit(1)
+    
+    console.print(f"\n[bold cyan]{cmd.name}[/bold cyan]")
+    console.print(f"[dim]Category:[/dim] {cmd.category}")
+    console.print(f"\n{cmd.description}")
+    
+    if cmd.notes:
+        console.print(f"\n[yellow]Note:[/yellow] {cmd.notes}")
+    
+    if cmd.parameters:
+        console.print("\n[bold]Parameters:[/bold]")
+        for p in cmd.parameters:
+            req = "[red]*[/red]" if p.required else "[dim](optional)[/dim]"
+            default = f" [dim]default: {p.default}[/dim]" if p.default is not None and not p.required else ""
+            console.print(f"  • {p.name} ({p.type}) {req}{default}")
+            if p.description:
+                console.print(f"    {p.description}")
+    
+    if cmd.examples:
+        console.print("\n[bold]Examples:[/bold]")
+        for ex in cmd.examples:
+            console.print(f"  {ex}")
+    
+    console.print()
+
+
+@cmd_app.command("categories")
+def commands_categories() -> None:
+    """List all command categories."""
+    from koda2.modules.commands import get_registry
+    
+    registry = get_registry()
+    
+    console.print("\n[bold]Command Categories:[/bold]\n")
+    for cat in registry.categories():
+        count = len(registry.list_by_category(cat))
+        console.print(f"  • {cat} ({count} commands)")
+    
+    console.print(f"\nTotal: {len(registry.list_all())} commands across {len(registry.categories())} categories")
+    console.print()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
