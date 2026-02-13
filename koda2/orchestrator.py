@@ -69,6 +69,9 @@ IMPORTANT RULES:
 # Maximum tool-calling loop iterations to prevent runaway
 MAX_TOOL_ITERATIONS = 15
 
+# If the first LLM response has more than this many tool calls, offload to background agent
+AGENT_AUTO_THRESHOLD = 4
+
 
 class Orchestrator:
     """Central brain that processes user requests and coordinates module actions."""
@@ -209,6 +212,30 @@ class Orchestrator:
                 # Clean any accidental JSON from the response
                 response_text = self._clean_response_for_user(response_text)
                 break
+
+            # ── Auto-detect complex tasks → offload to background agent ──
+            if iteration == 1 and len(llm_response.tool_calls) >= AGENT_AUTO_THRESHOLD:
+                logger.info(
+                    "auto_offload_to_agent",
+                    tool_count=len(llm_response.tool_calls),
+                    threshold=AGENT_AUTO_THRESHOLD,
+                )
+                try:
+                    agent_task = await self.agent.create_task(
+                        user_id=user_id,
+                        request=message,
+                        auto_start=True,
+                    )
+                    response_text = (
+                        f"This looks like a complex task ({len(llm_response.tool_calls)} steps detected). "
+                        f"I've started it as a background agent task (ID: {agent_task.id[:8]}...). "
+                        f"You'll be notified when it's complete — you can check status with /status."
+                    )
+                    action_log.append({"tool": "run_agent_task", "status": "auto_offloaded", "task_id": agent_task.id})
+                    break
+                except Exception as exc:
+                    logger.error("auto_offload_failed", error=str(exc))
+                    # Fall through to normal inline execution
 
             # LLM wants to call tools — add assistant message with tool_calls to history
             logger.info(

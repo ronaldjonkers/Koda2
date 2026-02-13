@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - OpenRouter: full OpenAI-compatible tool calling support
 - **Tool definition generator** — `CommandRegistry.to_openai_tools()` auto-generates OpenAI function-calling schemas from all registered commands
 - **ChatMessage model** — added `tool_calls` and `tool_call_id` fields for multi-turn tool conversations
+- **Background Agent with tool-calling loop** — `AgentService` rewritten to use native tool calling (50 iterations, 8000 char results) instead of fragile JSON plan parsing
+- **Auto-detect complex tasks** — if first LLM response has ≥4 tool calls, task is auto-offloaded to background agent with user notification
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:
