@@ -38,137 +38,36 @@ from koda2.security.audit import log_action
 
 logger = get_logger(__name__)
 
-SYSTEM_PROMPT = """You are Koda2, a professional AI executive assistant functioning as a 
-director-level secretary. You help manage calendars, emails, tasks, documents, communications, and more.
+SYSTEM_PROMPT = """You are Koda2, a professional AI executive assistant functioning as a director-level secretary.
 
-Your capabilities include:
-- Calendar management (Google Calendar, Exchange, Office 365, CalDAV)
-- Email (Gmail, Exchange, IMAP/SMTP) — read, send, with attachments
-- File system access — read, write, list files and directories
-- File sharing — send files via WhatsApp (media) or email (attachments)
-- Document creation (DOCX, XLSX, PDF, PPTX) — saved to data/generated/
-- Document analysis — extract and analyze content from PDF, DOCX, XLSX, PPTX, images
-- Image generation (DALL-E, Stability AI) and analysis (GPT-4 Vision)
-- Video generation (Runway, Pika, Stable Video, HeyGen avatars)
-- Messaging (WhatsApp, Telegram) — send messages, files, media
-- Shell commands — FULL ACCESS to run any terminal commands (ls, cat, find, grep, ps, etc.)
-- Contact management — unified sync from macOS, WhatsApp, Gmail, Exchange
-- Task scheduling, reminders, and cronjobs
-- Proactive alerts — meeting warnings, urgent emails, suggestions
-- Memory — remember conversations, search history, learn preferences
+You have tools available to take real actions. When the user asks you to do something, USE THE TOOLS — don't just describe what you would do. Execute the actions directly.
 
-When a user asks you to send a file, document, or media:
+Your capabilities (all available as tools):
+- Calendar: check events, schedule meetings (Google, Exchange, Office 365, CalDAV)
+- Email: read inbox, send emails with/without attachments (Gmail, Exchange, IMAP)
+- WhatsApp: send messages and files to contacts or phone numbers
+- Files: read, write, list directories, check existence
+- Shell: run any terminal command (ls, cat, find, grep, git, python, etc.)
+- Documents: create DOCX, XLSX, PDF, PPTX; analyze PDF/DOCX/images
+- Images: generate with AI, analyze with vision
+- Video: generate with AI
+- Contacts: find by name, search, sync from macOS/WhatsApp/Gmail/Exchange
+- Memory: search conversation history
+- Reminders: create macOS reminders
+- Tasks: check task queue status
 
-FOR WHATSAPP FILE SHARING:
-- Use send_file action with "channel": "whatsapp"
-- The "to" parameter can be a contact name (e.g., "Jan") or phone number (e.g., "+31612345678")
-- Supported files: PDF, DOCX, XLSX, PPTX, images, videos, audio
-- Example: send_file with {"path": "document.pdf", "channel": "whatsapp", "to": "Jan", "caption": "Hier is het document"}
+IMPORTANT RULES:
+1. ALWAYS use tools to fulfill requests. Never just say "I'll do that" without calling a tool.
+2. If you need info first (e.g., a contact's phone number), call the tool to look it up, then use the result.
+3. Contact names are auto-resolved to phone/email — you can pass names directly to send_whatsapp or send_file.
+4. For WhatsApp files: use send_file with channel="whatsapp".
+5. For email attachments: use send_email_with_attachments.
+6. Shell commands have full access except sudo and dangerous system operations.
+7. Be concise and helpful. Respond in the user's language.
+8. Today's date/time context will be provided when available."""
 
-FOR EMAIL WITH ATTACHMENTS:
-- Use send_email_with_attachments for emails with files
-- Or use send_file with "channel": "email" 
-- The "to" parameter should be an email address or contact name
-- Example: send_email_with_attachments with {"to": ["jan@example.com"], "subject": "Document", "body": "See attached", "attachments": ["document.pdf"]}
-
-CONTACT LOOKUP:
-- If the user mentions a name (like "Jan"), you can search contacts to find their phone or email
-- Use find_contact or search_contacts to lookup contact information
-- The system will automatically resolve names to phone numbers or emails
-
-Examples of file sending requests:
-- "Stuur dat rapport naar Jan via WhatsApp" → use send_file with channel "whatsapp"
-- "Email deze PDF naar jan@example.com" → use send_email_with_attachments
-- "Deel deze foto met het team" → ask which channel or use WhatsApp if not specified
-- "Stuur het bestand naar Piet" → lookup Piet's contact and use appropriate channel
-
-Available actions and their parameters:
-- run_shell: {"command": "...", "cwd": "/optional/path", "timeout": 30}
-- list_directory: {"path": "/some/path"}
-- read_file: {"path": "/some/file.txt"}
-- write_file: {"path": "/some/file.txt", "content": "..."}
-- file_exists: {"path": "/some/path"}
-- send_whatsapp: {"to": "+31612345678 or contact name", "message": "..."}
-- send_file: {"path": "/file.pdf", "channel": "whatsapp|email", "to": "recipient", "caption": "..."}
-- send_email: {"to": ["email@example.com"], "subject": "...", "body": "..."}
-- send_email_with_attachments: {"to": [...], "subject": "...", "body": "...", "attachments": [...]}
-- download_email_attachment: {"message_id": "...", "filename": "..."}
-- check_calendar: {"start": "ISO datetime", "end": "ISO datetime"}
-- schedule_meeting: {"title": "...", "start": "...", "end": "...", "location": "..."}
-- generate_document: {"type": "docx|xlsx|pdf|pptx", "filename": "...", "title": "...", "content": [...]}
-- generate_image: {"prompt": "...", "size": "1024x1024"}
-- generate_video: {"prompt": "...", "duration": 4, "aspect_ratio": "16:9"}
-- analyze_image: {"image_url": "...", "prompt": "..."}
-- analyze_document: {"file_path": "...", "message": "..."}
-- search_memory: {"query": "..."}
-- find_contact: {"name": "..."}
-- sync_contacts: {"force": false}
-- search_contacts: {"query": "...", "limit": 10}
-- download_whatsapp_media: {"media_url": "...", "filename": "..."}
-- get_proactive_alerts: {}
-- start_proactive_monitoring: {}
-- stop_proactive_monitoring: {}
-- create_reminder: {"title": "...", "notes": "..."}
-- get_task_status: {"task_id": "..."}
-- list_tasks: {"status": "pending|running|completed|failed", "limit": 10}
-
-AGENT MODE - AUTONOMOUS TASK EXECUTION:
-For complex multi-step tasks, use the AGENT to work autonomously:
-- run_agent_task: {"request": "Create a React website with login page"} - Start autonomous task
-- get_agent_task: {"task_id": "..."} - Check task status
-- list_agent_tasks: {"status": "running"} - List running tasks
-- cancel_agent_task: {"task_id": "..."} - Cancel a task
-- provide_clarification: {"task_id": "...", "answers": {...}} - Answer agent questions
-
-The AGENT will:
-1. Create a detailed execution plan
-2. Execute steps autonomously with feedback loops
-3. Handle failures with retries and alternatives
-4. Notify you when complete (even if you're away)
-5. Ask for clarification if stuck
-
-WHEN TO USE AGENT MODE:
-- Multi-step projects (building apps, writing reports, data analysis)
-- Tasks that take >5 minutes
-- Tasks that can run while user is away
-- Complex workflows with many dependencies
-
-SIMPLE vs AGENT tasks:
-SIMPLE (use direct actions): "Send email to John" → use send_email
-AGENT (use run_agent_task): "Build a complete website" → use run_agent_task
-
-COMMAND SELF-DISCOVERY:
-If you need details on any command, you can use:
-- describe_command: {"command": "send_whatsapp"} - Get full details about a command
-- list_command_categories: {} - See all command categories
-
-When the user gives you a request, determine the intent and required actions. Respond in JSON format:
-{
-    "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
-              generate_image, generate_video, analyze_image, analyze_document, create_reminder, 
-              find_contact, search_memory, send_file, send_whatsapp, sync_contacts, run_command, read_file, 
-              write_file, list_directory, describe_command, list_command_categories, run_agent_task, general_chat",
-    "entities": {
-        "any extracted entities like names, dates, times, subjects, file paths, recipient names, etc."
-    },
-    "response": "A natural language response to the user",
-    "actions": [
-        {"action": "action_name", "params": {"key": "value"}}
-    ]
-}
-
-If the user wants to send a file but doesn't specify a phone number or email:
-1. First use find_contact or search_contacts to locate the recipient
-2. Then use send_file with the found contact's phone/email
-
-If you're unsure about a command or its parameters:
-1. Use describe_command to get full documentation
-2. Reference the AVAILABLE COMMANDS REFERENCE section below
-
-If the user mentions sending/sharing/delivering a file, always use the send_file action.
-
-Be helpful, proactive, and concise. If you need clarification, ask in the response field.
-Always try to extract as much information as possible from the user's message."""
+# Maximum tool-calling loop iterations to prevent runaway
+MAX_TOOL_ITERATIONS = 15
 
 
 class Orchestrator:
@@ -232,19 +131,14 @@ class Orchestrator:
         self.whatsapp.set_command_parser(self.command_parser)
         self.whatsapp.set_message_handler(self.process_message)
 
-    def _get_system_prompt(self, include_commands: bool = True) -> str:
-        """Generate the full system prompt including command reference.
-        
-        This ensures the LLM always has up-to-date knowledge of available commands.
-        """
-        prompt = SYSTEM_PROMPT
-        
-        if include_commands:
-            # Add command reference from registry
-            command_ref = self.commands.get_system_prompt_addition()
-            prompt += command_ref
-        
-        return prompt
+    def _get_system_prompt(self) -> str:
+        """Generate the full system prompt with date/time context."""
+        now = dt.datetime.now()
+        return SYSTEM_PROMPT + f"\n\nCurrent date/time: {now.strftime('%A %d %B %Y, %H:%M')} (Europe/Amsterdam)"
+
+    def _get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Get OpenAI-format tool definitions from the command registry."""
+        return self.commands.to_openai_tools()
 
     async def process_message(
         self,
@@ -252,130 +146,136 @@ class Orchestrator:
         message: str,
         channel: str = "api",
     ) -> dict[str, Any]:
-        """Process a user message end-to-end.
+        """Process a user message with an agent tool-calling loop.
 
-        1. Store the message in memory
-        2. Retrieve relevant context
-        3. Parse intent via LLM
-        4. Execute required actions
-        5. Store the response
-        6. Return the result
+        Flow:
+        1. Store message in memory
+        2. Build conversation with context
+        3. Call LLM with tool definitions
+        4. If LLM returns tool_calls → execute them → feed results back → repeat
+        5. When LLM returns text (no tool_calls) → that's the final response
+        6. Store and return
         """
         await self.memory.add_conversation(user_id, "user", message, channel=channel)
         await log_action(user_id, "message_received", "orchestrator", {"channel": channel, "length": len(message)})
 
+        # Build context
         context = self.memory.recall(message, user_id=user_id, n=3)
-        context_str = "\n".join(f"- {c['content']}" for c in context) if context else "No prior context."
+        context_str = "\n".join(f"- {c['content']}" for c in context) if context else ""
 
         recent = await self.memory.get_recent_conversations(user_id, limit=10)
-        history_messages = [
+        history_messages: list[ChatMessage] = [
             ChatMessage(role=c.role, content=c.content) for c in recent[-8:]
         ]
 
-        system = self._get_system_prompt() + f"\n\nRelevant context:\n{context_str}"
+        system = self._get_system_prompt()
+        if context_str:
+            system += f"\n\nRelevant memory:\n{context_str}"
+
         history_messages.append(ChatMessage(role="user", content=message))
 
-        request = LLMRequest(
-            messages=history_messages,
-            system_prompt=system,
-            temperature=0.3,
-        )
+        tools = self._get_tool_definitions()
+        total_tokens = 0
+        model_used = ""
+        action_log: list[dict[str, Any]] = []
+        iteration = 0
 
-        try:
-            llm_response = await self.llm.complete(request)
-        except RuntimeError as exc:
-            logger.error("orchestrator_llm_failed", error=str(exc))
-            return {
-                "response": "I'm having trouble processing your request. Please try again.",
-                "error": str(exc),
-            }
+        # ── Agent Loop ────────────────────────────────────────────────
+        while iteration < MAX_TOOL_ITERATIONS:
+            iteration += 1
 
-        parsed = self._parse_llm_response(llm_response.content)
-        intent = parsed.get("intent", "general_chat")
-        entities = parsed.get("entities", {})
-        response_text = parsed.get("response", "")
-        actions = parsed.get("actions", [])
+            request = LLMRequest(
+                messages=history_messages,
+                system_prompt=system,
+                temperature=0.3,
+                tools=tools if iteration <= MAX_TOOL_ITERATIONS - 1 else None,
+            )
 
-        # If the LLM returned raw JSON without a "response" field, or the
-        # response itself looks like JSON, extract just the human-readable part.
-        if not response_text:
-            response_text = llm_response.content
-        if response_text.strip().startswith("{"):
             try:
-                inner = json.loads(response_text)
-                if isinstance(inner, dict) and "response" in inner:
-                    response_text = inner["response"]
-            except (json.JSONDecodeError, TypeError):
-                pass
+                llm_response = await self.llm.complete(request)
+            except RuntimeError as exc:
+                logger.error("orchestrator_llm_failed", error=str(exc), iteration=iteration)
+                return {
+                    "response": "I'm having trouble processing your request. Please try again.",
+                    "error": str(exc),
+                }
 
-        action_results = []
-        action_feedback = []
-        for action in actions:
-            try:
-                result = await self._execute_action(user_id, action, entities)
-                action_results.append({"action": action.get("action"), "status": "success", "result": result})
-                
-                # Generate user-friendly feedback for important actions
-                action_name = action.get("action", "")
-                if action_name == "send_file":
-                    if isinstance(result, dict) and result.get("status") == "error":
-                        action_feedback.append(f"⚠️ Could not send file: {result.get('message', 'Unknown error')}")
-                    else:
-                        action_feedback.append("✅ File sent successfully!")
-                elif action_name == "write_file":
-                    if isinstance(result, dict) and result.get("path"):
-                        action_feedback.append(f"✅ Created file: {result['path']}")
-                elif action_name == "send_email":
-                    if isinstance(result, dict) and result.get("sent"):
-                        action_feedback.append("✅ Email sent!")
-                    else:
-                        action_feedback.append("❌ Failed to send email")
-                elif action_name == "send_whatsapp":
-                    if isinstance(result, dict) and result.get("status") == "queued":
-                        action_feedback.append(f"✅ WhatsApp message queued (task: {result.get('task_id', 'unknown')[:8]}...)")
-                    elif isinstance(result, dict) and result.get("sent"):
-                        action_feedback.append("✅ WhatsApp message sent!")
-                    else:
-                        action_feedback.append(f"❌ Failed to send WhatsApp: {result.get('error', 'Unknown error')}")
-                elif action_name == "run_agent_task":
-                    if isinstance(result, dict) and result.get("status") == "waiting":
-                        questions = result.get("questions", [])
-                        action_feedback.append(f"⏸️ Agent task waiting for clarification:\n" + "\n".join(f"  - {q}" for q in questions))
-                    elif isinstance(result, dict) and result.get("task_id"):
-                        steps = result.get("plan_steps", 0)
-                        action_feedback.append(f"🤖 Agent task started with {steps} steps. You'll be notified when complete!")
-                    else:
-                        action_feedback.append(f"❌ Failed to start agent task: {result.get('error', 'Unknown error')}")
-                        
-            except Exception as exc:
-                logger.error("action_failed", action=action, error=str(exc))
-                action_results.append({"action": action.get("action"), "status": "error", "error": str(exc)})
-                action_feedback.append(f"❌ Error executing {action.get('action', 'action')}: {str(exc)}")
+            total_tokens += llm_response.total_tokens
+            model_used = llm_response.model
 
-        # Append action feedback to response
-        if action_feedback:
-            response_text += "\n\n" + "\n".join(action_feedback)
+            # If no tool calls → LLM is done, return the text response
+            if not llm_response.tool_calls:
+                response_text = llm_response.content or ""
+                # Clean any accidental JSON from the response
+                response_text = self._clean_response_for_user(response_text)
+                break
 
-        if intent != "general_chat":
-            missing = self.self_improve.detect_missing(intent)
-            if missing:
-                response_text += f"\n\n(Note: I don't have the '{missing}' capability yet. I can build it if you'd like.)"
+            # LLM wants to call tools — add assistant message with tool_calls to history
+            logger.info(
+                "tool_calls_requested",
+                iteration=iteration,
+                tools=[tc["function"]["name"] for tc in llm_response.tool_calls],
+            )
+            history_messages.append(ChatMessage(
+                role="assistant",
+                content=llm_response.content or "",
+                tool_calls=llm_response.tool_calls,
+            ))
 
+            # Execute each tool call and add results to history
+            for tc in llm_response.tool_calls:
+                func_name = tc["function"]["name"]
+                try:
+                    args_str = tc["function"]["arguments"]
+                    args = json.loads(args_str) if isinstance(args_str, str) else args_str
+                except (json.JSONDecodeError, TypeError):
+                    args = {}
+
+                logger.info("executing_tool", tool=func_name, args_preview=str(args)[:200])
+
+                try:
+                    result = await self._execute_action(
+                        user_id=user_id,
+                        action={"action": func_name, "params": args},
+                        entities={},
+                    )
+                    result_str = json.dumps(result, default=str, ensure_ascii=False)
+                    # Truncate very large results to avoid context overflow
+                    if len(result_str) > 4000:
+                        result_str = result_str[:4000] + "... (truncated)"
+                    action_log.append({"tool": func_name, "status": "success"})
+                except Exception as exc:
+                    result_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
+                    action_log.append({"tool": func_name, "status": "error", "error": str(exc)})
+                    logger.error("tool_execution_failed", tool=func_name, error=str(exc))
+
+                # Add tool result to conversation so LLM sees it
+                history_messages.append(ChatMessage(
+                    role="tool",
+                    content=result_str,
+                    tool_call_id=tc["id"],
+                ))
+
+        else:
+            # Hit max iterations
+            response_text = "I've reached the maximum number of steps for this request. Here's what I've done so far."
+            logger.warning("max_tool_iterations_reached", user_id=user_id, iterations=MAX_TOOL_ITERATIONS)
+
+        # Store response in memory
         await self.memory.add_conversation(
             user_id, "assistant", response_text, channel=channel,
-            model=llm_response.model, tokens_used=llm_response.total_tokens,
+            model=model_used, tokens_used=total_tokens,
         )
         await log_action(user_id, "message_processed", "orchestrator", {
-            "intent": intent, "actions_count": len(actions), "tokens": llm_response.total_tokens,
+            "tool_calls": len(action_log), "iterations": iteration, "tokens": total_tokens,
         })
 
         return {
             "response": response_text,
-            "intent": intent,
-            "entities": entities,
-            "actions": action_results,
-            "tokens_used": llm_response.total_tokens,
-            "model": llm_response.model,
+            "tool_calls": action_log,
+            "iterations": iteration,
+            "tokens_used": total_tokens,
+            "model": model_used,
         }
 
     def _parse_llm_response(self, content: str) -> dict[str, Any]:

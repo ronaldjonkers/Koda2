@@ -33,9 +33,8 @@ class ChatResponse(BaseModel):
     """Chat message response."""
 
     response: str
-    intent: str = ""
-    entities: dict[str, Any] = Field(default_factory=dict)
-    actions: list[dict[str, Any]] = Field(default_factory=list)
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    iterations: int = 0
     tokens_used: int = 0
     model: str = ""
 

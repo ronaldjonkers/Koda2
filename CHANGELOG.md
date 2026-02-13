@@ -5,6 +5,32 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-02-13
+
+### Added
+- **Autonomous Agent Loop** — LLM now uses native tool/function calling instead of fragile JSON parsing
+  - `process_message` runs an iterative loop: LLM calls tools → executes → feeds results back → repeats
+  - Supports up to 15 tool-calling iterations per request (configurable `MAX_TOOL_ITERATIONS`)
+  - Large tool results auto-truncated to 4000 chars to prevent context overflow
+- **Native tool calling for all LLM providers**
+  - OpenAI: full tool_calls serialization and parsing (was partial)
+  - Anthropic: converts OpenAI tool format to Anthropic `tool_use`/`tool_result` blocks
+  - Google Gemini: converts to `FunctionDeclaration` protos, parses `function_call` responses
+  - OpenRouter: full OpenAI-compatible tool calling support
+- **Tool definition generator** — `CommandRegistry.to_openai_tools()` auto-generates OpenAI function-calling schemas from all registered commands
+- **ChatMessage model** — added `tool_calls` and `tool_call_id` fields for multi-turn tool conversations
+
+### Changed
+- **BREAKING:** `process_message` response format changed:
+  - Removed: `intent`, `entities`, `actions` fields
+  - Added: `tool_calls` (list of executed tools), `iterations` (loop count)
+- **BREAKING:** `ChatResponse` API model updated to match new response format
+- System prompt rewritten: clean, concise, tool-focused (no more JSON format instructions)
+- LLM no longer asked to generate structured JSON — uses native function calling instead
+
+### Removed
+- JSON-based intent/action parsing from LLM responses (replaced by native tool calling)
+
 ## [0.2.0] - 2026-02-12
 
 ### Added

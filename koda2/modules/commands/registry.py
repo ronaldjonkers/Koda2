@@ -515,6 +515,48 @@ class CommandRegistry:
             "total": len(self._commands),
         }
     
+    def to_openai_tools(self) -> list[dict[str, Any]]:
+        """Convert all commands to OpenAI function-calling tool definitions.
+        
+        This format is also used by OpenRouter and converted for Anthropic.
+        """
+        tools = []
+        for cmd in self._commands.values():
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+            for p in cmd.parameters:
+                prop: dict[str, Any] = {"description": p.description}
+                # Map our types to JSON Schema types
+                type_map = {
+                    "string": "string",
+                    "integer": "integer",
+                    "boolean": "boolean",
+                    "array": "array",
+                    "number": "number",
+                }
+                prop["type"] = type_map.get(p.type, "string")
+                if p.type == "array":
+                    prop["items"] = {"type": "string"}
+                if p.default is not None and p.default != "":
+                    prop["default"] = p.default
+                properties[p.name] = prop
+                if p.required:
+                    required.append(p.name)
+            
+            tools.append({
+                "type": "function",
+                "function": {
+                    "name": cmd.name,
+                    "description": cmd.description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                        "required": required,
+                    },
+                },
+            })
+        return tools
+
     def get_system_prompt_addition(self) -> str:
         """Get formatted command reference for system prompt."""
         lines = [

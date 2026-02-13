@@ -19,9 +19,8 @@ def mock_orchestrator():
     # Mock process_message
     orch.process_message = AsyncMock(return_value={
         "response": "Hello! How can I help?",
-        "intent": "general_chat",
-        "entities": {},
-        "actions": [],
+        "tool_calls": [],
+        "iterations": 1,
         "tokens_used": 30,
         "model": "gpt-4o",
     })
@@ -106,7 +105,7 @@ class TestChatEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "response" in data
-        assert data["intent"] == "general_chat"
+        assert "tokens_used" in data
 
     def test_chat_with_channel(self, client) -> None:
         """Chat endpoint accepts channel parameter."""

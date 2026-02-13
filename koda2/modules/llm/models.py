@@ -23,6 +23,8 @@ class ChatMessage(BaseModel):
     role: str = "user"
     content: str = ""
     name: Optional[str] = None
+    tool_calls: Optional[list[dict[str, Any]]] = None
+    tool_call_id: Optional[str] = None
 
 
 class LLMRequest(BaseModel):

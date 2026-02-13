@@ -74,18 +74,14 @@ class TestOrchestrator:
             orch = Orchestrator()
 
             orch.llm.complete = AsyncMock(return_value=LLMResponse(
-                content=json.dumps({
-                    "intent": "general_chat",
-                    "entities": {},
-                    "response": "Hello! How can I help you today?",
-                    "actions": [],
-                }),
+                content="Hello! How can I help you today?",
                 provider="openai",
                 model="gpt-4o",
                 prompt_tokens=50,
                 completion_tokens=30,
                 total_tokens=80,
                 finish_reason="stop",
+                tool_calls=None,
             ))
 
             orch.memory.add_conversation = AsyncMock()
@@ -101,8 +97,8 @@ class TestOrchestrator:
         with patch("koda2.orchestrator.log_action", new_callable=AsyncMock):
             result = await orchestrator.process_message("user1", "Hello!", "api")
         assert "response" in result
-        assert result["intent"] == "general_chat"
         assert result["tokens_used"] == 80
+        assert result["iterations"] == 1
 
     @pytest.mark.asyncio
     async def test_process_message_stores_conversation(self, orchestrator) -> None:
@@ -115,27 +111,42 @@ class TestOrchestrator:
         assert calls[0].args[2] == "Test message"
 
     @pytest.mark.asyncio
-    async def test_process_message_with_action(self, orchestrator) -> None:
-        """Messages with actions execute them."""
-        orchestrator.llm.complete = AsyncMock(return_value=LLMResponse(
-            content=json.dumps({
-                "intent": "search_memory",
-                "entities": {},
-                "response": "Let me search your memory.",
-                "actions": [{"action": "search_memory", "params": {"query": "meetings"}}],
-            }),
-            provider="openai",
-            model="gpt-4o",
-            prompt_tokens=50,
-            completion_tokens=30,
-            total_tokens=80,
-            finish_reason="stop",
-        ))
+    async def test_process_message_with_tool_call(self, orchestrator) -> None:
+        """Messages that trigger tool calls execute them and loop back."""
+        # First call: LLM returns a tool call
+        # Second call: LLM returns final text after seeing tool result
+        orchestrator.llm.complete = AsyncMock(side_effect=[
+            LLMResponse(
+                content="",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=50,
+                completion_tokens=30,
+                total_tokens=80,
+                finish_reason="tool_calls",
+                tool_calls=[{
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "search_memory", "arguments": '{"query": "meetings"}'},
+                }],
+            ),
+            LLMResponse(
+                content="I found some meetings in your memory.",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=80,
+                completion_tokens=20,
+                total_tokens=100,
+                finish_reason="stop",
+                tool_calls=None,
+            ),
+        ])
 
         with patch("koda2.orchestrator.log_action", new_callable=AsyncMock):
             result = await orchestrator.process_message("user1", "Search my memories for meetings")
-        assert result["intent"] == "search_memory"
-        assert len(result["actions"]) == 1
+        assert len(result["tool_calls"]) == 1
+        assert result["tool_calls"][0]["tool"] == "search_memory"
+        assert result["iterations"] == 2
 
     @pytest.mark.asyncio
     async def test_process_message_llm_failure(self, orchestrator) -> None:
@@ -149,7 +160,7 @@ class TestOrchestrator:
 
     @pytest.mark.asyncio
     async def test_process_message_plain_text_response(self, orchestrator) -> None:
-        """Non-JSON LLM response is handled gracefully."""
+        """Plain text LLM response (no tool calls) is returned directly."""
         orchestrator.llm.complete = AsyncMock(return_value=LLMResponse(
             content="Just a plain text answer.",
             provider="openai",
@@ -158,12 +169,13 @@ class TestOrchestrator:
             completion_tokens=10,
             total_tokens=20,
             finish_reason="stop",
+            tool_calls=None,
         ))
 
         with patch("koda2.orchestrator.log_action", new_callable=AsyncMock):
             result = await orchestrator.process_message("user1", "Hi")
-        assert result["intent"] == "general_chat"
         assert result["response"] == "Just a plain text answer."
+        assert result["iterations"] == 1
 
     def test_parse_llm_response_valid_json(self, orchestrator) -> None:
         """Valid JSON is parsed correctly."""

@@ -28,6 +28,8 @@
 
 Koda2 is a **production-ready AI executive assistant** that functions as a fully automated director-level secretary. It handles everything a real secretary would: calendars, emails, travel booking, meeting minutes, expense reports, and more.
 
+**v0.3.0** — Now with an **autonomous agent loop**: the LLM uses native tool/function calling to execute actions iteratively. Ask it to do something complex and it will call tools, see results, and keep going until the task is done — across all providers (OpenAI, Anthropic, Google Gemini, OpenRouter).
+
 ### Key Capabilities
 
 | Category | Features |
