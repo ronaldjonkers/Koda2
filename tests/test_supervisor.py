@@ -248,3 +248,123 @@ class TestSupervisorConstants:
         from koda2.supervisor.repair import MAX_SOURCE_LINES, REPAIR_MODEL
         assert MAX_SOURCE_LINES > 0
         assert "claude" in REPAIR_MODEL or "anthropic" in REPAIR_MODEL
+
+    def test_learner_constants(self) -> None:
+        from koda2.supervisor.learner import (
+            LEARNING_INTERVAL_SECONDS,
+            CONVERSATION_LOOKBACK,
+            MIN_COMPLAINT_OCCURRENCES,
+            MAX_AUTO_IMPROVEMENTS_PER_CYCLE,
+        )
+        assert LEARNING_INTERVAL_SECONDS > 0
+        assert CONVERSATION_LOOKBACK > 0
+        assert MIN_COMPLAINT_OCCURRENCES >= 1
+        assert MAX_AUTO_IMPROVEMENTS_PER_CYCLE >= 1
+
+
+# ── ContinuousLearner Tests ──────────────────────────────────────────
+
+class TestContinuousLearner:
+    """Tests for the continuous learning loop."""
+
+    def test_learner_init(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        assert learner._cycle_count == 0
+        assert learner._running is False
+        assert isinstance(learner._failed_ideas, set)
+        assert isinstance(learner._improvements_applied, list)
+
+    def test_learner_state_persistence(self, tmp_path) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        learner._state_file = tmp_path / "learner_state.json"
+        learner._cycle_count = 5
+        learner._failed_ideas = {"idea_1", "idea_2"}
+        learner._improvements_applied = [{"description": "test"}]
+        learner._save_state()
+
+        # Load into new instance
+        learner2 = ContinuousLearner(safety)
+        learner2._state_file = tmp_path / "learner_state.json"
+        learner2._load_state()
+        assert learner2._cycle_count == 5
+        assert "idea_1" in learner2._failed_ideas
+        assert len(learner2._improvements_applied) == 1
+
+    def test_read_current_version(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        version = learner._read_current_version()
+        # Should match semver pattern
+        parts = version.split(".")
+        assert len(parts) == 3
+        assert all(p.isdigit() for p in parts)
+
+    def test_determine_bump_type_patch(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        assert learner._determine_bump_type([{"type": "bugfix"}]) == "patch"
+        assert learner._determine_bump_type([{"type": "improvement"}]) == "patch"
+
+    def test_determine_bump_type_minor(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        assert learner._determine_bump_type([{"type": "feature"}]) == "minor"
+        assert learner._determine_bump_type([{"type": "bugfix"}, {"type": "feature"}]) == "minor"
+
+    def test_bump_version_patch(self, tmp_path) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety, project_root=tmp_path)
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('version = "1.2.3"\n')
+        new = learner._bump_version("patch")
+        assert new == "1.2.4"
+        assert '1.2.4' in pyproject.read_text()
+
+    def test_bump_version_minor(self, tmp_path) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety, project_root=tmp_path)
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('version = "1.2.3"\n')
+        new = learner._bump_version("minor")
+        assert new == "1.3.0"
+
+    def test_bump_version_major(self, tmp_path) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety, project_root=tmp_path)
+        pyproject = tmp_path / "pyproject.toml"
+        pyproject.write_text('version = "1.2.3"\n')
+        new = learner._bump_version("major")
+        assert new == "2.0.0"
+
+    def test_gather_audit_signals_empty(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        signals = learner._gather_audit_signals()
+        # May or may not have signals depending on audit log state
+        assert isinstance(signals, list)
+
+    def test_gather_log_signals(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        signals = learner._gather_log_signals()
+        assert isinstance(signals, list)
+
+    def test_stop(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        learner._running = True
+        learner.stop()
+        assert not learner._running

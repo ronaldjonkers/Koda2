@@ -260,8 +260,9 @@ class SafetyGuard:
             passed, test_output = self.run_tests()
 
             if passed:
-                # Step 4: Commit
+                # Step 4: Commit + push
                 self.git_commit(commit_message)
+                self.git_push()
                 self.audit("patch_success", {"file": file_path})
                 return True, "Patch applied and tests passed"
             else:

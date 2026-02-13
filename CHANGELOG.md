@@ -9,16 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Self-Healing Supervisor** (`koda2/supervisor/`):
-  - `safety.py` — git stash/pop backup+rollback, max 3 repair attempts per crash, max 5 restarts/10min, audit log, safe patch workflow
+  - `safety.py` — git stash/pop backup+rollback, max 3 repair attempts per crash, max 5 restarts/10min, audit log, safe patch workflow, auto-push after every commit
   - `monitor.py` — spawns koda2 as subprocess, captures stderr, periodic health checks, auto-restart with rate limiting
   - `repair.py` — extracts crash info from traceback, sends to Claude via OpenRouter, applies minimal fix with confidence filter
-  - `evolution.py` — plans improvements from natural language, generates file create/modify ops, tests+commits or rollbacks
-  - `cli.py` — `koda2-supervisor run|repair|improve|status` commands
+  - `evolution.py` — plans improvements from natural language, generates file create/modify ops, tests+commits+pushes or rollbacks, user feedback analysis loop
+  - `cli.py` — `koda2-supervisor run|repair|improve|learn|status` commands
+- **Continuous Learning Loop** (`koda2/supervisor/learner.py`):
+  - Background task runs every hour alongside the supervisor
+  - Gathers signals: conversation history (complaints/wishes), audit log (crashes/errors), app logs (warnings)
+  - LLM analyzes signals, classifies by impact, proposes concrete improvements
+  - Executes improvements via EvolutionEngine (plan→code→test→commit→push)
+  - Auto-updates CHANGELOG after improvements
+  - Auto-bumps version (patch for fixes, minor for features) in pyproject.toml
+  - Notifies user via WhatsApp with changelog summary
+  - Periodic code hygiene checks (every 6 cycles)
+  - Tracks failed ideas to avoid retrying them
+  - Persists state to `data/supervisor/learner_state.json`
+  - CLI: `koda2-supervisor learn` for manual cycle, `--no-learning` flag to disable
+  - API: `POST /api/supervisor/learn` to trigger a cycle
 - **User Feedback Loop** — `/feedback` command analyzes feedback via LLM, classifies as bug/feature/behavior/general, auto-implements if actionable
-- **`/improve` WhatsApp command** — request self-improvement from chat, AI plans+implements+tests+commits
+- **`/improve` WhatsApp command** — request self-improvement from chat, AI plans+implements+tests+commits+pushes
 - **`self_improve_code` LLM tool** — agent can autonomously trigger code improvements during conversation
-- **Supervisor API** — `GET /api/supervisor/status` (repair state + audit log), `POST /api/supervisor/improve` (trigger improvement)
-- **Dashboard Supervisor section** — improve form, repair state panel, color-coded audit log
+- **Supervisor API** — `GET /api/supervisor/status` (repair state + learner state + audit log), `POST /api/supervisor/improve`, `POST /api/supervisor/learn`
+- **Dashboard Supervisor section** — improve form, learning loop panel with stats + Run Cycle Now button, repair state panel, color-coded audit log
 - **Service mode uses supervisor** — install.sh now wires launchd/systemd to `koda2-supervisor run`
 
 ## [0.3.0] - 2026-02-13

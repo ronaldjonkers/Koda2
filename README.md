@@ -30,7 +30,7 @@ Koda2 is a **personal AI assistant** you run on your own machine. It answers you
 
 **v0.3.0** — Autonomous agent loop with native tool/function calling across all LLM providers (OpenAI, Anthropic, Google Gemini, OpenRouter). Ask it to do something complex and it will call tools, see results, and keep going until the task is done.
 
-**NEW: Self-Healing Supervisor** — Koda2 can now monitor itself, auto-repair crashes via LLM analysis, and improve its own code based on user feedback. Run with `koda2-supervisor run` or use `/improve` from WhatsApp.
+**NEW: Self-Healing Supervisor + Continuous Learning** — Koda2 monitors itself, auto-repairs crashes via LLM, and **proactively improves itself** by reading its own logs and conversations. Every hour it analyzes patterns, proposes improvements, implements them, updates docs, bumps the version, and notifies you via WhatsApp. Run with `koda2-supervisor run` or use `/improve` and `/feedback` from WhatsApp.
 
 ### Key Capabilities
 
@@ -475,33 +475,37 @@ Full interactive API docs at `http://localhost:8000/docs` (Swagger UI).
 
 ---
 
-## 🧬 Self-Healing Supervisor
+## 🧬 Self-Healing Supervisor + Continuous Learning
 
-Koda2 can **monitor itself, auto-repair crashes, and improve its own code** based on user feedback. This is powered by a supervisor wrapper that runs _around_ the main application.
+Koda2 can **monitor itself, auto-repair crashes, improve its own code, and proactively learn from its own logs and conversations**. This is powered by a supervisor wrapper that runs _around_ the main application.
 
 ### Architecture
 
 ```
-┌─────────────────────────────────────────┐
-│         koda2-supervisor                 │
-│  ┌───────────┐ ┌──────────┐ ┌────────┐ │
-│  │ Process   │ │ Self-    │ │ Evolu- │ │
-│  │ Monitor   │ │ Repair   │ │ tion   │ │
-│  │           │ │ Engine   │ │ Engine │ │
-│  │ • Start   │ │ • Crash  │ │ • User │ │
-│  │ • Watch   │ │   analyze│ │   req  │ │
-│  │ • Restart │ │ • LLM fix│ │ • Code │ │
-│  │ • Health  │ │ • Test   │ │   gen  │ │
-│  │   check   │ │ • Commit │ │ • Test │ │
-│  └───────────┘ └──────────┘ └────────┘ │
-│  Safety: git backup, rollback, max 3    │
-│  repair attempts, audit log             │
-└─────────────┬───────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              koda2-supervisor                         │
+│  ┌───────────┐ ┌──────────┐ ┌────────┐ ┌─────────┐ │
+│  │ Process   │ │ Self-    │ │ Evolu- │ │ Contin- │ │
+│  │ Monitor   │ │ Repair   │ │ tion   │ │ uous    │ │
+│  │           │ │ Engine   │ │ Engine │ │ Learner │ │
+│  │ • Start   │ │ • Crash  │ │ • User │ │ • Read  │ │
+│  │ • Watch   │ │   analyze│ │   req  │ │   logs  │ │
+│  │ • Restart │ │ • LLM fix│ │ • Code │ │ • Read  │ │
+│  │ • Health  │ │ • Test   │ │   gen  │ │   chats │ │
+│  │   check   │ │ • Commit │ │ • Test │ │ • Plan  │ │
+│  │           │ │ • Push   │ │ • Push │ │ • Build │ │
+│  └───────────┘ └──────────┘ └────────┘ │ • Docs  │ │
+│                                         │ • Bump  │ │
+│                                         │ • Notify│ │
+│                                         └─────────┘ │
+│  Safety: git backup, rollback, max 3 repair         │
+│  attempts, test gate, audit log, confidence filter   │
+└─────────────┬────────────────────────────────────────┘
               │ spawns + monitors
               ▼
-┌─────────────────────────────────────────┐
-│            koda2 (FastAPI)               │
-└─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│            koda2 (FastAPI)                            │
+└──────────────────────────────────────────────────────┘
 ```
 
 ### Start with Self-Healing
@@ -510,21 +514,46 @@ Koda2 can **monitor itself, auto-repair crashes, and improve its own code** base
 # Normal start (no self-healing)
 koda2-server
 
-# Start under supervisor (auto-restart + self-repair)
+# Start under supervisor (auto-restart + self-repair + learning)
 koda2-supervisor run
 
-# Disable auto-repair (just restart on crash)
-koda2-supervisor run --no-repair
+# With WhatsApp notifications on improvements
+koda2-supervisor run --notify "31612345678@c.us"
+
+# Disable features selectively
+koda2-supervisor run --no-repair      # just restart on crash
+koda2-supervisor run --no-learning    # disable proactive learning
+```
+
+### Continuous Learning Loop
+
+Every hour, the supervisor automatically:
+1. **Reads conversation history** — detects complaints, wishes, confusion patterns
+2. **Reads audit log** — finds recurring crashes and errors
+3. **Reads application logs** — spots warnings and exceptions
+4. **Analyzes via LLM** — classifies signals, prioritizes by impact
+5. **Implements improvements** — code changes, tests, commit + push
+6. **Updates documentation** — CHANGELOG auto-updated
+7. **Bumps version** — patch for fixes, minor for features
+8. **Notifies you** — WhatsApp message with what changed
+
+```bash
+# Run one learning cycle manually
+koda2-supervisor learn
+
+# With notification
+koda2-supervisor learn --notify "31612345678@c.us"
 ```
 
 ### Self-Improvement from WhatsApp
 
-Send `/improve` from WhatsApp to request code changes:
+Send `/improve` or `/feedback` from WhatsApp:
 
 ```
 /improve add a /weather command that shows the forecast
 /improve make the email summary include attachment names
-/improve add retry logic to the calendar sync
+/feedback the calendar events don't show the location
+/feedback I love the WhatsApp integration!
 ```
 
 The AI will:
@@ -532,8 +561,9 @@ The AI will:
 2. Read the project structure for context
 3. Generate code modifications
 4. Run the test suite
-5. Commit if tests pass, rollback if they fail
-6. Notify you of the result
+5. Commit + push if tests pass, rollback if they fail
+6. Update CHANGELOG, bump version
+7. Notify you of the result
 
 ### Manual Repair
 
@@ -544,7 +574,7 @@ koda2-supervisor repair crash_log.txt
 # Request a code improvement from CLI
 koda2-supervisor improve "add a /weather command"
 
-# Check supervisor status and recent activity
+# Check supervisor status, learner stats, and recent activity
 koda2-supervisor status
 ```
 
@@ -557,8 +587,10 @@ koda2-supervisor status
 | **Max retries** | Max 3 repair attempts per unique crash |
 | **Restart limit** | Max 5 restarts per 10-minute window |
 | **Test gate** | Changes only committed if tests pass |
+| **Auto-push** | Every commit is immediately pushed to remote |
 | **Audit log** | Every action logged to `data/supervisor/audit_log.jsonl` |
 | **Confidence filter** | Low-confidence LLM fixes are skipped |
+| **Failed idea tracking** | Previously failed improvements are not retried |
 
 ---
 
