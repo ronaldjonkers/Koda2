@@ -391,17 +391,83 @@ async def whatsapp_logout() -> dict[str, Any]:
 # ── Scheduler ────────────────────────────────────────────────────────
 
 @router.get("/scheduler/tasks")
-async def list_tasks() -> list[dict[str, Any]]:
-    """List scheduled tasks."""
+async def list_scheduled_tasks() -> list[dict[str, Any]]:
+    """List scheduled tasks with next run time."""
     orch = get_orchestrator()
-    return [
-        {
+    results = []
+    for t in orch.scheduler.list_tasks():
+        # Try to get next run time from APScheduler
+        next_run = None
+        try:
+            job = orch.scheduler._scheduler.get_job(t.task_id)
+            if job and job.next_run_time:
+                next_run = job.next_run_time.isoformat()
+        except Exception:
+            pass
+        results.append({
             "id": t.task_id, "name": t.name, "type": t.task_type,
-            "schedule": t.schedule_info, "run_count": t.run_count,
+            "schedule": t.schedule_info, "func_name": t.func_name,
+            "run_count": t.run_count,
             "last_run": t.last_run.isoformat() if t.last_run else None,
-        }
-        for t in orch.scheduler.list_tasks()
-    ]
+            "next_run": next_run,
+            "created_at": t.created_at.isoformat(),
+        })
+    return results
+
+
+@router.delete("/scheduler/tasks/{task_id}")
+async def cancel_scheduled_task(task_id: str) -> dict[str, Any]:
+    """Cancel a scheduled task."""
+    orch = get_orchestrator()
+    success = orch.scheduler.cancel_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    return {"cancelled": True, "task_id": task_id}
+
+
+# ── Commands ─────────────────────────────────────────────────────────
+
+@router.get("/commands")
+async def list_commands(
+    category: Optional[str] = None,
+    search: Optional[str] = None,
+) -> dict[str, Any]:
+    """List all available assistant commands/actions."""
+    orch = get_orchestrator()
+    
+    if search:
+        commands = orch.commands.search(search)
+    elif category:
+        commands = orch.commands.list_by_category(category)
+    else:
+        commands = orch.commands.list_all()
+    
+    return {
+        "commands": [c.to_dict() for c in commands],
+        "total": len(commands),
+        "categories": orch.commands.categories(),
+    }
+
+
+@router.get("/commands/{command_name}")
+async def get_command(command_name: str) -> dict[str, Any]:
+    """Get detailed info about a specific command."""
+    orch = get_orchestrator()
+    command = orch.commands.get(command_name)
+    
+    if not command:
+        raise HTTPException(status_code=404, detail=f"Command '{command_name}' not found")
+    
+    return command.to_dict()
+
+
+@router.get("/commands/categories")
+async def list_command_categories() -> dict[str, Any]:
+    """List all command categories."""
+    orch = get_orchestrator()
+    return {
+        "categories": orch.commands.categories(),
+    }
 
 
 # ── Task Queue ───────────────────────────────────────────────────────

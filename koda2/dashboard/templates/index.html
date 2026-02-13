@@ -439,7 +439,12 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 
 <!-- ═══ SCHEDULER ═══════════════════════════════════════ -->
 <section class="section" id="section-scheduler">
-  <div class="page-head"><h2>Scheduled Tasks</h2><button class="btn btn-ghost btn-sm" onclick="loadScheduler()">Refresh</button></div>
+  <div class="page-head"><h2>Scheduled Jobs</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="loadScheduler()">Refresh</button>
+    </div>
+  </div>
+  <div style="font-size:10px;color:var(--tx-3);padding:0 4px 6px" id="sched-summary"></div>
   <div class="panel"><div class="panel-body tall" id="sched-list"><div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">Loading...</div></div></div></div>
 </section>
 
@@ -1076,19 +1081,68 @@ if (new URLSearchParams(window.location.search).get('google') === 'connected') {
 }
 
 /* ── Scheduler ──────────────────────────────────────────── */
+async function cancelScheduledTask(id) {
+    try {
+        await fetch(`/api/scheduler/tasks/${id}`, { method: 'DELETE' });
+        loadScheduler();
+    } catch(e) { console.error('Cancel scheduled task failed', e); }
+}
+function schedTypeIcon(type) {
+    if (type === 'cron') return '🔄';
+    if (type === 'interval') return '⏱';
+    if (type === 'once') return '📌';
+    return '⏰';
+}
+function schedTypeCls(type) {
+    if (type === 'cron') return 'tag-blue';
+    if (type === 'interval') return 'tag-green';
+    if (type === 'once') return 'tag-amber';
+    return 'tag-blue';
+}
 async function loadScheduler() {
     try {
         const r = await fetch('/api/scheduler/tasks');
         const tasks = await r.json();
+
+        // Summary
+        const cron = tasks.filter(t => t.type === 'cron').length;
+        const interval = tasks.filter(t => t.type === 'interval').length;
+        const once = tasks.filter(t => t.type === 'once').length;
+        const parts = [`${tasks.length} scheduled jobs`];
+        if (cron) parts.push(`${cron} cron`);
+        if (interval) parts.push(`${interval} interval`);
+        if (once) parts.push(`${once} one-time`);
+        const totalRuns = tasks.reduce((s, t) => s + (t.run_count || 0), 0);
+        if (totalRuns) parts.push(`${totalRuns} total runs`);
+        $('sched-summary').textContent = parts.join(' · ');
+
         if (tasks.length === 0) {
-            $('sched-list').innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">No scheduled tasks</div></div>';
+            $('sched-list').innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">No scheduled jobs</div><p>Jobs are created via reminders, cron schedules, and interval tasks</p></div>';
         } else {
-            $('sched-list').innerHTML = tasks.map(t => `
-                <div class="sched">
-                    <div style="width:7px;height:7px;border-radius:50%;background:var(--green);flex-shrink:0"></div>
-                    <div class="sched-name">${esc(t.name || t.id)}</div>
-                    <div class="sched-meta">${esc(t.type || '')} &middot; runs: ${t.run_count || 0}${t.last_run ? ' &middot; last: ' + timeAgo(t.last_run) : ''}</div>
-                </div>`).join('');
+            $('sched-list').innerHTML = tasks.map(t => {
+                const icon = schedTypeIcon(t.type);
+                const typeCls = schedTypeCls(t.type);
+                const nextRun = t.next_run ? `Next: ${fmtDate(t.next_run)}` : '';
+                const lastRun = t.last_run ? `Last: ${timeAgo(t.last_run)}` : 'Never run';
+                const schedule = t.schedule ? esc(t.schedule) : '';
+                const funcName = t.func_name ? esc(t.func_name) : '';
+
+                return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
+                    <div style="display:flex;gap:8px;width:100%;align-items:center">
+                        <span style="font-size:14px">${icon}</span>
+                        <span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name || t.id)}</span>
+                        <span class="tag ${typeCls}" style="font-size:8px;padding:0 5px">${esc(t.type)}</span>
+                        <button class="task-cancel" onclick="cancelScheduledTask('${t.id}')">Remove</button>
+                    </div>
+                    <div style="display:flex;gap:12px;font-size:10px;color:var(--tx-2);flex-wrap:wrap">
+                        ${schedule ? `<span>📋 ${schedule}</span>` : ''}
+                        ${funcName ? `<span>⚙ ${funcName}</span>` : ''}
+                        <span>🔢 ${t.run_count || 0} runs</span>
+                        <span>${lastRun}</span>
+                        ${nextRun ? `<span style="color:var(--accent)">${nextRun}</span>` : ''}
+                    </div>
+                </div>`;
+            }).join('');
         }
     } catch(e) {
         $('sched-list').innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><div class="empty-title">Could not load scheduler</div></div>';

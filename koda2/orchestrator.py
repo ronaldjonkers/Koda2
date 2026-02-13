@@ -31,6 +31,7 @@ from koda2.modules.scheduler import SchedulerService
 from koda2.modules.self_improve import SelfImproveService
 from koda2.modules.task_queue import TaskQueueService
 from koda2.modules.travel import TravelService
+from koda2.modules.commands import get_registry
 from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
 
@@ -181,11 +182,28 @@ class Orchestrator:
         # Task queue for async operations (messaging, long-running tasks)
         self.task_queue = TaskQueueService(max_workers=5)
         
+        # Command registry for action documentation
+        self.commands = get_registry()
+        
         # Create unified command parser and inject into messaging bots
         self.command_parser = create_command_parser(self)
         self.telegram.set_command_parser(self.command_parser)
         self.whatsapp.set_command_parser(self.command_parser)
         self.whatsapp.set_message_handler(self.process_message)
+
+    def _get_system_prompt(self, include_commands: bool = True) -> str:
+        """Generate the full system prompt including command reference.
+        
+        This ensures the LLM always has up-to-date knowledge of available commands.
+        """
+        prompt = SYSTEM_PROMPT
+        
+        if include_commands:
+            # Add command reference from registry
+            command_ref = self.commands.get_system_prompt_addition()
+            prompt += command_ref
+        
+        return prompt
 
     async def process_message(
         self,
@@ -213,7 +231,7 @@ class Orchestrator:
             ChatMessage(role=c.role, content=c.content) for c in recent[-8:]
         ]
 
-        system = SYSTEM_PROMPT + f"\n\nRelevant context:\n{context_str}"
+        system = self._get_system_prompt() + f"\n\nRelevant context:\n{context_str}"
         history_messages.append(ChatMessage(role="user", content=message))
 
         request = LLMRequest(
