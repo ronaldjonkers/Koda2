@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Evolution Engine 400 error** — replaced invalid OpenRouter model `anthropic/claude-sonnet-4-20250514` with settings-configured model (fallback `anthropic/claude-3.5-sonnet`), added response body logging on API errors
+- **Scheduler not executing tasks** — `orchestrator.startup()` was never called from `main.py` lifespan, so persisted tasks were never restored and system tasks never registered. Fixed by calling `startup()` properly.
+- **Scheduler `chat` action type** — added `chat` action restore support so LLM-processed scheduled tasks survive reboots
+- **Scheduler idempotent start** — `scheduler.start()` now safely handles double-start calls
 
 ## [0.3.0] - 2026-02-13
 

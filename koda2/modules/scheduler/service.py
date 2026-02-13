@@ -62,7 +62,9 @@ class SchedulerService:
         self._executor = executor
 
     async def start(self) -> None:
-        """Start the scheduler."""
+        """Start the scheduler (idempotent — safe to call multiple times)."""
+        if self._scheduler.running:
+            return
         self._scheduler.start()
         logger.info("scheduler_started")
 
@@ -291,6 +293,16 @@ class SchedulerService:
                             if self._executor.whatsapp.is_configured:
                                 await self._executor.whatsapp.send_message("me", msg)
                         func = _make_msg_func
+                    elif rec.action_type == "chat":
+                        async def _make_chat_func(msg=rec.action_payload, by=rec.created_by):
+                            result = await self._executor.process_message(by, msg, channel="scheduler")
+                            response = result.get("response", "")
+                            if self._executor.whatsapp.is_configured and response:
+                                try:
+                                    await self._executor.whatsapp.send_message(by, response)
+                                except Exception:
+                                    pass
+                        func = _make_chat_func
                     else:
                         logger.warning("unknown_action_type", task_id=rec.id, action_type=rec.action_type)
                         continue

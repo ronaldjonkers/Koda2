@@ -136,7 +136,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     _orchestrator.self_improve.load_all_plugins()
 
-    await _orchestrator.scheduler.start()
+    # Full startup: scheduler + restore persisted tasks + system tasks + proactive + task queue
+    await _orchestrator.startup()
 
     # Initialize WebSocket with orchestrator's task queue and metrics
     from koda2.dashboard.websocket import DashboardWebSocket
