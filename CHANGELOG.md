@@ -5,6 +5,22 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-02-13
+
+### Added
+- **Self-Healing Supervisor** (`koda2/supervisor/`):
+  - `safety.py` — git stash/pop backup+rollback, max 3 repair attempts per crash, max 5 restarts/10min, audit log, safe patch workflow
+  - `monitor.py` — spawns koda2 as subprocess, captures stderr, periodic health checks, auto-restart with rate limiting
+  - `repair.py` — extracts crash info from traceback, sends to Claude via OpenRouter, applies minimal fix with confidence filter
+  - `evolution.py` — plans improvements from natural language, generates file create/modify ops, tests+commits or rollbacks
+  - `cli.py` — `koda2-supervisor run|repair|improve|status` commands
+- **User Feedback Loop** — `/feedback` command analyzes feedback via LLM, classifies as bug/feature/behavior/general, auto-implements if actionable
+- **`/improve` WhatsApp command** — request self-improvement from chat, AI plans+implements+tests+commits
+- **`self_improve_code` LLM tool** — agent can autonomously trigger code improvements during conversation
+- **Supervisor API** — `GET /api/supervisor/status` (repair state + audit log), `POST /api/supervisor/improve` (trigger improvement)
+- **Dashboard Supervisor section** — improve form, repair state panel, color-coded audit log
+- **Service mode uses supervisor** — install.sh now wires launchd/systemd to `koda2-supervisor run`
+
 ## [0.3.0] - 2026-02-13
 
 ### Added
