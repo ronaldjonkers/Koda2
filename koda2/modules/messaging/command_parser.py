@@ -230,6 +230,7 @@ class CommonCommands:
             "/status — System status\n"
             "/calendar [today/week] — View upcoming events\n"
             "/schedule <details> — Create a calendar event\n"
+            "/schedules — List all scheduled background tasks\n"
             "/meet [title] — Create a Google Meet link\n"
             "/email <request> — Check inbox or send email\n"
             "/remind <what> at <when> — Set a reminder\n"
@@ -250,6 +251,34 @@ class CommonCommands:
         
         result = await self._orch.process_message(user_id, f"Schedule: {args}", channel=kwargs.get("platform", "api"))
         return result.get("response", "Scheduled successfully")
+
+    async def handle_schedules(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """List all scheduled tasks."""
+        tasks = self._orch.scheduler.list_tasks()
+        if not tasks:
+            return "⏰ *No scheduled tasks*\n\nUse natural language to create one:\n• \"Run a backup every day at 2am\"\n• \"Send me a summary every Monday at 9am\""
+
+        lines = ["⏰ *Scheduled Tasks*\n"]
+        for t in tasks:
+            # Get next run time
+            next_run = ""
+            try:
+                job = self._orch.scheduler._scheduler.get_job(t.task_id)
+                if job and job.next_run_time:
+                    next_run = f" → next: {job.next_run_time.strftime('%d/%m %H:%M')}"
+            except Exception:
+                pass
+
+            type_emoji = {"cron": "🔄", "interval": "⏱️", "once": "⏳"}.get(t.task_type, "📋")
+            last = f"last: {t.last_run.strftime('%d/%m %H:%M')}" if t.last_run else "never run"
+            lines.append(
+                f"{type_emoji} *{t.name}*\n"
+                f"   {t.schedule_info} | {last} | runs: {t.run_count}{next_run}\n"
+                f"   ID: `{t.task_id[:8]}...`"
+            )
+
+        lines.append(f"\n*Total: {len(tasks)} tasks*")
+        return "\n".join(lines)
     
     async def handle_email(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle email command."""
@@ -875,6 +904,7 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("commands", common.handle_commands, "List all commands")
     parser.register("status", common.handle_status, "Show system status")
     parser.register("schedule", common.handle_schedule, "Schedule a meeting")
+    parser.register("schedules", common.handle_schedules, "List all scheduled tasks")
     parser.register("email", common.handle_email, "Manage emails")
     parser.register("remind", common.handle_remind, "Set a reminder")
     parser.register("calendar", common.handle_calendar, "Check calendar")

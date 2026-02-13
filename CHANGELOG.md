@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ChatMessage model** — added `tool_calls` and `tool_call_id` fields for multi-turn tool conversations
 - **Background Agent with tool-calling loop** — `AgentService` rewritten to use native tool calling (50 iterations, 8000 char results) instead of fragile JSON plan parsing
 - **Auto-detect complex tasks** — if first LLM response has ≥4 tool calls, task is auto-offloaded to background agent with user notification
+- **Scheduler now active with real recurring tasks** registered at startup:
+  - Contact Sync (every 6 hours)
+  - Email Check for unread (every 15 minutes)
+  - Calendar Sync (every 30 minutes)
+  - Daily Morning Summary via WhatsApp (07:00 cron)
+  - Proactive Alerts Check (every 10 minutes)
+- **Scheduler tools for LLM** — `schedule_recurring_task`, `schedule_once_task`, `schedule_interval_task`, `list_scheduled_tasks`, `cancel_scheduled_task` — LLM can now create/manage scheduled tasks via native tool calling
+- **`/schedules` WhatsApp/Telegram command** — lists all scheduled tasks with schedule, last run, next run, and run count
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:

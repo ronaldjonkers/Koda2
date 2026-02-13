@@ -922,6 +922,112 @@ class Orchestrator:
                 "error": analysis.analysis_error,
             }
 
+        # ── Scheduler Actions ────────────────────────────────────────────
+
+        elif action_name == "schedule_recurring_task":
+            """Schedule a recurring task via cron expression."""
+            name = params.get("name", "Unnamed task")
+            cron = params.get("cron", "")
+            command = params.get("command", "")
+            message = params.get("message", "")
+
+            if command:
+                async def _run_cmd():
+                    return await self.macos.run_shell(command)
+                task_id = self.scheduler.schedule_recurring(name=name, func=_run_cmd, cron_expression=cron)
+            elif message:
+                async def _send_msg():
+                    if self.whatsapp.is_configured:
+                        await self.whatsapp.send_message("me", message)
+                task_id = self.scheduler.schedule_recurring(name=name, func=_send_msg, cron_expression=cron)
+            else:
+                return {"error": "Either 'command' or 'message' is required"}
+
+            return {"task_id": task_id, "name": name, "schedule": cron, "type": "recurring", "status": "scheduled"}
+
+        elif action_name == "schedule_once_task":
+            """Schedule a one-time task."""
+            name = params.get("name", "Unnamed task")
+            run_at_str = params.get("run_at", "")
+            command = params.get("command", "")
+            message = params.get("message", "")
+
+            try:
+                run_at = dt.datetime.fromisoformat(run_at_str)
+            except (ValueError, TypeError):
+                return {"error": f"Invalid datetime: {run_at_str}"}
+
+            if command:
+                async def _run_cmd():
+                    return await self.macos.run_shell(command)
+                task_id = self.scheduler.schedule_once(name=name, func=_run_cmd, run_at=run_at)
+            elif message:
+                async def _send_msg():
+                    if self.whatsapp.is_configured:
+                        await self.whatsapp.send_message("me", message)
+                task_id = self.scheduler.schedule_once(name=name, func=_send_msg, run_at=run_at)
+            else:
+                return {"error": "Either 'command' or 'message' is required"}
+
+            return {"task_id": task_id, "name": name, "run_at": run_at_str, "type": "once", "status": "scheduled"}
+
+        elif action_name == "schedule_interval_task":
+            """Schedule a task at a fixed interval."""
+            name = params.get("name", "Unnamed task")
+            hours = int(params.get("hours", 0))
+            minutes = int(params.get("minutes", 0))
+            command = params.get("command", "")
+            message = params.get("message", "")
+
+            if not hours and not minutes:
+                return {"error": "Specify hours and/or minutes for the interval"}
+
+            if command:
+                async def _run_cmd():
+                    return await self.macos.run_shell(command)
+                task_id = self.scheduler.schedule_interval(name=name, func=_run_cmd, hours=hours, minutes=minutes)
+            elif message:
+                async def _send_msg():
+                    if self.whatsapp.is_configured:
+                        await self.whatsapp.send_message("me", message)
+                task_id = self.scheduler.schedule_interval(name=name, func=_send_msg, hours=hours, minutes=minutes)
+            else:
+                return {"error": "Either 'command' or 'message' is required"}
+
+            interval = f"{hours}h{minutes}m" if hours else f"{minutes}m"
+            return {"task_id": task_id, "name": name, "interval": interval, "type": "interval", "status": "scheduled"}
+
+        elif action_name == "list_scheduled_tasks":
+            """List all scheduled tasks."""
+            tasks = self.scheduler.list_tasks()
+            result = []
+            for t in tasks:
+                next_run = None
+                try:
+                    job = self.scheduler._scheduler.get_job(t.task_id)
+                    if job and job.next_run_time:
+                        next_run = job.next_run_time.isoformat()
+                except Exception:
+                    pass
+                result.append({
+                    "id": t.task_id,
+                    "name": t.name,
+                    "type": t.task_type,
+                    "schedule": t.schedule_info,
+                    "run_count": t.run_count,
+                    "last_run": t.last_run.isoformat() if t.last_run else None,
+                    "next_run": next_run,
+                })
+            return {"tasks": result, "total": len(result)}
+
+        elif action_name == "cancel_scheduled_task":
+            """Cancel a scheduled task."""
+            task_id = params.get("task_id", "")
+            success = self.scheduler.cancel_task(task_id)
+            if success:
+                return {"cancelled": True, "task_id": task_id}
+            return {"error": f"Task not found: {task_id}"}
+
         else:
             logger.warning("unknown_action", action=action_name)
             return {"status": "unknown_action", "action": action_name}
@@ -1047,8 +1153,121 @@ class Orchestrator:
         except Exception as exc:
             logger.error("agent_callback_registration_failed", error=str(exc))
         
+        # ── Start scheduler and register recurring tasks ──────────────
+        try:
+            await self.scheduler.start()
+            self._register_scheduled_tasks()
+            logger.info("scheduler_started", tasks=len(self.scheduler.list_tasks()))
+        except Exception as exc:
+            logger.error("scheduler_start_failed", error=str(exc))
+        
         logger.info("orchestrator_startup_complete")
-    
+
+    def _register_scheduled_tasks(self) -> None:
+        """Register all recurring background tasks in the scheduler."""
+
+        # ── Contact sync — every 6 hours ──
+        async def _sync_contacts():
+            try:
+                counts = await self.contacts.sync_all(force=False, persist_to_db=True)
+                logger.info("scheduled_contact_sync_done", counts=counts)
+            except Exception as exc:
+                logger.error("scheduled_contact_sync_failed", error=str(exc))
+
+        self.scheduler.schedule_interval(
+            name="Contact Sync",
+            func=_sync_contacts,
+            hours=6,
+        )
+
+        # ── Email check — every 15 minutes ──
+        async def _check_email():
+            try:
+                from koda2.modules.email.models import EmailFilter
+                emails = await self.email.fetch_emails(EmailFilter(unread_only=True, limit=5))
+                if emails:
+                    logger.info("scheduled_email_check", unread=len(emails))
+            except Exception as exc:
+                logger.error("scheduled_email_check_failed", error=str(exc))
+
+        self.scheduler.schedule_interval(
+            name="Email Check (unread)",
+            func=_check_email,
+            minutes=15,
+        )
+
+        # ── Calendar sync — every 30 minutes ──
+        async def _sync_calendar():
+            try:
+                now = dt.datetime.now(dt.UTC)
+                end = now + dt.timedelta(days=1)
+                events = await self.calendar.list_events(now, end)
+                logger.info("scheduled_calendar_sync", events_today=len(events))
+            except Exception as exc:
+                logger.error("scheduled_calendar_sync_failed", error=str(exc))
+
+        self.scheduler.schedule_interval(
+            name="Calendar Sync",
+            func=_sync_calendar,
+            minutes=30,
+        )
+
+        # ── Daily morning summary — every day at 07:00 ──
+        async def _daily_summary():
+            try:
+                now = dt.datetime.now(dt.UTC)
+                end = now + dt.timedelta(days=1)
+                events = await self.calendar.list_events(now, end)
+                from koda2.modules.email.models import EmailFilter
+                emails = await self.email.fetch_emails(EmailFilter(unread_only=True, limit=20))
+
+                summary = f"🌅 *Goedemorgen — Koda2 Daily Summary*\n\n"
+                summary += f"📅 *Agenda vandaag:* {len(events)} events\n"
+                for e in events[:5]:
+                    time_str = e.start.strftime("%H:%M") if e.start else "?"
+                    summary += f"  • {time_str} — {e.title}\n"
+                if len(events) > 5:
+                    summary += f"  ... en {len(events) - 5} meer\n"
+                summary += f"\n📧 *Ongelezen email:* {len(emails)}\n"
+                for e in emails[:3]:
+                    summary += f"  • {e.sender[:30]} — {e.subject[:40]}\n"
+
+                tasks = self.scheduler.list_tasks()
+                summary += f"\n⏰ *Actieve schedules:* {len(tasks)}"
+
+                # Send via WhatsApp if available
+                if self.whatsapp.is_configured:
+                    try:
+                        await self.whatsapp.send_message("me", summary)
+                    except Exception:
+                        pass
+                logger.info("daily_summary_generated")
+            except Exception as exc:
+                logger.error("daily_summary_failed", error=str(exc))
+
+        self.scheduler.schedule_recurring(
+            name="Daily Morning Summary",
+            func=_daily_summary,
+            cron_expression="0 7 * * *",
+        )
+
+        # ── Proactive alerts check — every 10 minutes ──
+        async def _proactive_check():
+            try:
+                alerts = await self.proactive.get_active_alerts()
+                if alerts:
+                    logger.info("scheduled_proactive_alerts", count=len(alerts))
+            except Exception as exc:
+                logger.error("scheduled_proactive_check_failed", error=str(exc))
+
+        self.scheduler.schedule_interval(
+            name="Proactive Alerts Check",
+            func=_proactive_check,
+            minutes=10,
+        )
+
+        logger.info("scheduled_tasks_registered", count=len(self.scheduler.list_tasks()))
+
     async def shutdown(self) -> None:
         """Gracefully shutdown all services."""
         logger.info("orchestrator_shutdown_begin")
@@ -1073,6 +1292,13 @@ class Orchestrator:
             logger.info("proactive_monitoring_stopped")
         except Exception as exc:
             logger.error("proactive_stop_failed", error=str(exc))
+        
+        # Stop scheduler
+        try:
+            await self.scheduler.stop()
+            logger.info("scheduler_stopped")
+        except Exception as exc:
+            logger.error("scheduler_stop_failed", error=str(exc))
         
         logger.info("orchestrator_shutdown_complete")
 

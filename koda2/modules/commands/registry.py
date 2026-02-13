@@ -461,6 +461,76 @@ COMMANDS: dict[str, Command] = {
         ],
     ),
     
+    # ── Scheduler Commands ──────────────────────────────────────────────────────
+    "schedule_recurring_task": Command(
+        name="schedule_recurring_task",
+        category="scheduler",
+        description="Schedule a recurring task using a cron expression (minute hour day month weekday). The task will run a shell command or send a message at the specified schedule.",
+        parameters=[
+            CommandParameter("name", "string", True, description="Human-readable name for the task"),
+            CommandParameter("cron", "string", True, description="Cron expression: minute hour day month weekday (e.g. '0 9 * * 1-5' for weekdays at 9am)"),
+            CommandParameter("command", "string", False, None, "Shell command to run"),
+            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+        ],
+        examples=[
+            '{"action": "schedule_recurring_task", "params": {"name": "Daily backup", "cron": "0 2 * * *", "command": "tar -czf /tmp/backup.tar.gz ~/Documents"}}',
+            '{"action": "schedule_recurring_task", "params": {"name": "Weekly report reminder", "cron": "0 9 * * 1", "message": "Reminder: weekly report is due today"}}',
+        ],
+    ),
+
+    "schedule_once_task": Command(
+        name="schedule_once_task",
+        category="scheduler",
+        description="Schedule a one-time task at a specific date/time. The task will run a shell command or send a message.",
+        parameters=[
+            CommandParameter("name", "string", True, description="Human-readable name for the task"),
+            CommandParameter("run_at", "string", True, description="ISO datetime when to run (e.g. '2026-02-14T09:00:00')"),
+            CommandParameter("command", "string", False, None, "Shell command to run"),
+            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+        ],
+        examples=[
+            '{"action": "schedule_once_task", "params": {"name": "Deploy release", "run_at": "2026-02-14T09:00:00", "command": "cd /app && ./deploy.sh"}}',
+        ],
+    ),
+
+    "schedule_interval_task": Command(
+        name="schedule_interval_task",
+        category="scheduler",
+        description="Schedule a task that repeats at a fixed interval (hours/minutes). The task will run a shell command or send a message.",
+        parameters=[
+            CommandParameter("name", "string", True, description="Human-readable name for the task"),
+            CommandParameter("hours", "integer", False, 0, "Repeat every N hours"),
+            CommandParameter("minutes", "integer", False, 0, "Repeat every N minutes"),
+            CommandParameter("command", "string", False, None, "Shell command to run"),
+            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+        ],
+        examples=[
+            '{"action": "schedule_interval_task", "params": {"name": "Health check", "minutes": 5, "command": "curl -s http://localhost:8000/api/health"}}',
+        ],
+    ),
+
+    "list_scheduled_tasks": Command(
+        name="list_scheduled_tasks",
+        category="scheduler",
+        description="List all scheduled tasks with their schedule, last run time, and next run time",
+        parameters=[],
+        examples=[
+            '{"action": "list_scheduled_tasks", "params": {}}',
+        ],
+    ),
+
+    "cancel_scheduled_task": Command(
+        name="cancel_scheduled_task",
+        category="scheduler",
+        description="Cancel a scheduled task by its ID",
+        parameters=[
+            CommandParameter("task_id", "string", True, description="ID of the scheduled task to cancel"),
+        ],
+        examples=[
+            '{"action": "cancel_scheduled_task", "params": {"task_id": "abc-123"}}',
+        ],
+    ),
+
     # ── System Commands ─────────────────────────────────────────────────────────
     "build_capability": Command(
         name="build_capability",
