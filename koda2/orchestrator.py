@@ -684,7 +684,7 @@ class Orchestrator:
         await self.memory.add_conversation(user_id, "user", original_message or text, channel=platform)
         
         # Create a special system prompt for document analysis
-        doc_system_prompt = self.SYSTEM_PROMPT + """
+        doc_system_prompt = SYSTEM_PROMPT + """
 
 You have just received a document from the user via WhatsApp. The document content
 has been analyzed and extracted for you. Consider the document content carefully

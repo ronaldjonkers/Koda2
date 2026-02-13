@@ -43,7 +43,11 @@ class BaseCalendarProvider(ABC):
 
 
 class EWSCalendarProvider(BaseCalendarProvider):
-    """Exchange Web Services calendar integration."""
+    """Exchange Web Services calendar integration via direct SOAP + httpx-ntlm.
+
+    Uses raw SOAP requests instead of exchangelib because exchangelib's NTLM
+    handshake hangs on many Exchange servers with Python 3.13+.
+    """
 
     provider = CalendarProvider.EWS
 
@@ -54,62 +58,257 @@ class EWSCalendarProvider(BaseCalendarProvider):
         password: str,
         email: str,
     ) -> None:
-        self._server = server
+        from koda2.modules.account.validators import _normalize_ews_server
+        self._server = _normalize_ews_server(server)
         self._username = username
         self._password = password
         self._email = email
-        self._account = None
+        self._ews_url = f"https://{self._server}/EWS/Exchange.asmx"
+        self._headers = {"Content-Type": "text/xml; charset=utf-8"}
+        self._auth = None  # Lazy init
+        self._verified = False  # Whether we've verified the server works
 
-    def _get_account(self):
-        """Lazy-initialize the Exchange account connection."""
-        if self._account is not None:
-            return self._account
-        from exchangelib import Account, Configuration, Credentials, DELEGATE
+    def _get_auth(self):
+        """Get httpx-ntlm auth, building DOMAIN\\user variants."""
+        if self._auth is not None:
+            return self._auth
+        try:
+            from httpx_ntlm import HttpNtlmAuth
+        except ImportError:
+            raise RuntimeError("httpx-ntlm is required for EWS. Run: pip install httpx-ntlm")
 
-        creds = Credentials(self._username, self._password)
-        config = Configuration(server=self._server, credentials=creds)
-        self._account = Account(
-            self._email,
-            config=config,
-            autodiscover=False,
-            access_type=DELEGATE,
-        )
-        return self._account
+        user = self._username
+        # Auto-add domain prefix if not present
+        if "\\" not in user and "@" not in user:
+            domain = self._email.split("@")[-1].split(".")[0].upper() if "@" in self._email else ""
+            if domain:
+                user = f"{domain}\\{self._username}"
+        self._auth = HttpNtlmAuth(user, self._password)
+        return self._auth
+
+    def _ensure_server(self) -> None:
+        """Verify the configured server works; autodiscover if it doesn't."""
+        if self._verified:
+            return
+
+        import httpx
+        auth = self._get_auth()
+
+        # Quick test on configured server
+        try:
+            with httpx.Client(verify=True, timeout=10) as client:
+                resp = client.get(self._ews_url)
+            if resp.status_code in (200, 401):
+                # Server is reachable — try NTLM
+                test_soap = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Header><t:RequestServerVersion Version="Exchange2016"/></soap:Header>
+  <soap:Body>
+    <m:ResolveNames ReturnFullContactData="false">
+      <m:UnresolvedEntry>{self._email}</m:UnresolvedEntry>
+    </m:ResolveNames>
+  </soap:Body>
+</soap:Envelope>"""
+                with httpx.Client(verify=True, timeout=15) as client:
+                    resp = client.post(self._ews_url, content=test_soap, headers=self._headers, auth=auth)
+                if resp.status_code == 200:
+                    self._verified = True
+                    logger.info("ews_server_verified", server=self._server)
+                    return
+        except Exception:
+            pass
+
+        # Server didn't work — try autodiscover
+        logger.info("ews_autodiscovering", original_server=self._server, email=self._email)
+        from koda2.modules.account.validators import _discover_ews_servers
+        candidates = _discover_ews_servers(self._server, self._email)
+
+        for srv in candidates:
+            if srv == self._server:
+                continue  # Already tried
+            ews_url = f"https://{srv}/EWS/Exchange.asmx"
+            try:
+                test_soap = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Header><t:RequestServerVersion Version="Exchange2016"/></soap:Header>
+  <soap:Body>
+    <m:ResolveNames ReturnFullContactData="false">
+      <m:UnresolvedEntry>{self._email}</m:UnresolvedEntry>
+    </m:ResolveNames>
+  </soap:Body>
+</soap:Envelope>"""
+                with httpx.Client(verify=True, timeout=15) as client:
+                    resp = client.post(ews_url, content=test_soap, headers=self._headers, auth=auth)
+                if resp.status_code == 200:
+                    logger.info("ews_autodiscovered", old_server=self._server, new_server=srv)
+                    self._server = srv
+                    self._ews_url = ews_url
+                    self._verified = True
+                    return
+            except Exception:
+                continue
+
+        # If nothing worked, keep original and hope for the best
+        self._verified = True
+        logger.warning("ews_autodiscover_failed", server=self._server)
+
+    def _soap_request(self, body_xml: str) -> str:
+        """Execute a SOAP request against EWS and return the response XML."""
+        import httpx
+        self._ensure_server()
+        soap = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+               xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
+               xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
+  <soap:Header>
+    <t:RequestServerVersion Version="Exchange2016"/>
+  </soap:Header>
+  <soap:Body>
+    {body_xml}
+  </soap:Body>
+</soap:Envelope>"""
+        with httpx.Client(verify=True, timeout=30) as client:
+            resp = client.post(self._ews_url, content=soap, headers=self._headers, auth=self._get_auth())
+        if resp.status_code != 200:
+            raise RuntimeError(f"EWS request failed: HTTP {resp.status_code}")
+        return resp.text
+
+    @staticmethod
+    def _parse_events_xml(xml_text: str) -> list[dict]:
+        """Parse CalendarItem elements from EWS FindItem response XML."""
+        import xml.etree.ElementTree as ET
+        ns = {
+            "s": "http://schemas.xmlsoap.org/soap/envelope/",
+            "t": "http://schemas.microsoft.com/exchange/services/2006/types",
+            "m": "http://schemas.microsoft.com/exchange/services/2006/messages",
+        }
+        root = ET.fromstring(xml_text)
+        items = root.findall(".//t:CalendarItem", ns)
+        events = []
+        for item in items:
+            def _text(tag: str) -> str:
+                el = item.find(f"t:{tag}", ns)
+                return el.text if el is not None and el.text else ""
+
+            # Parse organizer
+            organizer = ""
+            org_el = item.find(".//t:Organizer/t:Mailbox/t:Name", ns)
+            if org_el is not None and org_el.text:
+                organizer = org_el.text
+
+            # Parse attendees
+            attendees_data = []
+            for att in item.findall(".//t:RequiredAttendees/t:Attendee", ns):
+                mb = att.find("t:Mailbox", ns)
+                if mb is not None:
+                    att_email = ""
+                    att_name = ""
+                    e_el = mb.find("t:EmailAddress", ns)
+                    n_el = mb.find("t:Name", ns)
+                    if e_el is not None and e_el.text:
+                        att_email = e_el.text
+                    if n_el is not None and n_el.text:
+                        att_name = n_el.text
+                    resp_el = att.find("t:ResponseType", ns)
+                    status = resp_el.text if resp_el is not None else "Unknown"
+                    if att_email:
+                        attendees_data.append({"email": att_email, "name": att_name, "status": status})
+
+            # Parse location
+            location = _text("Location")
+
+            # Parse ItemId
+            item_id_el = item.find("t:ItemId", ns)
+            item_id = item_id_el.get("Id", "") if item_id_el is not None else ""
+
+            # Parse boolean
+            is_all_day = _text("IsAllDayEvent").lower() == "true"
+
+            # Parse online meeting URL
+            meeting_url = ""
+            # Check for OnlineMeetingUrl or JoinUrl
+            for tag in ["OnlineMeetingUrl", "JoinOnlineMeetingUrl"]:
+                url_el = item.find(f"t:{tag}", ns)
+                if url_el is not None and url_el.text:
+                    meeting_url = url_el.text
+                    break
+
+            events.append({
+                "id": item_id,
+                "subject": _text("Subject"),
+                "start": _text("Start"),
+                "end": _text("End"),
+                "location": location,
+                "organizer": organizer,
+                "attendees": attendees_data,
+                "is_all_day": is_all_day,
+                "meeting_url": meeting_url,
+                "body": _text("Body"),
+            })
+        return events
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def list_events(
         self, start: dt.datetime, end: dt.datetime, calendar_name: Optional[str] = None,
     ) -> list[CalendarEvent]:
         import asyncio
-        from exchangelib import EWSDateTime, EWSTimeZone
 
-        account = self._get_account()
-        tz = EWSTimeZone.timezone("UTC")
-        ews_start = EWSDateTime.from_datetime(start.replace(tzinfo=tz))
-        ews_end = EWSDateTime.from_datetime(end.replace(tzinfo=tz))
+        start_str = start.strftime("%Y-%m-%dT%H:%M:%SZ") if start.tzinfo else start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = end.strftime("%Y-%m-%dT%H:%M:%SZ") if end.tzinfo else end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        body_xml = f"""<m:FindItem Traversal="Shallow">
+      <m:ItemShape>
+        <t:BaseShape>Default</t:BaseShape>
+        <t:AdditionalProperties>
+          <t:FieldURI FieldURI="item:Subject"/>
+          <t:FieldURI FieldURI="calendar:Start"/>
+          <t:FieldURI FieldURI="calendar:End"/>
+          <t:FieldURI FieldURI="calendar:Location"/>
+          <t:FieldURI FieldURI="calendar:Organizer"/>
+          <t:FieldURI FieldURI="calendar:IsAllDayEvent"/>
+          <t:FieldURI FieldURI="calendar:RequiredAttendees"/>
+          <t:FieldURI FieldURI="item:Body"/>
+        </t:AdditionalProperties>
+      </m:ItemShape>
+      <m:CalendarView StartDate="{start_str}" EndDate="{end_str}"/>
+      <m:ParentFolderIds>
+        <t:DistinguishedFolderId Id="calendar"/>
+      </m:ParentFolderIds>
+    </m:FindItem>"""
 
         def _fetch():
-            calendar = account.calendar
-            items = calendar.view(start=ews_start, end=ews_end)
+            xml_text = self._soap_request(body_xml)
+            raw_events = self._parse_events_xml(xml_text)
             events = []
-            for item in items:
-                attendees = []
-                if item.required_attendees:
-                    attendees.extend(
-                        Attendee(email=a.mailbox.email_address, name=a.mailbox.name or "")
-                        for a in item.required_attendees
-                    )
+            for raw in raw_events:
+                try:
+                    start_dt = dt.datetime.fromisoformat(raw["start"].replace("Z", "+00:00"))
+                    end_dt = dt.datetime.fromisoformat(raw["end"].replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+
+                attendees = [
+                    Attendee(email=a["email"], name=a.get("name", ""), status=a.get("status", ""))
+                    for a in raw.get("attendees", [])
+                ]
                 events.append(CalendarEvent(
                     provider=self.provider,
-                    provider_id=str(item.id),
-                    title=item.subject or "",
-                    description=item.body or "",
-                    location=item.location or "",
-                    start=item.start,
-                    end=item.end,
+                    provider_id=raw["id"],
+                    title=raw["subject"],
+                    description=raw.get("body", ""),
+                    location=raw.get("location", ""),
+                    start=start_dt,
+                    end=end_dt,
+                    all_day=raw.get("is_all_day", False),
                     attendees=attendees,
-                    organizer=str(item.organizer) if item.organizer else "",
-                    calendar_name="default",
+                    organizer=raw.get("organizer", ""),
+                    is_online=bool(raw.get("meeting_url")),
+                    meeting_url=raw.get("meeting_url", ""),
+                    calendar_name=calendar_name or "Exchange",
                 ))
             return events
 
@@ -118,23 +317,40 @@ class EWSCalendarProvider(BaseCalendarProvider):
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def create_event(self, event: CalendarEvent) -> CalendarEvent:
         import asyncio
-        from exchangelib import CalendarItem, EWSDateTime, EWSTimeZone
 
-        account = self._get_account()
-        tz = EWSTimeZone.timezone("UTC")
+        start_str = event.start.strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = event.end.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        attendees_xml = ""
+        if event.attendees:
+            attendees_xml = "<t:RequiredAttendees>"
+            for a in event.attendees:
+                attendees_xml += f"""<t:Attendee><t:Mailbox>
+                    <t:EmailAddress>{a.email}</t:EmailAddress>
+                    </t:Mailbox></t:Attendee>"""
+            attendees_xml += "</t:RequiredAttendees>"
+
+        body_xml = f"""<m:CreateItem SendMeetingInvitations="SendToAllAndSaveCopy">
+      <m:Items>
+        <t:CalendarItem>
+          <t:Subject>{event.title}</t:Subject>
+          <t:Body BodyType="Text">{event.description}</t:Body>
+          <t:Start>{start_str}</t:Start>
+          <t:End>{end_str}</t:End>
+          <t:Location>{event.location}</t:Location>
+          {attendees_xml}
+        </t:CalendarItem>
+      </m:Items>
+    </m:CreateItem>"""
 
         def _create():
-            item = CalendarItem(
-                account=account,
-                folder=account.calendar,
-                subject=event.title,
-                body=event.description,
-                start=EWSDateTime.from_datetime(event.start.replace(tzinfo=tz)),
-                end=EWSDateTime.from_datetime(event.end.replace(tzinfo=tz)),
-                location=event.location,
-            )
-            item.save(send_meeting_invitations="SendToAllAndSaveCopy")
-            return str(item.id)
+            xml_text = self._soap_request(body_xml)
+            # Extract ItemId from response
+            import xml.etree.ElementTree as ET
+            ns = {"t": "http://schemas.microsoft.com/exchange/services/2006/types"}
+            root = ET.fromstring(xml_text)
+            item_id_el = root.find(".//t:ItemId", ns)
+            return item_id_el.get("Id", "") if item_id_el is not None else ""
 
         provider_id = await asyncio.to_thread(_create)
         event.provider_id = provider_id
@@ -147,19 +363,54 @@ class EWSCalendarProvider(BaseCalendarProvider):
 
     async def delete_event(self, event_id: str) -> bool:
         import asyncio
-        account = self._get_account()
+
+        body_xml = f"""<m:DeleteItem DeleteType="MoveToDeletedItems"
+                                     SendMeetingCancellations="SendToAllAndSaveCopy">
+      <m:ItemIds>
+        <t:ItemId Id="{event_id}"/>
+      </m:ItemIds>
+    </m:DeleteItem>"""
 
         def _delete():
-            from exchangelib import CalendarItem
-            items = account.calendar.filter(id=event_id)
-            for item in items:
-                item.delete(send_meeting_cancellations="SendToAllAndSaveCopy")
+            self._soap_request(body_xml)
             return True
 
         return await asyncio.to_thread(_delete)
 
     async def list_calendars(self) -> list[str]:
-        return ["default"]
+        """List calendar folders via EWS FindFolder."""
+        import asyncio
+
+        body_xml = """<m:FindFolder Traversal="Deep">
+      <m:FolderShape>
+        <t:BaseShape>Default</t:BaseShape>
+      </m:FolderShape>
+      <m:Restriction>
+        <t:IsEqualTo>
+          <t:FieldURI FieldURI="folder:FolderClass"/>
+          <t:FieldURIOrConstant>
+            <t:Constant Value="IPF.Appointment"/>
+          </t:FieldURIOrConstant>
+        </t:IsEqualTo>
+      </m:Restriction>
+      <m:ParentFolderIds>
+        <t:DistinguishedFolderId Id="msgfolderroot"/>
+      </m:ParentFolderIds>
+    </m:FindFolder>"""
+
+        def _list():
+            import xml.etree.ElementTree as ET
+            xml_text = self._soap_request(body_xml)
+            ns = {"t": "http://schemas.microsoft.com/exchange/services/2006/types"}
+            root = ET.fromstring(xml_text)
+            names = []
+            for folder in root.findall(".//t:CalendarFolder", ns):
+                name_el = folder.find("t:DisplayName", ns)
+                if name_el is not None and name_el.text:
+                    names.append(name_el.text)
+            return names or ["Calendar"]
+
+        return await asyncio.to_thread(_list)
 
 
 class GoogleCalendarProvider(BaseCalendarProvider):

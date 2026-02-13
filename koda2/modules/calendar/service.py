@@ -123,15 +123,24 @@ class CalendarService:
         return list(set(acc.provider for acc in accounts))
 
     async def list_all_calendars(self) -> dict[str, list[str]]:
-        """List all calendars across all active accounts."""
+        """List all calendars across all active accounts.
+        
+        Deduplicates calendars that appear in multiple accounts sharing
+        the same provider credentials (e.g. two Google accounts with same token).
+        """
         result: dict[str, list[str]] = {}
+        seen_cal_ids: set[str] = set()
         accounts = await self.get_accounts()
         
         for account in accounts:
             try:
                 _, provider = await self._get_provider(account.id)
                 cals = await provider.list_calendars()
-                result[account.name] = cals
+                # Deduplicate: skip calendar IDs we've already seen
+                unique_cals = [c for c in cals if c not in seen_cal_ids]
+                seen_cal_ids.update(unique_cals)
+                if unique_cals:
+                    result[account.name] = unique_cals
             except Exception as exc:
                 logger.error("list_calendars_failed", account=account.name, error=str(exc))
                 result[account.name] = []
@@ -196,14 +205,25 @@ class CalendarService:
                 except Exception as exc:
                     logger.error("list_events_failed", account=account.name, error=str(exc))
 
+        # Deduplicate events by provider_id (multiple accounts may share the same token)
+        seen_ids: set[str] = set()
+        unique_events: list[CalendarEvent] = []
+        for event in events:
+            key = event.provider_id
+            if key and key in seen_ids:
+                continue
+            if key:
+                seen_ids.add(key)
+            unique_events.append(event)
+
         # Normalize to naive UTC for sorting (some providers return tz-aware, others naive)
         def _sort_key(e):
             s = e.start
             if s.tzinfo is not None:
                 s = s.replace(tzinfo=None)
             return s
-        events.sort(key=_sort_key)
-        return events
+        unique_events.sort(key=_sort_key)
+        return unique_events
 
     async def sync_all(self) -> dict[str, int]:
         """Sync events from all accounts into the local cache.
