@@ -119,9 +119,9 @@ class ContinuousLearner:
                 )
                 conversations = result.scalars().all()
 
-            # Extract user messages
+            # Extract user messages (truncated to keep payload small)
             user_messages = [
-                {"content": c.content, "channel": c.channel, "created_at": str(c.created_at)}
+                {"content": c.content[:150], "channel": c.channel, "created_at": str(c.created_at)[:19]}
                 for c in conversations
                 if c.role == "user" and len(c.content) > 10
             ]
@@ -130,7 +130,7 @@ class ContinuousLearner:
                 signals.append({
                     "type": "conversations",
                     "count": len(user_messages),
-                    "messages": user_messages[-50:],  # last 50 for LLM analysis
+                    "messages": user_messages[-20:],  # last 20, truncated
                 })
 
         except Exception as exc:
@@ -261,9 +261,9 @@ If there's nothing meaningful to improve, return {"analysis": "...", "proposals"
         ) or "None"
 
         signals_text = json.dumps(signals, default=str, ensure_ascii=False)
-        # Truncate if too long
-        if len(signals_text) > 12000:
-            signals_text = signals_text[:12000] + "... (truncated)"
+        # Truncate to stay well within LLM context limits
+        if len(signals_text) > 6000:
+            signals_text = signals_text[:6000] + "... (truncated)"
 
         user_prompt = f"""## Signals from Koda2 system
 

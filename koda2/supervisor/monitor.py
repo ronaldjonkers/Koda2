@@ -79,7 +79,7 @@ class ProcessMonitor:
             self._process = subprocess.Popen(
                 [python, "-m", "koda2.main"],
                 cwd=str(self._root),
-                stdout=subprocess.PIPE,
+                stdout=None,  # pass through to terminal so user sees output
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,  # line-buffered
