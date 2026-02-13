@@ -100,15 +100,18 @@ COMMANDS: dict[str, Command] = {
     "send_email": Command(
         name="send_email",
         category="messaging",
-        description="Send a simple email (no attachments)",
+        description="Send an email. Optionally specify which account to send from by name.",
         parameters=[
             CommandParameter("to", "array", True, description="List of recipient email addresses"),
             CommandParameter("subject", "string", True, description="Email subject"),
             CommandParameter("body", "string", True, description="Plain text body"),
             CommandParameter("body_html", "string", False, None, "Optional HTML body"),
+            CommandParameter("cc", "array", False, None, "CC recipients"),
+            CommandParameter("account", "string", False, None, "Account name to send from (e.g. 'GoSettle Exchange'). Uses default if not specified."),
         ],
         examples=[
             '{"action": "send_email", "params": {"to": ["jan@example.com"], "subject": "Hello", "body": "Hi there"}}',
+            '{"action": "send_email", "params": {"to": ["jan@example.com"], "subject": "Report", "body": "See attached", "account": "GoSettle Exchange"}}',
         ],
     ),
     
@@ -354,13 +357,53 @@ COMMANDS: dict[str, Command] = {
     "read_email": Command(
         name="read_email",
         category="email",
-        description="Fetch emails from inbox",
+        description="Fetch emails from ALL connected accounts (Google, Exchange, IMAP, Office365) in one unified list. Each email includes the account name it belongs to.",
         parameters=[
             CommandParameter("unread_only", "boolean", False, True, "Only show unread"),
             CommandParameter("limit", "integer", False, 10, "Max emails to fetch"),
         ],
         examples=[
-            '{"action": "read_email", "params": {"unread_only": true, "limit": 5}}',
+            '{"action": "read_email", "params": {"unread_only": true, "limit": 10}}',
+            '{"action": "read_email", "params": {"unread_only": false, "limit": 20}}',
+        ],
+    ),
+
+    "get_email_detail": Command(
+        name="get_email_detail",
+        category="email",
+        description="Get the full content of a specific email by its ID (including full body text). Use this after read_email to read a specific email.",
+        parameters=[
+            CommandParameter("email_id", "string", True, description="Email ID (from read_email results)"),
+        ],
+        examples=[
+            '{"action": "get_email_detail", "params": {"email_id": "abc-123"}}',
+        ],
+    ),
+
+    "reply_email": Command(
+        name="reply_email",
+        category="email",
+        description="Reply to an email. Fetches the original email and sends a reply to the sender (or all recipients with reply_all).",
+        parameters=[
+            CommandParameter("email_id", "string", True, description="ID of the email to reply to"),
+            CommandParameter("body", "string", True, description="Reply message body"),
+            CommandParameter("reply_all", "boolean", False, False, "Reply to all recipients"),
+        ],
+        examples=[
+            '{"action": "reply_email", "params": {"email_id": "abc-123", "body": "Thanks, I will look into this."}}',
+        ],
+    ),
+
+    "search_email": Command(
+        name="search_email",
+        category="email",
+        description="Search emails across all accounts by keyword (searches subject, sender, and body).",
+        parameters=[
+            CommandParameter("query", "string", True, description="Search keyword"),
+            CommandParameter("limit", "integer", False, 20, "Max results"),
+        ],
+        examples=[
+            '{"action": "search_email", "params": {"query": "invoice", "limit": 10}}',
         ],
     ),
     

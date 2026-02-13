@@ -534,11 +534,87 @@ class Orchestrator:
             msg = EmailMessage(
                 subject=params.get("subject", ""),
                 recipients=params.get("to", []),
+                cc=params.get("cc", []),
                 body_text=params.get("body", ""),
                 body_html=params.get("body_html", ""),
             )
-            success = await self.email.send_email(msg)
+            account_name = params.get("account", "")
+            if account_name:
+                accounts = await self.email._get_email_accounts()
+                match = next((a for a in accounts if a.name.lower() == account_name.lower()), None)
+                if match:
+                    success = await self.email.send_email(msg, account_id=match.id)
+                else:
+                    success = await self.email.send_email(msg)
+            else:
+                success = await self.email.send_email(msg)
             return {"sent": success}
+
+        elif action_name == "reply_email":
+            original_id = params.get("email_id", "")
+            reply_body = params.get("body", "")
+            reply_all = params.get("reply_all", False)
+            # Fetch the original email to get context
+            all_emails = await self.email.fetch_all_emails(unread_only=False, limit=50)
+            original = next((e for e in all_emails if e.id == original_id or e.provider_id == original_id), None)
+            if not original:
+                return {"error": f"Email not found: {original_id}"}
+            recipients = [original.sender]
+            if reply_all:
+                recipients.extend(original.recipients)
+                recipients = list(set(recipients))
+            msg = EmailMessage(
+                subject=f"Re: {original.subject}" if not original.subject.startswith("Re:") else original.subject,
+                recipients=recipients,
+                body_text=reply_body,
+                in_reply_to=original.provider_id,
+                references=original.references or original.provider_id,
+            )
+            success = await self.email.send_email(msg)
+            return {"sent": success, "replied_to": original.subject}
+
+        elif action_name == "search_email":
+            query = params.get("query", "")
+            limit = params.get("limit", 20)
+            # Use Gmail search if available, otherwise fetch all and filter
+            emails = await self.email.fetch_all_emails(unread_only=False, limit=limit)
+            if query:
+                q = query.lower()
+                emails = [e for e in emails if q in e.subject.lower() or q in e.sender.lower() or q in (e.body_text or "").lower()]
+            return [{
+                "id": e.id,
+                "provider_id": e.provider_id,
+                "account": e.account_name,
+                "subject": e.subject,
+                "sender": e.sender,
+                "date": e.date.isoformat(),
+                "is_read": e.is_read,
+                "body_preview": (e.body_text or "")[:300],
+            } for e in emails[:limit]]
+
+        elif action_name == "get_email_detail":
+            email_id = params.get("email_id", "")
+            all_emails = await self.email.fetch_all_emails(unread_only=False, limit=100)
+            email = next((e for e in all_emails if e.id == email_id or e.provider_id == email_id), None)
+            if not email:
+                return {"error": f"Email not found: {email_id}"}
+            return {
+                "id": email.id,
+                "provider_id": email.provider_id,
+                "account": email.account_name,
+                "provider": email.provider.value if email.provider else "unknown",
+                "subject": email.subject,
+                "sender": email.sender,
+                "sender_name": email.sender_name,
+                "recipients": email.recipients,
+                "cc": email.cc,
+                "date": email.date.isoformat(),
+                "is_read": email.is_read,
+                "has_attachments": email.has_attachments,
+                "body_text": email.body_text,
+                "body_html": email.body_html[:2000] if email.body_html else "",
+                "in_reply_to": email.in_reply_to,
+            }
 
         elif action_name == "send_whatsapp":
             to = params.get("to", "")
@@ -572,12 +648,23 @@ class Orchestrator:
             }
 
         elif action_name == "read_email":
-            from koda2.modules.email.models import EmailFilter
-            emails = await self.email.fetch_emails(EmailFilter(
+            emails = await self.email.fetch_all_emails(
                 unread_only=params.get("unread_only", True),
                 limit=params.get("limit", 10),
-            ))
-            return [{"subject": e.subject, "sender": e.sender, "date": e.date.isoformat()} for e in emails]
+            )
+            return [{
+                "id": e.id,
+                "provider_id": e.provider_id,
+                "account": e.account_name,
+                "provider": e.provider.value if e.provider else "unknown",
+                "subject": e.subject,
+                "sender": e.sender,
+                "recipients": e.recipients[:3],
+                "date": e.date.isoformat(),
+                "is_read": e.is_read,
+                "has_attachments": e.has_attachments,
+                "body_preview": (e.body_text or "")[:500],
+            } for e in emails]
 
         elif action_name == "find_contact":
             name = params.get("name", entities.get("name", ""))

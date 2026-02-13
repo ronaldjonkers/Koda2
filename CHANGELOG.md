@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scheduler tools for LLM** — `schedule_recurring_task`, `schedule_once_task`, `schedule_interval_task`, `list_scheduled_tasks`, `cancel_scheduled_task` — LLM can now create/manage scheduled tasks via native tool calling
 - **`/schedules` WhatsApp/Telegram command** — lists all scheduled tasks with schedule, last run, next run, and run count
 - **Scheduler persistence** — user-created scheduled tasks are saved to SQLite (`scheduled_tasks` table) and automatically restored after service restart. System tasks are re-registered at startup. Run counts and last_run synced to DB on shutdown.
+- **Unified email across all providers** — `read_email` now fetches from ALL connected accounts (Google, Exchange/EWS, IMAP, Office365) in one merged list, sorted by date. Each email includes `account` label showing which account it belongs to.
+- **New email tools for LLM** — `get_email_detail` (full body), `reply_email` (with reply_all), `search_email` (keyword search across all accounts)
+- **Account-aware email sending** — `send_email` now supports `account` parameter to choose which account to send from, plus `cc` support
+- **OFFICE365** added to `EmailProvider` enum (was missing, caused runtime errors for MSGraph accounts)
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:
