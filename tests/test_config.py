@@ -13,12 +13,14 @@ from koda2.config import Settings
 class TestSettings:
     """Tests for the Settings configuration class."""
 
+    @patch.dict(os.environ, {}, clear=True)
     def test_default_values(self) -> None:
         """Settings loads with sane defaults."""
         s = Settings(
             koda2_env="test",
             database_url="sqlite+aiosqlite:///:memory:",
             koda2_log_level="INFO",
+            _env_file=None,
         )
         assert s.koda2_env == "test"
         assert s.api_port == 8000
