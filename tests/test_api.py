@@ -106,6 +106,9 @@ class TestChatEndpoint:
         data = response.json()
         assert "response" in data
         assert "tokens_used" in data
+        assert "tool_calls" in data
+        assert "iterations" in data
+        assert "model" in data
 
     def test_chat_with_channel(self, client) -> None:
         """Chat endpoint accepts channel parameter."""
