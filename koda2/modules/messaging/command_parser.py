@@ -6,10 +6,24 @@ Provides unified command handling across all messaging platforms.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Callable, Coroutine, Optional
 
 CommandHandler = Callable[..., Coroutine[Any, Any, str]]
+
+
+@dataclass
+class WizardState:
+    """Tracks multi-step wizard conversation state per user."""
+    wizard_type: str  # e.g. 'add_exchange', 'add_imap'
+    step: int = 0
+    data: dict = field(default_factory=dict)
+    created_at: float = field(default_factory=time.time)
+
+    @property
+    def expired(self) -> bool:
+        return time.time() - self.created_at > 300  # 5 min timeout
 
 
 @dataclass
@@ -36,6 +50,48 @@ class CommandParser:
     def __init__(self) -> None:
         self._handlers: dict[str, CommandHandler] = {}
         self._help_texts: dict[str, str] = {}
+        self._wizards: dict[str, WizardState] = {}  # user_id -> active wizard
+        self._wizard_handlers: dict[str, Callable] = {}  # wizard_type -> handler
+
+    def register_wizard(self, wizard_type: str, handler: Callable) -> None:
+        """Register a wizard step handler."""
+        self._wizard_handlers[wizard_type] = handler
+
+    def start_wizard(self, user_id: str, wizard_type: str, data: dict | None = None) -> None:
+        """Start a multi-step wizard for a user."""
+        self._wizards[user_id] = WizardState(wizard_type=wizard_type, data=data or {})
+
+    def cancel_wizard(self, user_id: str) -> None:
+        """Cancel an active wizard."""
+        self._wizards.pop(user_id, None)
+
+    def has_active_wizard(self, user_id: str) -> bool:
+        """Check if user has an active (non-expired) wizard."""
+        ws = self._wizards.get(user_id)
+        if ws and ws.expired:
+            self._wizards.pop(user_id, None)
+            return False
+        return ws is not None
+
+    async def handle_wizard_input(self, user_id: str, text: str, **kwargs) -> tuple[bool, str]:
+        """Process input for an active wizard. Returns (handled, response)."""
+        ws = self._wizards.get(user_id)
+        if not ws or ws.expired:
+            self._wizards.pop(user_id, None)
+            return False, ""
+
+        # Allow cancellation
+        if text.strip().lower() in ("/cancel", "cancel", "stop", "annuleer"):
+            self._wizards.pop(user_id, None)
+            return True, "Wizard cancelled."
+
+        handler = self._wizard_handlers.get(ws.wizard_type)
+        if not handler:
+            self._wizards.pop(user_id, None)
+            return False, ""
+
+        response = await handler(user_id=user_id, text=text, state=ws, parser=self, **kwargs)
+        return True, response
     
     def register(
         self, 
@@ -361,18 +417,37 @@ class CommonCommands:
             return "\n".join(lines)
         
         elif subcmd == "add":
+            # Check for provider type argument
+            add_arg = parts[1].strip().lower() if len(parts) > 1 else ""
+            parser = kwargs.get("parser")
+            
+            wizard_map = {
+                "exchange": ("add_exchange", "Exchange (EWS)"),
+                "ews": ("add_exchange", "Exchange (EWS)"),
+                "office365": ("add_office365", "Office 365"),
+                "o365": ("add_office365", "Office 365"),
+                "msgraph": ("add_office365", "Office 365"),
+                "imap": ("add_imap", "IMAP/SMTP Email"),
+                "email": ("add_imap", "IMAP/SMTP Email"),
+                "caldav": ("add_caldav", "CalDAV"),
+                "telegram": ("add_telegram", "Telegram Bot"),
+            }
+            
+            if add_arg in wizard_map and parser:
+                wiz_type, wiz_name = wizard_map[add_arg]
+                parser.start_wizard(user_id, wiz_type)
+                return f"*Setting up {wiz_name}*\n\nStep 1: What name do you want for this account?\n(e.g. 'Work Exchange', 'Personal Email')\n\n_Send /cancel to abort_"
+            
             return (
                 "*Add Account*\n\n"
-                "Account setup is done through the web dashboard or CLI:\n"
-                "• Dashboard: http://localhost:8000/dashboard\n"
-                "• CLI: koda2 account add\n\n"
-                "Available account types:\n"
-                "• Exchange (EWS)\n"
-                "• Office 365 (Microsoft Graph)\n"
-                "• Google (Calendar + Gmail)\n"
-                "• CalDAV (Apple, Nextcloud)\n"
-                "• IMAP/SMTP\n"
-                "• Telegram Bot"
+                "Choose a provider:\n"
+                "/accounts add exchange\n"
+                "/accounts add office365\n"
+                "/accounts add imap\n"
+                "/accounts add caldav\n"
+                "/accounts add telegram\n\n"
+                "Google: Use the web dashboard for OAuth:\n"
+                "http://localhost:8000/dashboard → Accounts"
             )
         
         elif subcmd == "default":
@@ -494,16 +569,298 @@ class CommonCommands:
             return (
                 "*Account Management Commands:*\n\n"
                 "/accounts list - Show all accounts\n"
-                "/accounts default [name] - Show or set default account\n"
+                "/accounts add - Add a new account (step-by-step)\n"
+                "/accounts add exchange - Add Exchange account\n"
+                "/accounts add office365 - Add Office 365 account\n"
+                "/accounts add imap - Add IMAP email account\n"
+                "/accounts add caldav - Add CalDAV calendar\n"
+                "/accounts add telegram - Add Telegram bot\n"
+                "/accounts default [name] - Show or set default\n"
                 "/accounts enable <name> - Enable an account\n"
                 "/accounts disable <name> - Disable an account\n"
-                "/accounts test <name> - Test account credentials\n"
-                "/accounts delete <name> - Delete an account\n"
-                "/accounts add - Show how to add accounts"
+                "/accounts test <name> - Test credentials\n"
+                "/accounts delete <name> - Delete an account"
             )
         
         else:
             return f"Unknown subcommand: {subcmd}\nUse /accounts help for available commands."
+
+
+# ── Wizard Step Handlers ─────────────────────────────────────────────
+
+
+async def _wizard_add_exchange(user_id: str, text: str, state: WizardState, parser: CommandParser, **kw) -> str:
+    """Step-by-step Exchange (EWS) account setup."""
+    text = text.strip()
+    step = state.step
+
+    if step == 0:  # Got name
+        state.data["name"] = text
+        state.step = 1
+        return "Step 2: Exchange server hostname?\n(e.g. exchange.company.com)"
+
+    if step == 1:  # Got server
+        state.data["server"] = text.replace("https://", "").replace("http://", "").strip("/")
+        state.step = 2
+        return "Step 3: Username?\n(e.g. DOMAIN\\username or just username)"
+
+    if step == 2:  # Got username
+        state.data["username"] = text
+        state.step = 3
+        return "Step 4: Password?"
+
+    if step == 3:  # Got password
+        state.data["password"] = text
+        state.step = 4
+        return "Step 5: Email address?\n(e.g. user@company.com)"
+
+    if step == 4:  # Got email — validate and create
+        state.data["email"] = text
+        parser.cancel_wizard(user_id)
+
+        # Validate
+        from koda2.modules.account.validators import validate_ews_credentials
+        success, error = await validate_ews_credentials(
+            state.data["server"], state.data["username"],
+            state.data["password"], state.data["email"],
+        )
+        if not success:
+            return (
+                f"❌ Connection failed: {error}\n\n"
+                f"Use /accounts add exchange to try again."
+            )
+
+        # Create calendar + email accounts
+        from koda2.modules.account.service import AccountService
+        from koda2.modules.account.models import AccountType, ProviderType
+        svc = AccountService()
+        creds = {
+            "server": state.data["server"],
+            "username": state.data["username"],
+            "password": state.data["password"],
+            "email": state.data["email"],
+        }
+        cal = await svc.create_account(
+            name=f"{state.data['name']} (Calendar)",
+            account_type=AccountType.CALENDAR,
+            provider=ProviderType.EWS,
+            credentials=creds, is_default=True,
+        )
+        mail = await svc.create_account(
+            name=f"{state.data['name']} (Email)",
+            account_type=AccountType.EMAIL,
+            provider=ProviderType.EWS,
+            credentials=creds, is_default=True,
+        )
+        return (
+            f"✅ *Exchange account '{state.data['name']}' created!*\n\n"
+            f"• Calendar: {cal.name}\n"
+            f"• Email: {mail.name}\n\n"
+            f"Events and emails will appear on the next sync."
+        )
+
+    parser.cancel_wizard(user_id)
+    return "Unexpected step. Use /accounts add exchange to start over."
+
+
+async def _wizard_add_office365(user_id: str, text: str, state: WizardState, parser: CommandParser, **kw) -> str:
+    """Step-by-step Office 365 (MS Graph) account setup."""
+    text = text.strip()
+    step = state.step
+
+    if step == 0:
+        state.data["name"] = text
+        state.step = 1
+        return (
+            "Step 2: Client ID (Application ID)?\n\n"
+            "_Get this from Azure Portal → App registrations_"
+        )
+    if step == 1:
+        state.data["client_id"] = text
+        state.step = 2
+        return "Step 3: Client Secret?"
+    if step == 2:
+        state.data["client_secret"] = text
+        state.step = 3
+        return "Step 4: Tenant ID?\n(or 'common' for personal accounts)"
+    if step == 3:
+        state.data["tenant_id"] = text
+        parser.cancel_wizard(user_id)
+
+        from koda2.modules.account.validators import validate_msgraph_credentials
+        success, error = await validate_msgraph_credentials(
+            state.data["client_id"], state.data["client_secret"], state.data["tenant_id"],
+        )
+        if not success:
+            return f"❌ Connection failed: {error}\n\nUse /accounts add office365 to try again."
+
+        from koda2.modules.account.service import AccountService
+        from koda2.modules.account.models import AccountType, ProviderType
+        svc = AccountService()
+        creds = {
+            "client_id": state.data["client_id"],
+            "client_secret": state.data["client_secret"],
+            "tenant_id": state.data["tenant_id"],
+        }
+        cal = await svc.create_account(
+            name=f"{state.data['name']} (Calendar)",
+            account_type=AccountType.CALENDAR,
+            provider=ProviderType.MSGRAPH,
+            credentials=creds, is_default=True,
+        )
+        mail = await svc.create_account(
+            name=f"{state.data['name']} (Email)",
+            account_type=AccountType.EMAIL,
+            provider=ProviderType.MSGRAPH,
+            credentials=creds, is_default=True,
+        )
+        return (
+            f"✅ *Office 365 account '{state.data['name']}' created!*\n\n"
+            f"• Calendar: {cal.name}\n• Email: {mail.name}"
+        )
+
+    parser.cancel_wizard(user_id)
+    return "Unexpected step. Use /accounts add office365 to start over."
+
+
+async def _wizard_add_imap(user_id: str, text: str, state: WizardState, parser: CommandParser, **kw) -> str:
+    """Step-by-step IMAP/SMTP email account setup."""
+    text = text.strip()
+    step = state.step
+
+    if step == 0:
+        state.data["name"] = text
+        state.step = 1
+        return "Step 2: IMAP server?\n(e.g. imap.gmail.com)"
+    if step == 1:
+        state.data["imap_server"] = text
+        state.step = 2
+        return "Step 3: IMAP port?\n(usually 993 for SSL)"
+    if step == 2:
+        try:
+            state.data["imap_port"] = int(text)
+        except ValueError:
+            return "Please enter a valid port number (e.g. 993)."
+        state.step = 3
+        return "Step 4: Username/email?"
+    if step == 3:
+        state.data["username"] = text
+        state.step = 4
+        return "Step 5: Password?"
+    if step == 4:
+        state.data["password"] = text
+        parser.cancel_wizard(user_id)
+
+        from koda2.modules.account.validators import validate_imap_credentials
+        success, error = await validate_imap_credentials(
+            state.data["imap_server"], state.data["imap_port"],
+            state.data["username"], state.data["password"], True,
+        )
+        if not success:
+            return f"❌ IMAP connection failed: {error}\n\nUse /accounts add imap to try again."
+
+        from koda2.modules.account.service import AccountService
+        from koda2.modules.account.models import AccountType, ProviderType
+        svc = AccountService()
+        account = await svc.create_account(
+            name=f"{state.data['name']} (IMAP)",
+            account_type=AccountType.EMAIL,
+            provider=ProviderType.IMAP,
+            credentials={
+                "server": state.data["imap_server"],
+                "port": state.data["imap_port"],
+                "username": state.data["username"],
+                "password": state.data["password"],
+                "use_ssl": True,
+            },
+            is_default=True,
+        )
+        return f"✅ *IMAP account '{state.data['name']}' created!*\n\n• {account.name}"
+
+    parser.cancel_wizard(user_id)
+    return "Unexpected step. Use /accounts add imap to start over."
+
+
+async def _wizard_add_caldav(user_id: str, text: str, state: WizardState, parser: CommandParser, **kw) -> str:
+    """Step-by-step CalDAV account setup."""
+    text = text.strip()
+    step = state.step
+
+    if step == 0:
+        state.data["name"] = text
+        state.step = 1
+        return "Step 2: CalDAV URL?\n(e.g. https://nextcloud.example.com/remote.php/dav)"
+    if step == 1:
+        state.data["url"] = text
+        state.step = 2
+        return "Step 3: Username?"
+    if step == 2:
+        state.data["username"] = text
+        state.step = 3
+        return "Step 4: Password?"
+    if step == 3:
+        state.data["password"] = text
+        parser.cancel_wizard(user_id)
+
+        from koda2.modules.account.validators import validate_caldav_credentials
+        success, error = await validate_caldav_credentials(
+            state.data["url"], state.data["username"], state.data["password"],
+        )
+        if not success:
+            return f"❌ CalDAV connection failed: {error}\n\nUse /accounts add caldav to try again."
+
+        from koda2.modules.account.service import AccountService
+        from koda2.modules.account.models import AccountType, ProviderType
+        svc = AccountService()
+        account = await svc.create_account(
+            name=state.data["name"],
+            account_type=AccountType.CALENDAR,
+            provider=ProviderType.CALDAV,
+            credentials={
+                "url": state.data["url"],
+                "username": state.data["username"],
+                "password": state.data["password"],
+            },
+            is_default=True,
+        )
+        return f"✅ *CalDAV account '{state.data['name']}' created!*\n\n• {account.name}"
+
+    parser.cancel_wizard(user_id)
+    return "Unexpected step. Use /accounts add caldav to start over."
+
+
+async def _wizard_add_telegram(user_id: str, text: str, state: WizardState, parser: CommandParser, **kw) -> str:
+    """Step-by-step Telegram bot setup."""
+    text = text.strip()
+    step = state.step
+
+    if step == 0:
+        state.data["name"] = text
+        state.step = 1
+        return "Step 2: Bot token?\n(Get it from @BotFather on Telegram)"
+    if step == 1:
+        state.data["bot_token"] = text
+        parser.cancel_wizard(user_id)
+
+        from koda2.modules.account.validators import validate_telegram_credentials
+        success, error = await validate_telegram_credentials(state.data["bot_token"])
+        if not success:
+            return f"❌ Invalid bot token: {error}\n\nUse /accounts add telegram to try again."
+
+        from koda2.modules.account.service import AccountService
+        from koda2.modules.account.models import AccountType, ProviderType
+        svc = AccountService()
+        account = await svc.create_account(
+            name=state.data["name"],
+            account_type=AccountType.MESSAGING,
+            provider=ProviderType.TELEGRAM,
+            credentials={"bot_token": state.data["bot_token"], "allowed_user_ids": []},
+            is_default=True,
+        )
+        return f"✅ *Telegram bot '{state.data['name']}' created!*\n\n• {account.name}\n\nRestart Koda2 to activate the bot."
+
+    parser.cancel_wizard(user_id)
+    return "Unexpected step. Use /accounts add telegram to start over."
 
 
 def create_command_parser(orchestrator: Any) -> CommandParser:
@@ -522,5 +879,12 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("accounts", common.handle_accounts, "Manage accounts (list/add/enable/disable/test)")
     parser.register("meet", common.handle_meet, "Create a Google Meet link")
     parser.register("contacts", common.handle_contacts, "Search contacts")
+
+    # Register wizard handlers for step-by-step account setup
+    parser.register_wizard("add_exchange", _wizard_add_exchange)
+    parser.register_wizard("add_office365", _wizard_add_office365)
+    parser.register_wizard("add_imap", _wizard_add_imap)
+    parser.register_wizard("add_caldav", _wizard_add_caldav)
+    parser.register_wizard("add_telegram", _wizard_add_telegram)
     
     return parser

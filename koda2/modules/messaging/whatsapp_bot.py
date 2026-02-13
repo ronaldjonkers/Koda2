@@ -62,6 +62,14 @@ class WhatsAppBot:
                 return await self._message_handler(user_id=user_id, text=text, platform="whatsapp")
             return "Command parser not configured"
 
+        # Check for active wizard first (multi-step conversations)
+        if self._command_parser.has_active_wizard(user_id):
+            handled, response = await self._command_parser.handle_wizard_input(
+                user_id=user_id, text=text, platform="whatsapp"
+            )
+            if handled:
+                return response
+
         # Try to parse as command
         parsed = self._command_parser.parse(text, platform="whatsapp")
         
