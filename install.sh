@@ -306,7 +306,8 @@ install_service() {
     <string>com.koda2.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${SCRIPT_DIR}/.venv/bin/koda2</string>
+        <string>${SCRIPT_DIR}/.venv/bin/koda2-supervisor</string>
+        <string>run</string>
     </array>
     <key>WorkingDirectory</key>
     <string>${SCRIPT_DIR}</string>
@@ -326,10 +327,11 @@ install_service() {
 </dict>
 </plist>
 PLIST
-        ok "macOS LaunchAgent installed at $PLIST_PATH"
+        ok "macOS LaunchAgent installed at $PLIST_PATH (self-healing mode)"
         echo "  Start service:           launchctl load $PLIST_PATH"
         echo "  Stop service:            launchctl unload $PLIST_PATH"
         echo "  Enable start at login:   Change RunAtLoad to <true/> in the plist"
+        echo "  Note: runs under koda2-supervisor with auto-restart + self-repair"
     else
         # Linux systemd
         if command -v systemctl &>/dev/null; then
@@ -343,7 +345,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${SCRIPT_DIR}
-ExecStart=${SCRIPT_DIR}/.venv/bin/koda2
+ExecStart=${SCRIPT_DIR}/.venv/bin/koda2-supervisor run
 Restart=on-failure
 RestartSec=5
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
@@ -354,11 +356,12 @@ StandardError=append:${SCRIPT_DIR}/logs/koda2.error.log
 WantedBy=default.target
 UNIT
             systemctl --user daemon-reload
-            ok "systemd user service installed at $SERVICE_PATH"
+            ok "systemd user service installed at $SERVICE_PATH (self-healing mode)"
             echo "  Start service:           systemctl --user start koda2"
             echo "  Stop service:            systemctl --user stop koda2"
             echo "  Enable start at boot:    systemctl --user enable koda2"
             echo "                           sudo loginctl enable-linger \$USER"
+            echo "  Note: runs under koda2-supervisor with auto-restart + self-repair"
         else
             warn "systemd not found — create a service manually or use: nohup koda2 &"
         fi
