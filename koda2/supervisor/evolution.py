@@ -279,6 +279,62 @@ Plan the minimal changes needed. Return JSON only."""
 
         return patterns
 
+    async def analyze_user_feedback(self, feedback: str) -> dict[str, Any]:
+        """Analyze user feedback and determine if it warrants a code change.
+
+        The LLM decides whether the feedback is:
+        - A bug report → triggers repair
+        - A feature request → triggers evolution
+        - A complaint about behavior → triggers prompt/config tweak
+        - General feedback → stored as memory, no code change
+        """
+        system_prompt = """You analyze user feedback about Koda2 (an AI assistant).
+Classify the feedback and decide if a code change is needed.
+
+RESPONSE FORMAT (JSON):
+{
+    "category": "bug|feature|behavior|general",
+    "actionable": true/false,
+    "improvement_request": "Concrete description of what to change (empty if not actionable)",
+    "explanation": "Why this change would help"
+}"""
+
+        user_prompt = f"User feedback: {feedback}"
+
+        try:
+            response = await self._call_llm(system_prompt, user_prompt)
+            return self._parse_json_response(response)
+        except Exception as exc:
+            logger.error("feedback_analysis_failed", error=str(exc))
+            return {"category": "general", "actionable": False, "improvement_request": "", "explanation": str(exc)}
+
+    async def process_feedback(self, feedback: str) -> tuple[bool, str]:
+        """Full feedback loop: analyze → decide → implement if actionable.
+
+        Returns:
+            (acted, message) — whether a code change was made
+        """
+        self._safety.audit("feedback_received", {"feedback": feedback[:200]})
+
+        analysis = await self.analyze_user_feedback(feedback)
+        category = analysis.get("category", "general")
+        actionable = analysis.get("actionable", False)
+        request = analysis.get("improvement_request", "")
+
+        if not actionable or not request:
+            self._safety.audit("feedback_not_actionable", {
+                "category": category,
+                "explanation": analysis.get("explanation", "")[:200],
+            })
+            return False, f"Feedback noted ({category}): {analysis.get('explanation', 'No action needed')}"
+
+        # Actionable — trigger improvement
+        logger.info("feedback_actionable", category=category, request=request[:100])
+        self._safety.audit("feedback_actionable", {"category": category, "request": request[:200]})
+
+        success, message = await self.implement_improvement(request)
+        return success, f"[{category}] {message}"
+
     def _parse_json_response(self, response: str) -> dict[str, Any]:
         """Parse JSON from LLM response."""
         text = response.strip()

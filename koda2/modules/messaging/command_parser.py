@@ -342,6 +342,39 @@ class CommonCommands:
             f"Categories: {', '.join(f'{k}({v})' for k, v in mem_stats.get('categories', {}).items()) or 'none'}"
         )
 
+    async def handle_feedback(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Handle /feedback command — send feedback that Koda2 analyzes and may auto-improve from."""
+        if not args:
+            return (
+                "💬 *Feedback*\n\n"
+                "Usage: /feedback <your feedback>\n\n"
+                "Examples:\n"
+                "• /feedback the email summaries are too short\n"
+                "• /feedback calendar events don't show the location\n"
+                "• /feedback I love the WhatsApp integration!\n\n"
+                "Koda2 will analyze your feedback and may automatically improve itself."
+            )
+
+        try:
+            from koda2.supervisor.safety import SafetyGuard
+            from koda2.supervisor.evolution import EvolutionEngine
+
+            safety = SafetyGuard()
+            engine = EvolutionEngine(safety)
+
+            channel = kwargs.get("platform", "api")
+            await self._orch._send_typing(user_id, channel)
+
+            acted, message = await engine.process_feedback(args)
+
+            if acted:
+                return f"💬 *Feedback Processed*\n\n✅ {message}\n\n⚠️ Restart Koda2 to activate changes."
+            else:
+                return f"💬 *Feedback Noted*\n\n📝 {message}"
+
+        except Exception as exc:
+            return f"💬 *Feedback Error*\n\n❌ {exc}"
+
     async def handle_improve(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle /improve command — request a self-improvement via the evolution engine."""
         if not args:
@@ -1112,6 +1145,7 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("compact", common.handle_compact, "Compact session context")
     parser.register("usage", common.handle_usage, "Show token usage and cost")
     parser.register("improve", common.handle_improve, "Request a self-improvement (AI modifies its own code)")
+    parser.register("feedback", common.handle_feedback, "Send feedback — Koda2 analyzes and may auto-improve")
 
     # Register wizard handlers for step-by-step account setup
     parser.register_wizard("add_exchange", _wizard_add_exchange)
