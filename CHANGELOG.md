@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Proactive Alerts Check (every 10 minutes)
 - **Scheduler tools for LLM** — `schedule_recurring_task`, `schedule_once_task`, `schedule_interval_task`, `list_scheduled_tasks`, `cancel_scheduled_task` — LLM can now create/manage scheduled tasks via native tool calling
 - **`/schedules` WhatsApp/Telegram command** — lists all scheduled tasks with schedule, last run, next run, and run count
+- **Scheduler persistence** — user-created scheduled tasks are saved to SQLite (`scheduled_tasks` table) and automatically restored after service restart. System tasks are re-registered at startup. Run counts and last_run synced to DB on shutdown.
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:

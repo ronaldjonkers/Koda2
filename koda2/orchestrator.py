@@ -935,11 +935,21 @@ class Orchestrator:
                 async def _run_cmd():
                     return await self.macos.run_shell(command)
                 task_id = self.scheduler.schedule_recurring(name=name, func=_run_cmd, cron_expression=cron)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="cron",
+                    schedule_info=cron, action_type="command", action_payload=command,
+                    created_by=user_id,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
                 task_id = self.scheduler.schedule_recurring(name=name, func=_send_msg, cron_expression=cron)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="cron",
+                    schedule_info=cron, action_type="message", action_payload=message,
+                    created_by=user_id,
+                )
             else:
                 return {"error": "Either 'command' or 'message' is required"}
 
@@ -961,11 +971,21 @@ class Orchestrator:
                 async def _run_cmd():
                     return await self.macos.run_shell(command)
                 task_id = self.scheduler.schedule_once(name=name, func=_run_cmd, run_at=run_at)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="once",
+                    schedule_info=run_at_str, action_type="command", action_payload=command,
+                    created_by=user_id,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
                 task_id = self.scheduler.schedule_once(name=name, func=_send_msg, run_at=run_at)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="once",
+                    schedule_info=run_at_str, action_type="message", action_payload=message,
+                    created_by=user_id,
+                )
             else:
                 return {"error": "Either 'command' or 'message' is required"}
 
@@ -986,11 +1006,21 @@ class Orchestrator:
                 async def _run_cmd():
                     return await self.macos.run_shell(command)
                 task_id = self.scheduler.schedule_interval(name=name, func=_run_cmd, hours=hours, minutes=minutes)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="interval",
+                    schedule_info=f"{hours}h{minutes}m", action_type="command", action_payload=command,
+                    created_by=user_id, interval_hours=hours, interval_minutes=minutes,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
                 task_id = self.scheduler.schedule_interval(name=name, func=_send_msg, hours=hours, minutes=minutes)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="interval",
+                    schedule_info=f"{hours}h{minutes}m", action_type="message", action_payload=message,
+                    created_by=user_id, interval_hours=hours, interval_minutes=minutes,
+                )
             else:
                 return {"error": "Either 'command' or 'message' is required"}
 
@@ -1153,11 +1183,13 @@ class Orchestrator:
         except Exception as exc:
             logger.error("agent_callback_registration_failed", error=str(exc))
         
-        # ── Start scheduler and register recurring tasks ──────────────
+        # ── Start scheduler, restore persisted tasks, register system tasks ──
         try:
+            self.scheduler.set_executor(self)
             await self.scheduler.start()
+            restored = await self.scheduler.restore_persisted_tasks()
             self._register_scheduled_tasks()
-            logger.info("scheduler_started", tasks=len(self.scheduler.list_tasks()))
+            logger.info("scheduler_started", restored=restored, total=len(self.scheduler.list_tasks()))
         except Exception as exc:
             logger.error("scheduler_start_failed", error=str(exc))
         
