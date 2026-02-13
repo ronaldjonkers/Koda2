@@ -22,7 +22,7 @@ from koda2.supervisor.safety import SafetyGuard
 logger = get_logger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-EVOLUTION_MODEL = "anthropic/claude-sonnet-4-20250514"
+EVOLUTION_MODEL_FALLBACK = "anthropic/claude-3.5-sonnet"
 
 
 class EvolutionEngine:
@@ -48,7 +48,7 @@ class EvolutionEngine:
 
         if api_key.startswith("sk-or-"):
             url = OPENROUTER_URL
-            model = EVOLUTION_MODEL
+            model = self._settings.openrouter_model or EVOLUTION_MODEL_FALLBACK
         else:
             url = "https://api.openai.com/v1/chat/completions"
             model = "gpt-4o"
@@ -70,7 +70,10 @@ class EvolutionEngine:
                     "max_tokens": 16000,
                 },
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                body = resp.text[:500]
+                logger.error("llm_call_failed", status=resp.status_code, body=body, model=model)
+                resp.raise_for_status()
             data = resp.json()
             return data["choices"][0]["message"]["content"]
 

@@ -196,18 +196,78 @@ async def supervisor_status() -> dict[str, Any]:
 
 @router.post("/supervisor/improve")
 async def supervisor_improve(request: dict[str, Any]) -> dict[str, Any]:
-    """Trigger a self-improvement via the evolution engine."""
+    """Queue a self-improvement request. Processed chronologically in background."""
     description = request.get("request", request.get("description", ""))
     if not description:
         return {"error": "No improvement request provided"}
 
-    from koda2.supervisor.safety import SafetyGuard
-    from koda2.supervisor.evolution import EvolutionEngine
+    from koda2.supervisor.improvement_queue import get_improvement_queue
 
-    safety = SafetyGuard()
-    engine = EvolutionEngine(safety)
-    success, message = await engine.implement_improvement(description)
-    return {"success": success, "message": message}
+    queue = get_improvement_queue()
+    priority = request.get("priority", 5)
+    item = queue.add(description, source="user", priority=priority)
+
+    # Start worker if not running
+    if not queue.is_running:
+        queue.start_worker()
+
+    return {
+        "queued": True,
+        "item": item,
+        "position": queue.pending_count(),
+        "message": f"Improvement queued (#{item['id']}). Processing in background.",
+    }
+
+
+@router.get("/supervisor/queue")
+async def supervisor_queue(
+    status: Optional[str] = Query(None),
+    limit: int = Query(50),
+) -> dict[str, Any]:
+    """Get the improvement queue status and items."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    items = queue.list_items(status=status, limit=limit)
+    return {
+        "stats": queue.stats(),
+        "worker_running": queue.is_running,
+        "items": items,
+    }
+
+
+@router.post("/supervisor/queue/{item_id}/cancel")
+async def supervisor_queue_cancel(item_id: str) -> dict[str, Any]:
+    """Cancel a pending queue item."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    success = queue.cancel_item(item_id)
+    if not success:
+        raise HTTPException(404, "Item not found or not cancellable")
+    return {"cancelled": True, "item_id": item_id}
+
+
+@router.post("/supervisor/queue/start")
+async def supervisor_queue_start() -> dict[str, Any]:
+    """Start the improvement queue worker."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    if queue.is_running:
+        return {"status": "already_running"}
+    queue.start_worker()
+    return {"status": "started"}
+
+
+@router.post("/supervisor/queue/stop")
+async def supervisor_queue_stop() -> dict[str, Any]:
+    """Stop the improvement queue worker."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    queue.stop_worker()
+    return {"status": "stopped"}
 
 
 @router.post("/supervisor/learn")

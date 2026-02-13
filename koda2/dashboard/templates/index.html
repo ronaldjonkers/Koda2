@@ -499,6 +499,24 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
     </div>
   </div>
 
+  <!-- Improvement Queue -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="panel-body" style="padding:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <h3 style="margin:0;font-size:13px;font-weight:600">Improvement Queue</h3>
+        <div style="display:flex;gap:4px;align-items:center">
+          <span id="queue-worker-status" style="font-size:10px;color:var(--tx-3)"></span>
+          <button class="btn btn-ghost btn-sm" onclick="toggleQueueWorker()" id="queue-toggle-btn" style="font-size:10px">Start Worker</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadQueue()" style="font-size:10px">Refresh</button>
+        </div>
+      </div>
+      <div id="queue-stats" style="font-size:11px;color:var(--tx-2);margin-bottom:8px">Loading...</div>
+      <div id="queue-list" style="max-height:300px;overflow-y:auto;font-size:11px">
+        <div class="empty"><div class="empty-icon">📋</div><div class="empty-title">No items in queue</div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- Learning loop -->
   <div class="panel" style="margin-bottom:14px">
     <div class="panel-body" style="padding:12px">
@@ -1391,6 +1409,8 @@ async function loadSupervisor() {
         $('sv-repair-state').innerHTML = '<span style="color:var(--tx-3)">Could not load supervisor status</span>';
         $('sv-audit-list').innerHTML = '<div class="empty"><div class="empty-icon">🧬</div><div class="empty-title">Supervisor not available</div></div>';
     }
+    // Also load the improvement queue
+    loadQueue();
 }
 
 async function triggerLearnCycle() {
@@ -1429,9 +1449,9 @@ async function submitImprove() {
     if (!request) return;
 
     btn.disabled = true;
-    btn.textContent = 'Working...';
+    btn.textContent = 'Queueing...';
     result.style.display = 'block';
-    result.innerHTML = '<span style="color:var(--accent)">🧬 Planning and implementing improvement...</span>';
+    result.innerHTML = '<span style="color:var(--accent)">🧬 Adding to improvement queue...</span>';
 
     try {
         const r = await fetch('/api/supervisor/improve', {
@@ -1440,18 +1460,109 @@ async function submitImprove() {
             body: JSON.stringify({ request })
         });
         const data = await r.json();
-        if (data.success) {
-            result.innerHTML = `<span style="color:#22c55e">✅ ${esc(data.message)}</span><br><small style="color:var(--tx-3)">Restart Koda2 to activate changes.</small>`;
+        if (data.queued) {
+            result.innerHTML = `<span style="color:#22c55e">✅ ${esc(data.message)}</span><br><small style="color:var(--tx-3)">${data.position} item(s) in queue. Worker processes them in order.</small>`;
             input.value = '';
+            loadQueue();
         } else {
             result.innerHTML = `<span style="color:#ef4444">❌ ${esc(data.message || data.error)}</span>`;
         }
-        loadSupervisor();
     } catch(e) {
         result.innerHTML = `<span style="color:#ef4444">❌ Error: ${esc(e.message)}</span>`;
     } finally {
         btn.disabled = false;
         btn.textContent = 'Improve';
+    }
+}
+
+async function loadQueue() {
+    try {
+        const r = await fetch('/api/supervisor/queue');
+        const data = await r.json();
+        const stats = data.stats || {};
+        const running = data.worker_running;
+
+        // Update worker toggle button
+        $('queue-toggle-btn').textContent = running ? 'Stop Worker' : 'Start Worker';
+        $('queue-worker-status').innerHTML = running
+            ? '<span style="color:#22c55e">● Running</span>'
+            : '<span style="color:var(--tx-3)">● Stopped</span>';
+
+        // Stats bar
+        const parts = [];
+        if (stats.pending) parts.push(`⏳ ${stats.pending} pending`);
+        if (stats.in_progress) parts.push(`🔄 ${stats.in_progress} in progress`);
+        if (stats.completed) parts.push(`✅ ${stats.completed} completed`);
+        if (stats.failed) parts.push(`❌ ${stats.failed} failed`);
+        $('queue-stats').innerHTML = parts.length ? parts.join(' · ') : 'Queue empty';
+
+        // Item list
+        const items = (data.items || []).slice().reverse();
+        if (items.length === 0) {
+            $('queue-list').innerHTML = '<div class="empty" style="padding:12px"><div class="empty-icon">📋</div><div class="empty-title">No items in queue</div><p style="font-size:10px">Use the form above or let the learner auto-add observations</p></div>';
+            return;
+        }
+
+        $('queue-list').innerHTML = items.map(i => {
+            const statusColors = {
+                pending: '#f59e0b', in_progress: '#3b82f6',
+                completed: '#22c55e', failed: '#ef4444', skipped: 'var(--tx-3)'
+            };
+            const statusIcons = {
+                pending: '⏳', in_progress: '🔄',
+                completed: '✅', failed: '❌', skipped: '⏭'
+            };
+            const color = statusColors[i.status] || 'var(--tx-2)';
+            const icon = statusIcons[i.status] || '•';
+            const ts = (i.created_at || '').substring(0, 16).replace('T', ' ');
+            const cancelBtn = i.status === 'pending'
+                ? `<button class="btn btn-ghost btn-sm" onclick="cancelQueueItem('${i.id}')" style="font-size:9px;padding:1px 4px;margin-left:4px">Cancel</button>`
+                : '';
+            const resultMsg = i.result_message
+                ? `<div style="font-size:10px;color:var(--tx-3);margin-top:2px;padding-left:18px">${esc(i.result_message.substring(0, 120))}</div>`
+                : '';
+            const sourceTag = i.source !== 'user'
+                ? `<span class="tag" style="font-size:8px;padding:0 4px;background:var(--bg-3);margin-left:4px">${esc(i.source)}</span>`
+                : '';
+
+            return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:4px">
+                    <span>${icon}</span>
+                    <span style="flex:1">${esc(i.request.substring(0, 80))}${i.request.length > 80 ? '...' : ''}</span>
+                    ${sourceTag}
+                    <span style="color:${color};font-size:10px;font-weight:600">${esc(i.status)}</span>
+                    ${cancelBtn}
+                </div>
+                <div style="font-size:9px;color:var(--tx-3);padding-left:18px">${ts} · #${i.id}</div>
+                ${resultMsg}
+            </div>`;
+        }).join('');
+    } catch(e) {
+        $('queue-stats').innerHTML = '<span style="color:var(--tx-3)">Could not load queue</span>';
+    }
+}
+
+async function cancelQueueItem(itemId) {
+    try {
+        await fetch(`/api/supervisor/queue/${itemId}/cancel`, { method: 'POST' });
+        loadQueue();
+    } catch(e) {
+        console.error('Cancel failed', e);
+    }
+}
+
+async function toggleQueueWorker() {
+    const btn = $('queue-toggle-btn');
+    const isRunning = btn.textContent.includes('Stop');
+    btn.disabled = true;
+    try {
+        const endpoint = isRunning ? '/api/supervisor/queue/stop' : '/api/supervisor/queue/start';
+        await fetch(endpoint, { method: 'POST' });
+        await loadQueue();
+    } catch(e) {
+        console.error('Toggle worker failed', e);
+    } finally {
+        btn.disabled = false;
     }
 }
 

@@ -33,6 +33,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Supervisor API** — `GET /api/supervisor/status` (repair state + learner state + audit log), `POST /api/supervisor/improve`, `POST /api/supervisor/learn`
 - **Dashboard Supervisor section** — improve form, learning loop panel with stats + Run Cycle Now button, repair state panel, color-coded audit log
 - **Service mode uses supervisor** — install.sh now wires launchd/systemd to `koda2-supervisor run`
+- **Improvement Queue** (`koda2/supervisor/improvement_queue.py`):
+  - Persistent chronological queue for self-improvement tasks (`data/supervisor/improvement_queue.json`)
+  - Background asyncio worker processes items by priority then age
+  - Sources: user (dashboard), learner (auto-observations), supervisor, system
+  - API: `GET /api/supervisor/queue`, `POST /api/supervisor/queue/start|stop`, `POST /api/supervisor/queue/{id}/cancel`
+  - Dashboard panel with live queue view, worker toggle, cancel buttons
+  - ContinuousLearner now queues proposals instead of executing directly
+
+### Fixed
+- **Evolution Engine 400 error** — replaced invalid OpenRouter model `anthropic/claude-sonnet-4-20250514` with settings-configured model (fallback `anthropic/claude-3.5-sonnet`), added response body logging on API errors
 
 ## [0.3.0] - 2026-02-13
 

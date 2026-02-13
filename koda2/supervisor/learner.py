@@ -601,39 +601,51 @@ Any organizational issues? Return JSON only."""
             # Sort by priority
             proposals.sort(key=lambda p: p.get("priority", 5))
 
-            # Step 3: Execute improvements (max N per cycle)
-            applied = []
+            # Step 3: Queue proposals via the ImprovementQueue
+            from koda2.supervisor.improvement_queue import get_improvement_queue
+            queue = get_improvement_queue()
+
+            queued_count = 0
             for proposal in proposals[:MAX_AUTO_IMPROVEMENTS_PER_CYCLE]:
-                success, message = await self._execute_improvement(proposal)
-                if success:
-                    applied.append(proposal)
-                    summary["improvements_applied"] += 1
-                else:
-                    summary["improvements_failed"] += 1
+                proposal_id = proposal.get("id", "unknown")
+                description = proposal.get("description", "")
+                request = proposal.get("implementation_request", description)
 
-            # Step 4: Post-improvement tasks (only if something was applied)
-            if applied:
-                # Update documentation
-                await self._update_documentation(applied)
+                if proposal_id in self._failed_ideas:
+                    continue
+                if proposal.get("risk") == "high":
+                    self._safety.audit("learner_skip_high_risk", {"proposal": proposal_id})
+                    continue
 
-                # Bump version
-                bump_type = self._determine_bump_type(applied)
-                new_version = self._bump_version(bump_type)
-                summary["version_bumped"] = True
-                summary["new_version"] = new_version
+                queue.add(
+                    request=request,
+                    source="learner",
+                    priority=proposal.get("priority", 5),
+                    metadata={
+                        "proposal_id": proposal_id,
+                        "type": proposal.get("type"),
+                        "description": description[:200],
+                        "cycle": self._cycle_count,
+                    },
+                )
+                queued_count += 1
 
-                # Commit docs + version bump
-                self._safety.git_commit(f"docs: auto-update changelog + bump to v{new_version}")
-                self._safety.git_push()
+            summary["improvements_queued"] = queued_count
 
-                # Notify user
-                await self._notify_user(new_version, applied)
-                summary["user_notified"] = True
+            # Start queue worker if items were added and it's not running
+            if queued_count > 0 and not queue.is_running:
+                queue.start_worker()
 
-            # Step 5: Periodic hygiene check (every 6 cycles)
+            # Step 4: Periodic hygiene check (every 6 cycles)
             if self._cycle_count % 6 == 0:
                 hygiene = await self._run_hygiene_check()
-                if hygiene:
+                if hygiene and hygiene.get("suggestion"):
+                    queue.add(
+                        request=hygiene["suggestion"],
+                        source="learner",
+                        priority=8,
+                        metadata={"type": "hygiene", "issue": hygiene.get("issue", "")},
+                    )
                     summary["hygiene_issue"] = hygiene.get("issue", "")
 
         except Exception as exc:
