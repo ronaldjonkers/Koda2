@@ -67,6 +67,12 @@ IMPORTANT RULES:
 7. Be concise and helpful. Respond in the user's language.
 8. Today's date/time context will be provided when available."""
 
+# Maximum tool-calling loop iterations to prevent runaway
+MAX_TOOL_ITERATIONS = 15
+
+# If the first LLM response has more than this many tool calls, offload to background agent
+AGENT_AUTO_THRESHOLD = 4
+
 # Workspace directory for personality/tool files
 _WORKSPACE_DIR = Path("workspace")
 
