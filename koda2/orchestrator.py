@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Callable
 from typing import Any, Optional
 
 from koda2.config import get_settings
@@ -28,6 +29,7 @@ from koda2.modules.messaging.command_parser import create_command_parser
 from koda2.modules.proactive import ProactiveService
 from koda2.modules.scheduler import SchedulerService
 from koda2.modules.self_improve import SelfImproveService
+from koda2.modules.task_queue import TaskQueueService
 from koda2.modules.travel import TravelService
 from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
@@ -84,6 +86,7 @@ Available actions and their parameters:
 - read_file: {"path": "/some/file.txt"}
 - write_file: {"path": "/some/file.txt", "content": "..."}
 - file_exists: {"path": "/some/path"}
+- send_whatsapp: {"to": "+31612345678 or contact name", "message": "..."}
 - send_file: {"path": "/file.pdf", "channel": "whatsapp|email", "to": "recipient", "caption": "..."}
 - send_email: {"to": ["email@example.com"], "subject": "...", "body": "..."}
 - send_email_with_attachments: {"to": [...], "subject": "...", "body": "...", "attachments": [...]}
@@ -104,12 +107,14 @@ Available actions and their parameters:
 - start_proactive_monitoring: {}
 - stop_proactive_monitoring: {}
 - create_reminder: {"title": "...", "notes": "..."}
+- get_task_status: {"task_id": "..."}
+- list_tasks: {"status": "pending|running|completed|failed", "limit": 10}
 
 When the user gives you a request, determine the intent and required actions. Respond in JSON format:
 {
     "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
               generate_image, generate_video, analyze_image, analyze_document, create_reminder, 
-              find_contact, search_memory, send_file, sync_contacts, run_command, read_file, 
+              find_contact, search_memory, send_file, send_whatsapp, sync_contacts, run_command, read_file, 
               write_file, list_directory, general_chat",
     "entities": {
         "any extracted entities like names, dates, times, subjects, file paths, recipient names, etc."
@@ -172,6 +177,9 @@ class Orchestrator:
             whatsapp_bot=self.whatsapp,
         )
         self.document_analyzer = DocumentAnalyzerService(self.llm)
+        
+        # Task queue for async operations (messaging, long-running tasks)
+        self.task_queue = TaskQueueService(max_workers=5)
         
         # Create unified command parser and inject into messaging bots
         self.command_parser = create_command_parser(self)
@@ -263,6 +271,13 @@ class Orchestrator:
                         action_feedback.append("✅ Email sent!")
                     else:
                         action_feedback.append("❌ Failed to send email")
+                elif action_name == "send_whatsapp":
+                    if isinstance(result, dict) and result.get("status") == "queued":
+                        action_feedback.append(f"✅ WhatsApp message queued (task: {result.get('task_id', 'unknown')[:8]}...)")
+                    elif isinstance(result, dict) and result.get("sent"):
+                        action_feedback.append("✅ WhatsApp message sent!")
+                    else:
+                        action_feedback.append(f"❌ Failed to send WhatsApp: {result.get('error', 'Unknown error')}")
                         
             except Exception as exc:
                 logger.error("action_failed", action=action, error=str(exc))
@@ -456,6 +471,34 @@ class Orchestrator:
         
         return text
 
+    async def _send_whatsapp_task(
+        self,
+        recipient: str,
+        message: str,
+        progress_callback: Optional[Callable] = None,
+    ) -> dict[str, Any]:
+        """Task function for sending WhatsApp messages via task queue.
+        
+        This runs async and updates progress as it goes.
+        """
+        try:
+            if progress_callback:
+                await progress_callback(10, "Connecting to WhatsApp...")
+            
+            # Send the message
+            result = await self.whatsapp.send_message(recipient, message)
+            
+            if progress_callback:
+                await progress_callback(100, "Message sent!")
+            
+            return {"sent": True, "result": result}
+            
+        except Exception as exc:
+            logger.error("whatsapp_task_failed", recipient=recipient, error=str(exc))
+            if progress_callback:
+                await progress_callback(100, f"Failed: {str(exc)}")
+            return {"sent": False, "error": str(exc)}
+
     async def _execute_action(
         self,
         user_id: str,
@@ -501,6 +544,37 @@ class Orchestrator:
             )
             success = await self.email.send_email(msg)
             return {"sent": success}
+
+        elif action_name == "send_whatsapp":
+            to = params.get("to", "")
+            message = params.get("message", "")
+            
+            # Resolve contact name to phone number if needed
+            recipient = to
+            if to and not to.startswith("+") and not to.isdigit():
+                # Try to find contact by name
+                contact = await self.contacts.find_by_name(to)
+                if contact and contact.get_primary_phone():
+                    recipient = contact.get_primary_phone()
+                    logger.info("resolved_contact_for_whatsapp", name=to, phone=recipient)
+                else:
+                    return {"status": "error", "error": f"Could not find phone number for contact: {to}"}
+            
+            # Submit to task queue for async processing
+            task = await self.task_queue.submit(
+                name=f"send_whatsapp_to_{recipient}",
+                func=self._send_whatsapp_task,
+                recipient=recipient,
+                message=message,
+                priority=3,  # High priority for messaging
+            )
+            
+            return {
+                "status": "queued",
+                "task_id": task.id,
+                "recipient": recipient,
+                "message_preview": message[:50] + "..." if len(message) > 50 else message,
+            }
 
         elif action_name == "read_email":
             from koda2.modules.email.models import EmailFilter
@@ -732,6 +806,20 @@ class Orchestrator:
             await self.proactive.stop()
             return {"status": "stopped"}
 
+        elif action_name == "get_task_status":
+            task_id = params.get("task_id", "")
+            task = await self.task_queue.get_task(task_id)
+            if task:
+                return task.to_dict()
+            return {"status": "not_found", "task_id": task_id}
+
+        elif action_name == "list_tasks":
+            tasks = await self.task_queue.list_tasks(
+                status=params.get("status"),
+                limit=params.get("limit", 10),
+            )
+            return [t.to_dict() for t in tasks]
+
         elif action_name == "analyze_document":
             file_path = params.get("file_path", "")
             user_message = params.get("message", "")
@@ -835,7 +923,45 @@ class Orchestrator:
         except Exception as exc:
             logger.error("proactive_start_failed", error=str(exc))
         
+        # Start task queue for async operations
+        try:
+            await self.task_queue.start()
+            # Register callback to notify on task completion
+            async def on_task_update(task):
+                if task.status.value in ("completed", "failed"):
+                    logger.info(
+                        "task_completed_notification",
+                        task_name=task.name,
+                        status=task.status.value,
+                        has_result=task.result is not None,
+                        error=task.error,
+                    )
+            self.task_queue.register_callback(on_task_update)
+            logger.info("task_queue_started")
+        except Exception as exc:
+            logger.error("task_queue_start_failed", error=str(exc))
+        
         logger.info("orchestrator_startup_complete")
+    
+    async def shutdown(self) -> None:
+        """Gracefully shutdown all services."""
+        logger.info("orchestrator_shutdown_begin")
+        
+        # Stop task queue
+        try:
+            await self.task_queue.stop()
+            logger.info("task_queue_stopped")
+        except Exception as exc:
+            logger.error("task_queue_stop_failed", error=str(exc))
+        
+        # Stop proactive monitoring
+        try:
+            await self.proactive.stop()
+            logger.info("proactive_monitoring_stopped")
+        except Exception as exc:
+            logger.error("proactive_stop_failed", error=str(exc))
+        
+        logger.info("orchestrator_shutdown_complete")
 
     async def handle_whatsapp_message(self, payload: dict[str, Any]) -> Optional[str]:
         """Handle an incoming WhatsApp self-message with automatic document analysis.

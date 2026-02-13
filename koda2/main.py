@@ -36,14 +36,12 @@ from koda2.dashboard.websocket import sio
 from koda2.database import close_db, init_db
 from koda2.logging_config import get_logger, setup_logging
 from koda2.modules.metrics.service import MetricsService
-from koda2.modules.task_queue.service import TaskQueueService
 from koda2.orchestrator import Orchestrator
 
 setup_logging()
 logger = get_logger(__name__)
 
 _orchestrator: Orchestrator | None = None
-_task_queue: TaskQueueService | None = None
 _metrics: MetricsService | None = None
 _background_tasks: list[asyncio.Task] = []
 _shutdown_in_progress = False
@@ -127,17 +125,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if repaired:
         logger.info("accounts_repaired_on_startup", count=repaired)
 
-    # Initialize task queue
-    _task_queue = TaskQueueService(max_workers=5)
-    await _task_queue.start()
+    # Initialize orchestrator (includes task queue)
+    _orchestrator = Orchestrator()
     
     # Initialize metrics
     _metrics = MetricsService(collection_interval=5)
     await _metrics.start()
-
-    _orchestrator = Orchestrator()
-    # Inject task queue and metrics into orchestrator
-    _orchestrator.task_queue = _task_queue
     _orchestrator.metrics = _metrics
     set_orchestrator(_orchestrator)
 
@@ -145,9 +138,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await _orchestrator.scheduler.start()
 
-    # Initialize WebSocket with task queue and metrics
+    # Initialize WebSocket with orchestrator's task queue and metrics
     from koda2.dashboard.websocket import DashboardWebSocket
-    dashboard_ws = DashboardWebSocket(_task_queue, _metrics)
+    dashboard_ws = DashboardWebSocket(_orchestrator.task_queue, _metrics)
     sio.dashboard_ws = dashboard_ws
     await dashboard_ws.start()
 
@@ -197,32 +190,18 @@ async def _graceful_shutdown() -> None:
         await asyncio.gather(*_background_tasks, return_exceptions=True)
     _background_tasks.clear()
 
-    # 2. Stop services (order: messaging → scheduler → metrics → queue → ws → db)
+    # 2. Stop services (order: orchestrator → metrics → ws → db)
     if _orchestrator:
         try:
-            await _orchestrator.telegram.stop()
+            await _orchestrator.shutdown()
         except Exception as exc:
-            logger.warning("telegram_stop_error", error=str(exc))
-        try:
-            await _orchestrator.whatsapp.stop()
-        except Exception as exc:
-            logger.warning("whatsapp_stop_error", error=str(exc))
-        try:
-            await _orchestrator.scheduler.stop()
-        except Exception as exc:
-            logger.warning("scheduler_stop_error", error=str(exc))
+            logger.warning("orchestrator_shutdown_error", error=str(exc))
 
     if _metrics:
         try:
             await _metrics.stop()
         except Exception as exc:
             logger.warning("metrics_stop_error", error=str(exc))
-
-    if _task_queue:
-        try:
-            await _task_queue.stop()
-        except Exception as exc:
-            logger.warning("task_queue_stop_error", error=str(exc))
 
     if hasattr(sio, 'dashboard_ws') and sio.dashboard_ws:
         try:

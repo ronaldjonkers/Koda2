@@ -79,9 +79,9 @@ class TestMacOSService:
 
     @pytest.mark.asyncio
     async def test_run_shell_blocked_command(self, macos: MacOSService) -> None:
-        """Dangerous commands are blocked with PermissionError."""
+        """Dangerous commands on system paths are blocked with PermissionError."""
         with pytest.raises(PermissionError, match="blocked"):
-            await macos.run_shell("rm -rf /tmp/test")
+            await macos.run_shell("rm -rf /usr/bin/test")
 
     @pytest.mark.asyncio
     async def test_run_applescript(self, macos: MacOSService) -> None:

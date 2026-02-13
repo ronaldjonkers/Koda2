@@ -404,6 +404,41 @@ async def list_tasks() -> list[dict[str, Any]]:
     ]
 
 
+# ── Task Queue ───────────────────────────────────────────────────────
+
+@router.get("/tasks")
+async def list_queued_tasks(
+    status: Optional[str] = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """List tasks from the async task queue."""
+    orch = get_orchestrator()
+    from koda2.modules.task_queue import TaskStatus
+    task_status = TaskStatus(status) if status else None
+    tasks = await orch.task_queue.list_tasks(status=task_status, limit=limit)
+    return [t.to_dict() for t in tasks]
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str) -> dict[str, Any]:
+    """Get details of a specific task."""
+    orch = get_orchestrator()
+    task = await orch.task_queue.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task.to_dict()
+
+
+@router.post("/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str) -> dict[str, Any]:
+    """Cancel a pending or running task."""
+    orch = get_orchestrator()
+    success = await orch.task_queue.cancel_task(task_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Task not found or cannot be cancelled")
+    return {"cancelled": True, "task_id": task_id}
+
+
 # ── Travel ───────────────────────────────────────────────────────────
 
 @router.get("/travel/search-flights")
