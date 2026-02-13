@@ -159,13 +159,15 @@ class CommandParser:
             return True, f"Unknown command: /{parsed.command}\n\nAvailable commands: {available}"
         
         try:
+            # Remove keys we pass explicitly to avoid duplicates from **kwargs
+            clean_kwargs = {k: v for k, v in kwargs.items() if k not in ("user_id", "args", "command", "platform", "parser")}
             response = await handler(
                 user_id=user_id,
                 args=parsed.args,
                 command=parsed.command,
                 platform=parsed.platform,
                 parser=self,
-                **kwargs,
+                **clean_kwargs,
             )
             return True, response
         except Exception as exc:
