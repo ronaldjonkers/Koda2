@@ -54,15 +54,29 @@ Your capabilities include:
 - Memory — remember conversations, search history, learn preferences
 
 When a user asks you to send a file, document, or media:
-1. First check if you have access to the file path
-2. Use send_file action with the appropriate channel (whatsapp or email)
-3. For WhatsApp, the "to" parameter should be a phone number like "+31612345678"
-4. You can search contacts to find the right recipient if not specified
+
+FOR WHATSAPP FILE SHARING:
+- Use send_file action with "channel": "whatsapp"
+- The "to" parameter can be a contact name (e.g., "Jan") or phone number (e.g., "+31612345678")
+- Supported files: PDF, DOCX, XLSX, PPTX, images, videos, audio
+- Example: send_file with {"path": "document.pdf", "channel": "whatsapp", "to": "Jan", "caption": "Hier is het document"}
+
+FOR EMAIL WITH ATTACHMENTS:
+- Use send_email_with_attachments for emails with files
+- Or use send_file with "channel": "email" 
+- The "to" parameter should be an email address or contact name
+- Example: send_email_with_attachments with {"to": ["jan@example.com"], "subject": "Document", "body": "See attached", "attachments": ["document.pdf"]}
+
+CONTACT LOOKUP:
+- If the user mentions a name (like "Jan"), you can search contacts to find their phone or email
+- Use find_contact or search_contacts to lookup contact information
+- The system will automatically resolve names to phone numbers or emails
 
 Examples of file sending requests:
-- "Stuur dat rapport naar Jan" → use send_file to Jan's number
-- "Email deze PDF naar het team" → use send_email_with_attachments
-- "Deel deze foto op WhatsApp" → use send_file via whatsapp
+- "Stuur dat rapport naar Jan via WhatsApp" → use send_file with channel "whatsapp"
+- "Email deze PDF naar jan@example.com" → use send_email_with_attachments
+- "Deel deze foto met het team" → ask which channel or use WhatsApp if not specified
+- "Stuur het bestand naar Piet" → lookup Piet's contact and use appropriate channel
 
 Available actions and their parameters:
 - run_shell: {"command": "...", "cwd": "/optional/path", "timeout": 30}
@@ -228,13 +242,36 @@ class Orchestrator:
                 pass
 
         action_results = []
+        action_feedback = []
         for action in actions:
             try:
                 result = await self._execute_action(user_id, action, entities)
                 action_results.append({"action": action.get("action"), "status": "success", "result": result})
+                
+                # Generate user-friendly feedback for important actions
+                action_name = action.get("action", "")
+                if action_name == "send_file":
+                    if isinstance(result, dict) and result.get("status") == "error":
+                        action_feedback.append(f"⚠️ Could not send file: {result.get('message', 'Unknown error')}")
+                    else:
+                        action_feedback.append("✅ File sent successfully!")
+                elif action_name == "write_file":
+                    if isinstance(result, dict) and result.get("path"):
+                        action_feedback.append(f"✅ Created file: {result['path']}")
+                elif action_name == "send_email":
+                    if isinstance(result, dict) and result.get("sent"):
+                        action_feedback.append("✅ Email sent!")
+                    else:
+                        action_feedback.append("❌ Failed to send email")
+                        
             except Exception as exc:
                 logger.error("action_failed", action=action, error=str(exc))
                 action_results.append({"action": action.get("action"), "status": "error", "error": str(exc)})
+                action_feedback.append(f"❌ Error executing {action.get('action', 'action')}: {str(exc)}")
+
+        # Append action feedback to response
+        if action_feedback:
+            response_text += "\n\n" + "\n".join(action_feedback)
 
         if intent != "general_chat":
             missing = self.self_improve.detect_missing(intent)
@@ -260,20 +297,60 @@ class Orchestrator:
 
     def _parse_llm_response(self, content: str) -> dict[str, Any]:
         """Parse the LLM's JSON response, with fallback for plain text."""
+        import re
+        
         content = content.strip()
+        
+        # Case 1: Content is wrapped in code blocks - extract JSON from inside
         if content.startswith("```"):
+            # Extract content between code block markers
             lines = content.split("\n")
-            content = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:
-            return {
-                "intent": "general_chat",
-                "entities": {},
-                "response": content,
-                "actions": [],
-            }
+            if len(lines) > 2:
+                # Remove first line (```json or ```) and last line (```)
+                inner_content = "\n".join(lines[1:-1])
+            else:
+                inner_content = content.replace("```json", "").replace("```", "").strip()
+            
+            try:
+                return json.loads(inner_content)
+            except json.JSONDecodeError:
+                pass
+        
+        # Case 2: Content starts with JSON object - extract just the JSON part
+        if content.startswith("{"):
+            # Find the end of the JSON object by counting braces
+            brace_count = 0
+            json_end = 0
+            for i, char in enumerate(content):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            
+            if json_end > 0:
+                json_part = content[:json_end]
+                remaining_text = content[json_end:].strip()
+                
+                try:
+                    data = json.loads(json_part)
+                    # If there's text after the JSON, append it to the response
+                    if remaining_text and isinstance(data, dict):
+                        original_response = data.get("response", "")
+                        data["response"] = original_response + "\n\n" + remaining_text
+                    return data
+                except json.JSONDecodeError:
+                    pass
+        
+        # Case 3: Plain text fallback
+        return {
+            "intent": "general_chat",
+            "entities": {},
+            "response": content,
+            "actions": [],
+        }
 
     def _clean_response_for_user(self, text: str) -> str:
         """Clean LLM response for user display by removing JSON artifacts.
@@ -288,40 +365,90 @@ class Orchestrator:
         if not text:
             return text
         
-        text = text.strip()
+        import re
         
-        # Case 1: Entire text is a JSON object - extract response field
-        if text.startswith("{") and text.endswith("}"):
+        original_text = text.strip()
+        
+        # Case 1: Check if text starts with JSON code block
+        # Pattern: ```json followed by JSON and ending with ```
+        json_code_block_pattern = r'^```(?:json)?\s*\n*(\{[\s\S]*?\})\s*\n*```'
+        match = re.search(json_code_block_pattern, original_text)
+        if match:
             try:
-                data = json.loads(text)
+                json_str = match.group(1)
+                data = json.loads(json_str)
+                if isinstance(data, dict) and "response" in data:
+                    # Return the response field + any text after the code block
+                    remaining = original_text[match.end():].strip()
+                    result = data["response"].strip()
+                    if remaining:
+                        result += "\n\n" + remaining
+                    return result
+            except (json.JSONDecodeError, ValueError):
+                pass
+        
+        # Case 2: Entire text is a JSON object (no code block markers)
+        if original_text.startswith("{") and original_text.endswith("}"):
+            try:
+                data = json.loads(original_text)
                 if isinstance(data, dict) and "response" in data:
                     return data["response"].strip()
             except json.JSONDecodeError:
                 pass
         
-        # Case 2: Text contains JSON code blocks - remove them
-        import re
+        # Case 3: Text starts with JSON and has text after it
+        # Try to find a complete JSON object at the start
+        if original_text.startswith("{"):
+            # Find the matching closing brace
+            brace_count = 0
+            json_end = 0
+            for i, char in enumerate(original_text):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        json_end = i + 1
+                        break
+            
+            if json_end > 0:
+                json_part = original_text[:json_end]
+                remaining_text = original_text[json_end:].strip()
+                try:
+                    data = json.loads(json_part)
+                    if isinstance(data, dict) and "response" in data:
+                        result = data["response"].strip()
+                        if remaining_text:
+                            result += "\n\n" + remaining_text
+                        return result
+                except json.JSONDecodeError:
+                    pass
         
-        # Remove JSON markdown code blocks
-        text = re.sub(r'```json\s*\{.*?\}\s*```', '', text, flags=re.DOTALL)
-        text = re.sub(r'```\s*\{.*?\}\s*```', '', text, flags=re.DOTALL)
-        
-        # Remove standalone JSON objects (but keep surrounding text)
-        # This handles cases where JSON is embedded in natural language
-        def extract_json_response(match):
+        # Case 4: Text contains JSON code blocks in the middle - remove them
+        # Remove JSON markdown code blocks and replace with their response
+        def replace_json_block(match):
             try:
-                data = json.loads(match.group(0))
+                json_str = match.group(1) if match.group(1) else match.group(0)
+                # Clean up the json string
+                json_str = json_str.strip()
+                if json_str.startswith('```'):
+                    # Extract content between backticks
+                    lines = json_str.split('\n')
+                    if len(lines) > 2:
+                        json_str = '\n'.join(lines[1:-1])
+                    else:
+                        json_str = json_str.replace('```json', '').replace('```', '').strip()
+                
+                data = json.loads(json_str)
                 if isinstance(data, dict) and "response" in data:
                     return data["response"]
             except:
                 pass
             return ''
         
-        # Replace JSON objects with their response field if available
-        text = re.sub(r'\{[^{}]*"response"[^{}]*\}', extract_json_response, text)
-        
-        # Clean up any remaining empty JSON objects
-        text = re.sub(r'\{\s*\}', '', text)
+        # Pattern to match JSON code blocks anywhere in text
+        text = re.sub(r'```json\s*\n([\s\S]*?)\n\s*```', replace_json_block, text, flags=re.MULTILINE)
+        text = re.sub(r'```\s*\n([\s\S]*?)\n\s*```', replace_json_block, text, flags=re.MULTILINE)
         
         # Clean up excessive whitespace
         text = re.sub(r'\n{3,}', '\n\n', text)
@@ -473,6 +600,8 @@ class Orchestrator:
             
             # If 'to' looks like a name rather than a phone/email, try to find contact
             recipient = to
+            contact_lookup_error = None
+            
             if to and channel == "whatsapp" and not to.startswith("+") and not to.isdigit():
                 # Try to find contact by name
                 contact = await self.contacts.find_by_name(to)
@@ -480,7 +609,12 @@ class Orchestrator:
                     recipient = contact.get_primary_phone()
                     logger.info("resolved_contact_to_phone", name=to, phone=recipient)
                 else:
-                    return {"status": "error", "message": f"Could not find phone number for contact: {to}"}
+                    # Contact not found - provide helpful error
+                    all_contacts = await self.contacts.search("", limit=10)
+                    contact_names = [c.name for c in all_contacts[:5]]
+                    contact_list = ", ".join(contact_names) if contact_names else "(none found)"
+                    return {"status": "error", "message": f"Could not find phone number for '{to}'. Available contacts: {contact_list}. Please use a full phone number like +31612345678."}
+                    
             elif to and channel == "email" and "@" not in to:
                 # Try to find contact by name for email
                 contact = await self.contacts.find_by_name(to)
@@ -488,7 +622,7 @@ class Orchestrator:
                     recipient = contact.get_primary_email()
                     logger.info("resolved_contact_to_email", name=to, email=recipient)
                 else:
-                    return {"status": "error", "message": f"Could not find email for contact: {to}"}
+                    return {"status": "error", "message": f"Could not find email address for contact: {to}"}
             
             if channel == "whatsapp" and recipient:
                 # Use send_file for local files (more reliable than file:// URLs)

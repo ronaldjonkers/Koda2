@@ -225,6 +225,7 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
         <div class="nav-group-label">Data</div>
         <button class="nav-item" data-section="calendar"><span class="ic">📅</span>Calendar</button>
         <button class="nav-item" data-section="email"><span class="ic">📧</span>Email</button>
+        <button class="nav-item" data-section="contacts"><span class="ic">👥</span>Contacts</button>
         <button class="nav-item" data-section="memory"><span class="ic">🧠</span>Memory</button>
       </div>
       <div class="nav-group">
@@ -337,6 +338,22 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 <section class="section" id="section-email">
   <div class="page-head"><h2>Email</h2><button class="btn btn-ghost btn-sm" onclick="loadEmail()">Refresh</button></div>
   <div class="panel"><div class="panel-body tall" id="email-inbox"><div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Loading...</div></div></div></div>
+</section>
+
+<!-- ═══ CONTACTS ═══════════════════════════════════════ -->
+<section class="section" id="section-contacts">
+  <div class="page-head"><h2>Contacts</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="syncContacts()">Sync</button>
+      <button class="btn btn-ghost btn-sm" onclick="loadContacts()">Refresh</button>
+    </div>
+  </div>
+  <div class="search-bar">
+    <input class="search-input" id="contact-q" placeholder="Search contacts by name, email or phone...">
+    <button class="btn btn-primary btn-sm" onclick="loadContacts()">Search</button>
+  </div>
+  <div style="font-size:10px;color:var(--tx-3);padding:0 4px 6px" id="contact-summary"></div>
+  <div class="panel"><div class="panel-body tall" id="contact-list"><div class="empty"><div class="empty-icon">👥</div><div class="empty-title">Loading contacts...</div><p>Syncing from macOS Contacts, WhatsApp, and email accounts</p></div></div></div>
 </section>
 
 <!-- ═══ MEMORY ══════════════════════════════════════════ -->
@@ -458,6 +475,7 @@ document.querySelectorAll('.nav-item').forEach(b => b.addEventListener('click', 
 function onSection(s) {
     if (s === 'calendar') loadCalendar();
     else if (s === 'email') loadEmail();
+    else if (s === 'contacts') loadContacts();
     else if (s === 'accounts') loadAccounts();
     else if (s === 'scheduler') loadScheduler();
     else if (s === 'integrations' && S.health) renderIntegrations(S.health);
@@ -648,6 +666,66 @@ async function loadEmail() {
         }
     } catch(e) {
         $('email-inbox').innerHTML = '<div class="empty"><div class="empty-icon">📧</div><div class="empty-title">Could not load inbox</div><p>Email may not be configured</p></div>';
+    }
+}
+
+/* ── Contacts ──────────────────────────────────────────── */
+$('contact-q').addEventListener('keydown', e => { if (e.key === 'Enter') loadContacts(); });
+async function loadContacts() {
+    const q = $('contact-q').value.trim();
+    $('contact-list').innerHTML = '<div class="empty"><div class="empty-icon">👥</div><div class="empty-title">Loading...</div></div>';
+    try {
+        const [cR, sR] = await Promise.all([
+            fetch(`/api/contacts?query=${encodeURIComponent(q)}&limit=50`),
+            fetch('/api/contacts/summary')
+        ]);
+        const contacts = await cR.json();
+        const summary = await sR.json();
+
+        // Summary line
+        const parts = [];
+        if (summary.total_unique) parts.push(`${summary.total_unique} contacts`);
+        if (summary.by_source) {
+            const srcs = Object.entries(summary.by_source).filter(([,v]) => v > 0).map(([k,v]) => `${k}: ${v}`);
+            if (srcs.length) parts.push(srcs.join(', '));
+        }
+        if (summary.last_sync) parts.push(`synced ${fmtDate(summary.last_sync)}`);
+        $('contact-summary').textContent = parts.join(' · ');
+
+        if (contacts.length === 0) {
+            $('contact-list').innerHTML = q
+                ? `<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">No contacts matching "${esc(q)}"</div></div>`
+                : '<div class="empty"><div class="empty-icon">👥</div><div class="empty-title">No contacts found</div><p>Click Sync to import from macOS Contacts, WhatsApp, and email</p></div>';
+        } else {
+            $('contact-list').innerHTML = contacts.map(c => {
+                const phones = (c.phones || []).map(p => `<span style="font-size:10px;color:var(--tx-2)">${esc(p.number)}${p.whatsapp ? ' 💬' : ''}</span>`).join(' ');
+                const emails = (c.emails || []).map(e => `<span style="font-size:10px;color:var(--tx-2)">${esc(e.address)}</span>`).join(' ');
+                const srcTags = (c.sources || []).map(s => {
+                    const cls = s === 'macos' ? 'tag-blue' : s === 'whatsapp' ? 'tag-green' : s === 'gmail' ? 'tag-red' : 'tag-amber';
+                    return `<span class="tag ${cls}" style="font-size:8px;padding:0 4px">${s}</span>`;
+                }).join('');
+                const company = c.company ? `<span style="font-size:10px;color:var(--tx-3)">${esc(c.company)}</span>` : '';
+                return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:3px;padding:8px 16px">
+                    <div style="display:flex;gap:6px;width:100%;align-items:center">
+                        <span style="font-weight:500;flex:1">${esc(c.name)}</span>
+                        ${srcTags}
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">${phones} ${emails} ${company}</div>
+                </div>`;
+            }).join('');
+        }
+    } catch(e) {
+        $('contact-list').innerHTML = '<div class="empty"><div class="empty-icon">👥</div><div class="empty-title">Could not load contacts</div></div>';
+    }
+}
+
+async function syncContacts() {
+    $('contact-list').innerHTML = '<div class="empty"><div class="empty-icon">🔄</div><div class="empty-title">Syncing contacts...</div><p>Importing from macOS Contacts, WhatsApp, and email accounts</p></div>';
+    try {
+        await fetch('/api/contacts/sync', { method: 'POST' });
+        await loadContacts();
+    } catch(e) {
+        $('contact-list').innerHTML = '<div class="empty"><div class="empty-icon">❌</div><div class="empty-title">Sync failed</div></div>';
     }
 }
 

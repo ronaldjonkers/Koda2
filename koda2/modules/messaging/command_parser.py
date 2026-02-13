@@ -164,14 +164,24 @@ class CommonCommands:
     
     async def handle_help(self, user_id: str, **kwargs: Any) -> str:
         """Show help information."""
-        platform = kwargs.get("platform", "api")
         return (
-            f"*Koda2 Help*\n\n"
-            f"Send me natural language requests like:\n"
-            f"• \"Schedule a meeting with John tomorrow at 2pm\"\n"
-            f"• \"Check my email\"\n"
-            f"• \"Create a reminder to call mom\"\n\n"
-            f"Or use commands (see /commands)"
+            "*Koda2 — AI Executive Assistant*\n\n"
+            "*Commands:*\n"
+            "/help — This help overview\n"
+            "/status — System status\n"
+            "/calendar [today/week] — View upcoming events\n"
+            "/schedule <details> — Create a calendar event\n"
+            "/meet [title] — Create a Google Meet link\n"
+            "/email <request> — Check inbox or send email\n"
+            "/remind <what> at <when> — Set a reminder\n"
+            "/contacts [name] — Search contacts\n"
+            "/accounts — Manage accounts (list/add/test/delete)\n"
+            "/config — View settings\n\n"
+            "*Or just send a message:*\n"
+            "• \"Schedule a meeting with John tomorrow at 2pm\"\n"
+            "• \"Send an email to Ronald about the report\"\n"
+            "• \"What's on my calendar this week?\"\n"
+            "• \"Create a Meet link and send it to Jan via WhatsApp\""
         )
     
     async def handle_schedule(self, user_id: str, args: str = "", **kwargs: Any) -> str:
@@ -235,10 +245,91 @@ class CommonCommands:
     
     async def handle_commands(self, user_id: str, **kwargs: Any) -> str:
         """List all available commands."""
-        parser = kwargs.get("parser")
-        if parser:
-            return parser.get_help()
-        return "Commands available: /help, /status, /schedule, /email, /remind, /calendar, /config, /accounts"
+        return await self.handle_help(user_id, **kwargs)
+
+    async def handle_meet(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Create a Google Meet link."""
+        title = args.strip() or "Koda2 Meeting"
+        try:
+            from pathlib import Path
+            from google.oauth2.credentials import Credentials
+            from google.auth.transport.requests import Request
+            from googleapiclient.discovery import build
+            import datetime as _dt
+
+            token_path = Path("config/google_token.json")
+            if not token_path.exists():
+                return "Google is not connected. Set up Google OAuth via the dashboard first."
+
+            SCOPES = ["https://www.googleapis.com/auth/calendar"]
+            creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    token_path.write_text(creds.to_json())
+                else:
+                    return "Google token expired. Re-authenticate via the dashboard."
+
+            service = build("calendar", "v3", credentials=creds)
+            now = _dt.datetime.now(_dt.UTC)
+            event_body = {
+                "summary": title,
+                "start": {"dateTime": now.isoformat(), "timeZone": "UTC"},
+                "end": {"dateTime": (now + _dt.timedelta(hours=1)).isoformat(), "timeZone": "UTC"},
+                "conferenceData": {
+                    "createRequest": {
+                        "requestId": f"koda2-meet-{now.strftime('%Y%m%d%H%M%S')}",
+                        "conferenceSolutionKey": {"type": "hangoutsMeet"},
+                    }
+                },
+            }
+            result = service.events().insert(
+                calendarId="primary", body=event_body, conferenceDataVersion=1,
+            ).execute()
+
+            meet_url = result.get("hangoutLink", "")
+            event_id = result.get("id", "")
+
+            # Delete placeholder event — we only need the link
+            if event_id:
+                try:
+                    service.events().delete(calendarId="primary", eventId=event_id).execute()
+                except Exception:
+                    pass
+
+            if meet_url:
+                return f"*Google Meet Link:*\n{meet_url}\n\nTitle: {title}"
+            return "Could not generate a Meet link. Try again."
+        except Exception as exc:
+            return f"Error creating Meet link: {exc}"
+
+    async def handle_contacts(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Search or list contacts."""
+        query = args.strip()
+        contacts = await self._orch.contacts.search(query, limit=10)
+
+        if not contacts:
+            if query:
+                return f"No contacts found for '{query}'."
+            return "No contacts synced yet. Contacts sync from macOS Contacts, WhatsApp, and email accounts."
+
+        lines = [f"*Contacts{' — ' + query if query else ''}:*\n"]
+        for c in contacts:
+            phone = c.get_primary_phone() or ""
+            email = c.get_primary_email() or ""
+            sources = ", ".join(s.value for s in c.sources)
+            detail_parts = []
+            if phone:
+                detail_parts.append(phone)
+            if email:
+                detail_parts.append(email)
+            if c.company:
+                detail_parts.append(c.company)
+            detail = " · ".join(detail_parts)
+            wa = " 💬" if c.has_whatsapp() else ""
+            lines.append(f"• *{c.name}*{wa}\n  {detail}\n  _{sources}_")
+
+        return "\n".join(lines)
     
     async def handle_accounts(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle account management commands."""
@@ -429,5 +520,7 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("calendar", common.handle_calendar, "Check calendar")
     parser.register("config", common.handle_config, "View/change settings")
     parser.register("accounts", common.handle_accounts, "Manage accounts (list/add/enable/disable/test)")
+    parser.register("meet", common.handle_meet, "Create a Google Meet link")
+    parser.register("contacts", common.handle_contacts, "Search contacts")
     
     return parser

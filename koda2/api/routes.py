@@ -1147,3 +1147,109 @@ async def google_oauth_callback(
 
     # Redirect back to dashboard
     return RedirectResponse(url="/dashboard?section=accounts&google=connected")
+
+
+# ── Contacts ──────────────────────────────────────────────────────────
+
+
+@router.get("/contacts")
+async def list_contacts(
+    query: str = Query("", description="Search query"),
+    limit: int = Query(50, ge=1, le=200),
+) -> list[dict[str, Any]]:
+    """Search or list contacts from all sources (macOS, WhatsApp, etc)."""
+    orch = get_orchestrator()
+    contacts = await orch.contacts.search(query, limit=limit)
+    return [
+        {
+            "name": c.name,
+            "phones": [{"number": p.number, "type": p.type, "whatsapp": p.whatsapp_available} for p in c.phones],
+            "emails": [{"address": e.address, "type": e.type} for e in c.emails],
+            "company": c.company,
+            "job_title": c.job_title,
+            "birthday": c.birthday.isoformat() if c.birthday else None,
+            "sources": [s.value for s in c.sources],
+            "has_whatsapp": c.has_whatsapp(),
+        }
+        for c in contacts
+    ]
+
+
+@router.post("/contacts/sync")
+async def sync_contacts() -> dict[str, Any]:
+    """Trigger a manual contact sync from all sources."""
+    orch = get_orchestrator()
+    counts = await orch.contacts.sync_all(force=True)
+    summary = await orch.contacts.get_contact_summary()
+    return {"status": "ok", "counts": counts, "summary": summary}
+
+
+@router.get("/contacts/summary")
+async def contacts_summary() -> dict[str, Any]:
+    """Get contact sync summary."""
+    orch = get_orchestrator()
+    return await orch.contacts.get_contact_summary()
+
+
+# ── Google Meet ───────────────────────────────────────────────────────
+
+
+@router.post("/meet/create")
+async def create_meet_link(
+    title: str = Query("Koda2 Meeting", description="Meeting title"),
+) -> dict[str, Any]:
+    """Create a Google Meet link for ad-hoc use."""
+    from pathlib import Path
+    from google.oauth2.credentials import Credentials
+    from google.auth.transport.requests import Request
+    from googleapiclient.discovery import build
+
+    token_path = Path("config/google_token.json")
+    if not token_path.exists():
+        raise HTTPException(400, "Google not connected. Set up Google OAuth first.")
+
+    SCOPES = ["https://www.googleapis.com/auth/calendar"]
+    creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            token_path.write_text(creds.to_json())
+        else:
+            raise HTTPException(400, "Google token expired. Re-authenticate via dashboard.")
+
+    service = build("calendar", "v3", credentials=creds)
+
+    import datetime as _dt
+    now = _dt.datetime.now(_dt.UTC)
+    event_body = {
+        "summary": title,
+        "start": {"dateTime": now.isoformat(), "timeZone": "UTC"},
+        "end": {"dateTime": (now + _dt.timedelta(hours=1)).isoformat(), "timeZone": "UTC"},
+        "conferenceData": {
+            "createRequest": {
+                "requestId": f"koda2-meet-{now.strftime('%Y%m%d%H%M%S')}",
+                "conferenceSolutionKey": {"type": "hangoutsMeet"},
+            }
+        },
+    }
+
+    result = service.events().insert(
+        calendarId="primary",
+        body=event_body,
+        conferenceDataVersion=1,
+    ).execute()
+
+    meet_url = result.get("hangoutLink", "")
+    event_id = result.get("id", "")
+
+    # Delete the placeholder event — we only wanted the Meet link
+    if event_id:
+        try:
+            service.events().delete(calendarId="primary", eventId=event_id).execute()
+        except Exception:
+            pass
+
+    if not meet_url:
+        raise HTTPException(500, "Google Meet link was not generated")
+
+    return {"meet_url": meet_url, "title": title}

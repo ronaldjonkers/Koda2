@@ -204,7 +204,7 @@ class CalendarService:
                     _, provider = await self._get_provider(account.id)
                     acc_events = await provider.list_events(start, end, calendar_name)
                     for event in acc_events:
-                        event.calendar_name = event.calendar_name or account.name
+                        event.calendar_name = account.name
                     events.extend(acc_events)
                 except Exception as exc:
                     logger.error("list_events_failed", account=account.name, error=str(exc))
