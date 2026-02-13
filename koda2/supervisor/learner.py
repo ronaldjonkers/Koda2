@@ -437,11 +437,23 @@ Generate the changelog entry. Return JSON only."""
                 content,
             )
             pyproject.write_text(updated)
-            self._safety.audit("version_bump", {
-                "from": current,
-                "to": new_version,
-                "type": bump_type,
-            })
+
+        # Keep koda2/__init__.py in sync
+        init_file = self._root / "koda2" / "__init__.py"
+        if init_file.exists():
+            init_content = init_file.read_text()
+            updated_init = re.sub(
+                r'__version__\s*=\s*"\d+\.\d+\.\d+"',
+                f'__version__ = "{new_version}"',
+                init_content,
+            )
+            init_file.write_text(updated_init)
+
+        self._safety.audit("version_bump", {
+            "from": current,
+            "to": new_version,
+            "type": bump_type,
+        })
 
         return new_version
 

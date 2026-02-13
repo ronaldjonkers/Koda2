@@ -110,7 +110,11 @@ if command -v systemctl &>/dev/null; then
     systemctl --user stop koda2 2>/dev/null && \
         info "Stopped systemd service" || true
 fi
-# Kill any running koda2 process (foreground mode)
+# Kill any running koda2 process (foreground or supervisor mode)
+if pgrep -f "koda2-supervisor" &>/dev/null; then
+    pkill -f "koda2-supervisor" 2>/dev/null && info "Stopped koda2-supervisor" || true
+    sleep 1
+fi
 if pgrep -f "koda2.main" &>/dev/null; then
     pkill -f "koda2.main" 2>/dev/null && info "Stopped foreground Koda2 process" || true
     sleep 1
@@ -197,7 +201,7 @@ fi
 # ── 8. Directories ──────────────────────────────────────────────────
 step "📁 Directories"
 
-for dir in data data/chroma data/generated data/whatsapp_session logs config plugins templates; do
+for dir in data data/chroma data/generated data/whatsapp_session data/supervisor logs config plugins templates; do
     mkdir -p "$dir"
 done
 ok "All directories present"
@@ -251,7 +255,9 @@ elif command -v systemctl &>/dev/null && systemctl --user is-enabled koda2 &>/de
 fi
 
 if [ "$SERVICE_RESTARTED" = false ]; then
-    info "No service configured — start manually with: koda2"
+    info "No service configured — start manually:"
+    info "  ${BOLD}koda2-supervisor run${NC}  (self-healing mode)"
+    info "  ${BOLD}koda2${NC}                 (basic mode)"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────
@@ -264,9 +270,12 @@ echo "  ║                                                  ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 if [ "$SERVICE_RESTARTED" = true ]; then
-    echo -e "  ${BOLD}Koda2 is running as a service.${NC}"
+    echo -e "  ${BOLD}Koda2 is running as a service (self-healing mode).${NC}"
 else
     echo -e "  ${BOLD}🚀 Start Koda2:${NC}"
-    echo -e "     ${DIM}source .venv/bin/activate && koda2${NC}"
+    echo -e "     ${DIM}source .venv/bin/activate${NC}"
+    echo -e "     ${DIM}koda2-supervisor run          # self-healing + auto-improve${NC}"
+    echo -e "     ${DIM}koda2-supervisor run --notify YOUR_WHATSAPP_ID  # + notifications${NC}"
+    echo -e "     ${DIM}koda2                         # basic mode (no supervisor)${NC}"
 fi
 echo ""
