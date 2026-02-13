@@ -488,3 +488,75 @@ class AccountService:
             Encrypted, base64-encoded string.
         """
         return self._encrypt_credentials(credentials)
+
+    async def repair_broken_accounts(self) -> int:
+        """Re-encrypt accounts whose credentials can't be decrypted.
+
+        Uses credentials from environment/settings as the source of truth.
+        Returns the number of accounts repaired.
+        """
+        from koda2.config import get_settings
+        settings = get_settings()
+        repaired = 0
+
+        all_accounts = await self.get_accounts(active_only=False)
+        for account in all_accounts:
+            try:
+                self.decrypt_credentials(account)
+                continue  # Decryption works, skip
+            except Exception:
+                pass  # Broken — try to repair
+
+            # Build credentials from settings based on provider
+            provider = ProviderType(account.provider)
+            new_creds: dict | None = None
+
+            if provider == ProviderType.EWS:
+                if settings.ews_server and settings.ews_username and settings.ews_password:
+                    new_creds = {
+                        "server": settings.ews_server,
+                        "username": settings.ews_username,
+                        "password": settings.ews_password,
+                        "email": settings.ews_email or f"{settings.ews_username}@{settings.ews_server.split('.')[-2]}.com",
+                    }
+            elif provider == ProviderType.GOOGLE:
+                if settings.google_credentials_file:
+                    new_creds = {
+                        "credentials_file": settings.google_credentials_file,
+                        "token_file": settings.google_token_file,
+                    }
+            elif provider == ProviderType.IMAP:
+                if settings.imap_server and settings.imap_username:
+                    new_creds = {
+                        "server": settings.imap_server,
+                        "port": settings.imap_port,
+                        "username": settings.imap_username,
+                        "password": settings.imap_password,
+                        "use_ssl": settings.imap_use_ssl,
+                    }
+
+            if new_creds:
+                encrypted = self._encrypt_credentials(new_creds)
+                async with self._get_session() as session:
+                    await session.execute(
+                        update(Account)
+                        .where(Account.id == account.id)
+                        .values(credentials=encrypted)
+                    )
+                repaired += 1
+                logger.info(
+                    "account_credentials_repaired",
+                    account_id=account.id,
+                    account_name=account.name,
+                    provider=account.provider,
+                )
+            else:
+                logger.warning(
+                    "account_credentials_broken_no_fallback",
+                    account_id=account.id,
+                    account_name=account.name,
+                    provider=account.provider,
+                    hint="Set credentials in .env or re-create the account via API",
+                )
+
+        return repaired

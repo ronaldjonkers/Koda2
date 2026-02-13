@@ -120,6 +120,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_db()
 
+    # Repair accounts with broken encryption (e.g. after key change)
+    from koda2.modules.account.service import AccountService
+    _acct_svc = AccountService()
+    repaired = await _acct_svc.repair_broken_accounts()
+    if repaired:
+        logger.info("accounts_repaired_on_startup", count=repaired)
+
     # Initialize task queue
     _task_queue = TaskQueueService(max_workers=5)
     await _task_queue.start()

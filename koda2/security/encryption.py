@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import os
+from pathlib import Path
 from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -16,6 +17,36 @@ logger = get_logger(__name__)
 _cipher: Optional[AESGCM] = None
 
 
+def _persist_key_to_env(key_b64: str) -> bool:
+    """Write the encryption key to .env so it survives restarts.
+
+    If .env exists, update/add the KODA2_ENCRYPTION_KEY line.
+    If .env doesn't exist, create it with just the key.
+    Returns True if the key was persisted successfully.
+    """
+    env_path = Path(".env")
+    try:
+        if env_path.exists():
+            lines = env_path.read_text().splitlines()
+            found = False
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                if stripped.startswith("KODA2_ENCRYPTION_KEY=") or stripped.startswith("KODA2_ENCRYPTION_KEY ="):
+                    lines[i] = f"KODA2_ENCRYPTION_KEY={key_b64}"
+                    found = True
+                    break
+            if not found:
+                lines.append(f"KODA2_ENCRYPTION_KEY={key_b64}")
+            env_path.write_text("\n".join(lines) + "\n")
+        else:
+            env_path.write_text(f"KODA2_ENCRYPTION_KEY={key_b64}\n")
+        logger.info("encryption_key_persisted", path=str(env_path.resolve()))
+        return True
+    except Exception as exc:
+        logger.warning("encryption_key_persist_failed", error=str(exc))
+        return False
+
+
 def _get_cipher() -> AESGCM:
     """Return or create the AES-GCM cipher from the configured key."""
     global _cipher
@@ -25,9 +56,12 @@ def _get_cipher() -> AESGCM:
     settings = get_settings()
     key_b64 = settings.koda2_encryption_key
     if not key_b64:
-        logger.warning("encryption_key_missing", msg="Generating ephemeral key — data will not persist across restarts")
         key = AESGCM.generate_key(bit_length=256)
-        logger.info("ephemeral_key_generated", key_b64=base64.urlsafe_b64encode(key).decode())
+        new_key_b64 = base64.urlsafe_b64encode(key).decode()
+        if _persist_key_to_env(new_key_b64):
+            logger.info("encryption_key_generated_and_saved")
+        else:
+            logger.warning("encryption_key_missing", msg="Generated ephemeral key — could not save to .env")
     else:
         # Try to decode the key from base64. If it fails, the key might be
         # a raw string or invalid — generate a proper key and warn.
@@ -40,13 +74,16 @@ def _get_cipher() -> AESGCM:
             logger.warning(
                 "encryption_key_invalid",
                 error=str(e),
-                msg="Generating new key. Update KODA2_ENCRYPTION_KEY in .env",
+                msg="Generating new key and saving to .env",
             )
             key = AESGCM.generate_key(bit_length=256)
             new_key_b64 = base64.urlsafe_b64encode(key).decode()
-            logger.warning("new_encryption_key", key=new_key_b64)
-            print(f"\n⚠️  KODA2_ENCRYPTION_KEY is invalid. A new key was generated.")
-            print(f"   Update your .env file with:\n   KODA2_ENCRYPTION_KEY={new_key_b64}\n")
+            if _persist_key_to_env(new_key_b64):
+                logger.info("new_encryption_key_saved")
+            else:
+                logger.warning("new_encryption_key", key=new_key_b64)
+                print(f"\n⚠️  KODA2_ENCRYPTION_KEY is invalid. A new key was generated.")
+                print(f"   Update your .env file with:\n   KODA2_ENCRYPTION_KEY={new_key_b64}\n")
 
     _cipher = AESGCM(key)
     return _cipher
