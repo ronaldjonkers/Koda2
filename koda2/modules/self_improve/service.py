@@ -53,6 +53,8 @@ class SelfImproveService:
             "send_whatsapp": "messaging",
             "send_file": "documents",
             "download_whatsapp_media": "messaging",
+            "analyze_document": "document_analyzer",
+            "analyze_file": "document_analyzer",
             "run_shell": "macos",
             "list_directory": "macos",
             "read_file": "macos",

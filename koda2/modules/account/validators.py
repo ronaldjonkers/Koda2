@@ -47,36 +47,9 @@ def _normalize_ews_server(server: str) -> str:
     return s
 
 
-async def validate_ews_credentials(
-    server: str, username: str, password: str, email: str
-) -> tuple[bool, str]:
-    """Validate Exchange Web Services credentials.
-    
-    Uses httpx with httpx-ntlm for NTLM auth (requests_ntlm is broken
-    on Python 3.13 / modern urllib3). Falls back to basic auth if NTLM
-    is not available.
-    
-    Automatically tries DOMAIN\\username variants if plain username fails.
-    
-    Args:
-        server: EWS server hostname or URL (will be normalized to hostname)
-        username: Username for authentication
-        password: Password for authentication
-        email: Email address for the account
-        
-    Returns:
-        Tuple of (success, error_message_or_empty)
-    """
-    import httpx
-
-    hostname = _normalize_ews_server(server)
-    if not hostname:
-        return (False, "Server hostname is required.")
-
-    ews_url = f"https://{hostname}/EWS/Exchange.asmx"
-
-    # Simple SOAP request to resolve the user — lightweight validation
-    soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
+def _build_ews_soap(email: str) -> str:
+    """Build a lightweight SOAP request for EWS validation."""
+    return f"""<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
                xmlns:t="http://schemas.microsoft.com/exchange/services/2006/types"
                xmlns:m="http://schemas.microsoft.com/exchange/services/2006/messages">
@@ -90,64 +63,201 @@ async def validate_ews_credentials(
   </soap:Body>
 </soap:Envelope>"""
 
-    headers = {"Content-Type": "text/xml; charset=utf-8"}
 
-    # Build list of username variants to try
-    # If username already contains \ or @, use as-is; otherwise try domain variants
-    username_variants = [username]
+def _build_username_variants(username: str, email: str, hostname: str) -> list[str]:
+    """Build a list of username variants to try for NTLM/basic auth."""
+    variants = [username]
     if "\\" not in username and "@" not in username:
-        # Extract domain from email (e.g. "gosettle" from "r.jonkers@gosettle.com")
         domain = email.split("@")[-1].split(".")[0].upper() if "@" in email else ""
-        # Extract domain from server hostname (e.g. "CMDZ" from "exchange.cmdz.com")
         server_domain = hostname.split(".")[-2].upper() if "." in hostname else ""
         if domain:
-            username_variants.insert(0, f"{domain}\\{username}")
+            variants.insert(0, f"{domain}\\{username}")
         if server_domain and server_domain != domain:
-            username_variants.append(f"{server_domain}\\{username}")
-        username_variants.append(email)
+            variants.append(f"{server_domain}\\{username}")
+        variants.append(email)
+    return variants
 
-    # ── Try NTLM auth via httpx-ntlm (works with Python 3.13) ────────
+
+def _discover_ews_servers(hostname: str, email: str) -> list[str]:
+    """Build a list of candidate EWS server hostnames to try.
+    
+    Starts with the user-provided server, then uses DNS (MX, SRV) to
+    discover the actual Exchange server, and finally tries common patterns.
+    """
+    import socket
+    import subprocess
+
+    servers = [hostname]
+    email_domain = email.split("@")[-1] if "@" in email else ""
+    if not email_domain:
+        return servers
+
+    # 1. DNS SRV record: _autodiscover._tcp.<domain>
+    try:
+        result = subprocess.run(
+            ["dig", "SRV", f"_autodiscover._tcp.{email_domain}", "+short"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().splitlines():
+            # Format: priority weight port target
+            parts = line.split()
+            if len(parts) >= 4:
+                target = parts[3].rstrip(".")
+                if target and target not in servers:
+                    print(f"[EWS] SRV autodiscover -> {target}")
+                    servers.append(target)
+    except Exception:
+        pass
+
+    # 2. DNS MX record: find the mail server
+    try:
+        result = subprocess.run(
+            ["dig", "MX", email_domain, "+short"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 2:
+                mx_host = parts[1].rstrip(".")
+                if mx_host and mx_host not in servers:
+                    print(f"[EWS] MX record -> {mx_host}")
+                    servers.append(mx_host)
+    except Exception:
+        pass
+
+    # 3. Common hostname patterns as last resort
+    candidates = [
+        f"exchange.{email_domain}",
+        f"mail.{email_domain}",
+    ]
+    for c in candidates:
+        # Only add if it resolves to an IP
+        try:
+            socket.gethostbyname(c)
+            if c not in servers:
+                servers.append(c)
+        except socket.gaierror:
+            pass
+
+    return servers
+
+
+def _try_ntlm_auth(
+    ews_url: str, soap_body: str, headers: dict, username_variants: list[str], password: str
+) -> tuple[bool, str]:
+    """Try NTLM auth against an EWS URL with multiple username variants.
+    
+    Returns (success, working_username_or_error).
+    """
     try:
         from httpx_ntlm import HttpNtlmAuth
-
-        for user in username_variants:
-            try:
-                print(f"[EWS] Testing NTLM auth: {user} @ {ews_url}...")
-                auth = HttpNtlmAuth(user, password)
-                with httpx.Client(verify=True, timeout=15) as client:
-                    resp = client.post(ews_url, content=soap_body, headers=headers, auth=auth)
-                print(f"[EWS] NTLM response for {user}: {resp.status_code}")
-                if resp.status_code == 200:
-                    print(f"[EWS] ✅ Connected with NTLM ({user})")
-                    return (True, "")
-                elif resp.status_code == 401:
-                    continue
-            except httpx.TimeoutException:
-                print(f"[EWS] NTLM timeout for {user}")
-                continue
-            except Exception as exc:
-                print(f"[EWS] NTLM error for {user}: {exc}")
-                continue
     except ImportError:
-        print("[EWS] httpx-ntlm not installed, skipping NTLM")
+        print("[EWS] ⚠️  httpx-ntlm not installed! Run: pip install httpx-ntlm")
+        return (False, "httpx-ntlm not installed. Run: pip install httpx-ntlm")
 
-    # ── Fallback: basic auth via httpx ────────────────────────────────
     for user in username_variants:
         try:
-            print(f"[EWS] Testing basic auth: {user} @ {ews_url}...")
+            print(f"[EWS] NTLM: {user} @ {ews_url}...")
+            auth = HttpNtlmAuth(user, password)
+            with httpx.Client(verify=True, timeout=15) as client:
+                resp = client.post(ews_url, content=soap_body, headers=headers, auth=auth)
+            print(f"[EWS] NTLM {user}: {resp.status_code}")
+            if resp.status_code == 200:
+                print(f"[EWS] ✅ NTLM success: {user}")
+                return (True, user)
+        except httpx.TimeoutException:
+            print(f"[EWS] NTLM timeout: {user}")
+        except Exception as exc:
+            print(f"[EWS] NTLM error: {user}: {exc}")
+    return (False, "")
+
+
+async def _try_basic_auth(
+    ews_url: str, soap_body: str, headers: dict, username_variants: list[str], password: str
+) -> tuple[bool, str]:
+    """Try basic auth against an EWS URL with multiple username variants."""
+    for user in username_variants:
+        try:
+            print(f"[EWS] Basic: {user} @ {ews_url}...")
             async with httpx.AsyncClient(verify=True, timeout=15) as client:
                 resp = await client.post(
                     ews_url, content=soap_body, headers=headers,
                     auth=(user, password),
                 )
-            print(f"[EWS] Basic auth response for {user}: {resp.status_code}")
+            print(f"[EWS] Basic {user}: {resp.status_code}")
             if resp.status_code == 200:
-                print(f"[EWS] ✅ Connected with basic auth ({user})")
-                return (True, "")
+                print(f"[EWS] ✅ Basic auth success: {user}")
+                return (True, user)
         except Exception as exc:
-            print(f"[EWS] Basic auth error for {user}: {exc}")
+            print(f"[EWS] Basic error: {user}: {exc}")
+    return (False, "")
 
-    return (False, f"Could not authenticate to Exchange server at {hostname}. "
+
+async def validate_ews_credentials(
+    server: str, username: str, password: str, email: str
+) -> tuple[bool, str]:
+    """Validate Exchange Web Services credentials.
+    
+    Uses httpx-ntlm for NTLM auth (required by most Exchange servers).
+    Falls back to basic auth if NTLM is unavailable.
+    
+    If the given server fails, automatically discovers and tries alternative
+    EWS servers derived from the email domain (autodiscover-like).
+    
+    Args:
+        server: EWS server hostname or URL (will be normalized to hostname)
+        username: Username for authentication
+        password: Password for authentication
+        email: Email address for the account
+        
+    Returns:
+        Tuple of (success, error_message_or_empty)
+    """
+    hostname = _normalize_ews_server(server)
+    if not hostname:
+        return (False, "Server hostname is required.")
+
+    soap_body = _build_ews_soap(email)
+    headers = {"Content-Type": "text/xml; charset=utf-8"}
+
+    # Build list of servers to try (user-provided first, then autodiscovered)
+    servers = _discover_ews_servers(hostname, email)
+    print(f"[EWS] Will try servers: {servers}")
+
+    for srv in servers:
+        ews_url = f"https://{srv}/EWS/Exchange.asmx"
+        username_variants = _build_username_variants(username, email, srv)
+
+        # Quick reachability check (don't waste time on unreachable servers)
+        try:
+            async with httpx.AsyncClient(verify=True, timeout=5) as client:
+                probe = await client.get(ews_url)
+            if probe.status_code not in (200, 401, 403):
+                print(f"[EWS] Server {srv} returned {probe.status_code}, skipping")
+                continue
+        except Exception:
+            print(f"[EWS] Server {srv} unreachable, skipping")
+            continue
+
+        # Try NTLM first (most Exchange servers require it)
+        ok, result = await asyncio.to_thread(
+            _try_ntlm_auth, ews_url, soap_body, headers, username_variants, password
+        )
+        if ok:
+            if srv != hostname:
+                print(f"[EWS] ✅ Connected via autodiscovered server: {srv}")
+            return (True, "")
+
+        # Fallback: basic auth
+        ok, result = await _try_basic_auth(ews_url, soap_body, headers, username_variants, password)
+        if ok:
+            if srv != hostname:
+                print(f"[EWS] ✅ Connected via autodiscovered server: {srv}")
+            return (True, "")
+
+        print(f"[EWS] All auth methods failed on {srv}")
+
+    return (False, f"Could not authenticate to Exchange. Tried servers: {', '.join(servers)}. "
             "Check username (try DOMAIN\\\\user), password, and server hostname.")
 
 

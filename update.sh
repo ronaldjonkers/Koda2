@@ -118,7 +118,7 @@ fi
 ok "Koda2 stopped"
 
 # ── 4. Virtual environment & dependencies ─────────────────────────
-step "�🐍 Python environment"
+step "� Python environment"
 
 if [ ! -d ".venv" ]; then
     warn "Virtual environment missing — recreating..."
@@ -135,6 +135,14 @@ pip install --upgrade pip --quiet
 # --upgrade ensures new deps are installed and existing ones are updated.
 info "Syncing Python dependencies (this may take a moment)..."
 pip install -e ".[dev]" --upgrade --quiet 2>&1 | tail -5 || true
+
+# Verify critical packages that may have been added in recent updates
+for pkg in httpx-ntlm; do
+    if ! python -c "import ${pkg//-/_}" 2>/dev/null; then
+        info "Installing missing package: $pkg"
+        pip install "$pkg" --quiet
+    fi
+done
 ok "Python dependencies up to date"
 
 # ── 5. WhatsApp bridge ──────────────────────────────────────────────

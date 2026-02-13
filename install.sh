@@ -207,6 +207,14 @@ pip install --upgrade pip --quiet
 
 info "Installing Koda2 and dependencies..."
 pip install -e ".[dev]" --quiet
+
+# Verify critical packages that may have been added in recent updates
+for pkg in httpx-ntlm; do
+    if ! python -c "import ${pkg//-/_}" 2>/dev/null; then
+        info "Installing missing package: $pkg"
+        pip install "$pkg" --quiet
+    fi
+done
 ok "Dependencies installed"
 
 step "📱 WhatsApp bridge"

@@ -8,6 +8,7 @@ It can send messages to anyone on the user's behalf.
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import os
 import signal
 import subprocess
@@ -493,6 +494,180 @@ class WhatsAppBot:
                 return resp.json()
         except Exception as exc:
             return {"error": str(exc)}
+
+    # ── Auto Document Analysis ───────────────────────────────────────
+
+    async def process_message_with_document_analysis(
+        self,
+        payload: dict[str, Any],
+        document_analyzer: Any,
+        message_handler: Any,
+    ) -> Optional[dict[str, Any]]:
+        """Process WhatsApp message with automatic document analysis.
+        
+        This method:
+        1. Checks if the message has media/attachments
+        2. Downloads the file
+        3. Analyzes the document content
+        4. Combines document analysis with user message
+        5. Generates an intelligent response
+        
+        Args:
+            payload: WhatsApp webhook payload
+            document_analyzer: DocumentAnalyzerService instance
+            message_handler: Async callable to handle the enriched message
+            
+        Returns:
+            Result dict with analysis and response, or None if not a self-message
+        """
+        # First process as normal message
+        base_result = await self.process_webhook(payload)
+        if not base_result:
+            return None
+        
+        user_message = base_result.get("text", "")
+        has_media = base_result.get("has_media", False)
+        media_info = payload.get("media", {})
+        
+        # If no media, just handle as text message
+        if not has_media:
+            if message_handler:
+                response = await message_handler(
+                    user_id=base_result["from"],
+                    text=user_message,
+                    platform="whatsapp",
+                )
+                base_result["response"] = response
+            return base_result
+        
+        # Has media - download and analyze
+        logger.info("whatsapp_media_detected", message_preview=user_message[:100])
+        
+        try:
+            # Get media details from payload
+            media_url = media_info.get("url") or payload.get("mediaUrl")
+            mimetype = media_info.get("mimetype", "application/octet-stream")
+            original_filename = media_info.get("filename", "unknown")
+            
+            # Generate appropriate filename
+            timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
+            ext = self._mime_to_extension(mimetype)
+            
+            # Use original filename if available, otherwise generate one
+            if original_filename and original_filename != "unknown":
+                filename = f"{timestamp}_{original_filename}"
+            else:
+                filename = f"whatsapp_{timestamp}{ext}"
+            
+            # Download the file
+            download_path = await self.download_media(
+                media_url=media_url,
+                output_dir="data/whatsapp_received",
+                filename=filename,
+            )
+            
+            if not download_path:
+                logger.error("whatsapp_media_download_failed")
+                base_result["media_error"] = "Failed to download media"
+                return base_result
+            
+            base_result["downloaded_path"] = download_path
+            base_result["mime_type"] = mimetype
+            
+            # Analyze the document
+            logger.info("analyzing_document", path=download_path)
+            analysis = await document_analyzer.analyze_with_context(
+                file_path=download_path,
+                user_message=user_message,
+            )
+            
+            base_result["document_analysis"] = {
+                "file_type": analysis.file_type.value,
+                "summary": analysis.summary,
+                "text_content": analysis.text_content[:500] if analysis.text_content else None,
+                "image_description": analysis.image_description,
+                "detected_text": analysis.detected_text,
+                "key_topics": analysis.key_topics,
+                "action_items": analysis.action_items,
+                "title": analysis.title,
+                "author": analysis.author,
+            }
+            
+            # Create enriched prompt for the message handler
+            enriched_message = self._create_enriched_prompt(user_message, analysis)
+            
+            # Handle with enriched context
+            if message_handler:
+                response = await message_handler(
+                    user_id=base_result["from"],
+                    text=enriched_message,
+                    platform="whatsapp",
+                    original_message=user_message,
+                    document_analysis=analysis,
+                )
+                base_result["response"] = response
+            
+            return base_result
+            
+        except Exception as exc:
+            logger.error("document_analysis_failed", error=str(exc))
+            base_result["analysis_error"] = str(exc)
+            
+            # Still try to handle the original message
+            if message_handler:
+                response = await message_handler(
+                    user_id=base_result["from"],
+                    text=user_message,
+                    platform="whatsapp",
+                )
+                base_result["response"] = response
+            
+            return base_result
+    
+    def _create_enriched_prompt(self, user_message: str, analysis) -> str:
+        """Create an enriched prompt combining user message and document analysis."""
+        parts = []
+        
+        # Include original message
+        if user_message.strip():
+            parts.append(f"User message: {user_message}")
+        else:
+            parts.append("User sent a file without a message.")
+        
+        parts.append("")
+        parts.append(f"File: {analysis.filename}")
+        parts.append(f"Type: {analysis.file_type.value}")
+        
+        # Add relevant content based on file type
+        if analysis.file_type.value == "image":
+            if analysis.image_description:
+                parts.append(f"\nImage description: {analysis.image_description}")
+            if analysis.detected_text:
+                parts.append(f"\nText detected in image: {analysis.detected_text}")
+        else:
+            if analysis.summary:
+                parts.append(f"\nDocument summary: {analysis.summary}")
+            if analysis.title:
+                parts.append(f"Title: {analysis.title}")
+            if analysis.author:
+                parts.append(f"Author: {analysis.author}")
+        
+        if analysis.key_topics:
+            parts.append(f"\nKey topics: {', '.join(analysis.key_topics)}")
+        
+        if analysis.action_items:
+            parts.append(f"\nAction items mentioned: {'; '.join(analysis.action_items)}")
+        
+        # Add content preview for text documents
+        if analysis.text_content and analysis.file_type.value != "image":
+            preview = analysis.text_content[:800]
+            if len(analysis.text_content) > 800:
+                preview += "... [truncated]"
+            parts.append(f"\nContent preview:\n{preview}")
+        
+        parts.append("\nPlease respond to the user's message considering the document content above.")
+        
+        return "\n".join(parts)
 
     # ── Media Download ───────────────────────────────────────────────
 

@@ -11,6 +11,7 @@ from koda2.logging_config import get_logger
 from koda2.modules.account.service import AccountService
 from koda2.modules.calendar import CalendarEvent, CalendarService
 from koda2.modules.contacts import ContactSyncService
+from koda2.modules.document_analyzer import DocumentAnalyzerService
 from koda2.modules.documents import DocumentService
 from koda2.modules.email import EmailMessage, EmailService
 from koda2.modules.images import ImageService
@@ -42,6 +43,7 @@ Your capabilities include:
 - File system access — read, write, list files and directories
 - File sharing — send files via WhatsApp (media) or email (attachments)
 - Document creation (DOCX, XLSX, PDF, PPTX) — saved to data/generated/
+- Document analysis — extract and analyze content from PDF, DOCX, XLSX, PPTX, images
 - Image generation (DALL-E, Stability AI) and analysis (GPT-4 Vision)
 - Video generation (Runway, Pika, Stable Video, HeyGen avatars)
 - Messaging (WhatsApp, Telegram) — send messages, files, media
@@ -67,6 +69,7 @@ Available actions and their parameters:
 - generate_image: {"prompt": "...", "size": "1024x1024"}
 - generate_video: {"prompt": "...", "duration": 4, "aspect_ratio": "16:9"}
 - analyze_image: {"image_url": "...", "prompt": "..."}
+- analyze_document: {"file_path": "...", "message": "..."}
 - search_memory: {"query": "..."}
 - find_contact: {"name": "..."}
 - sync_contacts: {"force": false}
@@ -80,8 +83,9 @@ Available actions and their parameters:
 When the user gives you a request, determine the intent and required actions. Respond in JSON format:
 {
     "intent": "one of: schedule_meeting, send_email, read_email, check_calendar, create_document,
-              generate_image, generate_video, analyze_image, create_reminder, find_contact, search_memory,
-              send_file, sync_contacts, run_command, read_file, write_file, list_directory, general_chat",
+              generate_image, generate_video, analyze_image, analyze_document, create_reminder, 
+              find_contact, search_memory, send_file, sync_contacts, run_command, read_file, 
+              write_file, list_directory, general_chat",
     "entities": {
         "any extracted entities like names, dates, times, subjects, etc."
     },
@@ -136,6 +140,7 @@ class Orchestrator:
             memory_service=self.memory,
             whatsapp_bot=self.whatsapp,
         )
+        self.document_analyzer = DocumentAnalyzerService(self.llm)
         
         # Create unified command parser and inject into messaging bots
         self.command_parser = create_command_parser(self)
@@ -501,6 +506,27 @@ class Orchestrator:
             await self.proactive.stop()
             return {"status": "stopped"}
 
+        elif action_name == "analyze_document":
+            file_path = params.get("file_path", "")
+            user_message = params.get("message", "")
+            analysis = await self.document_analyzer.analyze_with_context(
+                file_path=file_path,
+                user_message=user_message,
+            )
+            return {
+                "file_type": analysis.file_type.value,
+                "summary": analysis.summary,
+                "text_content": analysis.text_content[:1000] if analysis.text_content else None,
+                "image_description": analysis.image_description,
+                "detected_text": analysis.detected_text,
+                "key_topics": analysis.key_topics,
+                "action_items": analysis.action_items,
+                "title": analysis.title,
+                "author": analysis.author,
+                "success": analysis.is_successful(),
+                "error": analysis.analysis_error,
+            }
+
         else:
             logger.warning("unknown_action", action=action_name)
             return {"status": "unknown_action", "action": action_name}
@@ -564,14 +590,44 @@ class Orchestrator:
         logger.info("whatsapp_integration_ready")
 
     async def handle_whatsapp_message(self, payload: dict[str, Any]) -> Optional[str]:
-        """Handle an incoming WhatsApp self-message.
+        """Handle an incoming WhatsApp self-message with automatic document analysis.
 
         Only processes messages the user sends to themselves.
+        Automatically detects and analyzes attached files (PDF, DOCX, XLSX, PPTX, images).
         Can send replies to anyone on the user's behalf.
         """
         logger.info("orchestrator_whatsapp_message_received", payload_preview=str(payload)[:200])
         print(f"[Koda2] WhatsApp message received: {payload.get('body', '')[:50]}...")
         
+        # Check if message has media that needs analysis
+        has_media = payload.get("hasMedia", False)
+        
+        if has_media:
+            logger.info("whatsapp_message_has_media", has_media=True)
+            print("[Koda2] Media detected, starting document analysis flow...")
+            
+            # Use the enhanced processing with document analysis
+            result = await self.whatsapp.process_message_with_document_analysis(
+                payload=payload,
+                document_analyzer=self.document_analyzer,
+                message_handler=self._handle_whatsapp_message_with_context,
+            )
+            
+            if result and result.get("response"):
+                user_id = result.get("from", "whatsapp_user")
+                response = result["response"]
+                
+                # Send response
+                await self.whatsapp.send_typing(user_id)
+                logger.info("orchestrator_sending_whatsapp_reply_with_analysis", 
+                          to=user_id, response_preview=response[:100])
+                print(f"[Koda2] Sending analysis reply: {response[:100]}...")
+                await self.whatsapp.send_message(user_id, response)
+                return response
+            
+            return result.get("response") if result else None
+        
+        # No media - process as regular text message
         parsed = await self.whatsapp.process_webhook(payload)
         if parsed is None:
             logger.debug("orchestrator_whatsapp_message_ignored_not_parsed")
@@ -602,3 +658,86 @@ class Orchestrator:
             print("[Koda2] No response generated for message")
 
         return response
+    
+    async def _handle_whatsapp_message_with_context(
+        self,
+        user_id: str,
+        text: str,
+        platform: str = "whatsapp",
+        original_message: str = "",
+        document_analysis = None,
+        **kwargs: Any,
+    ) -> str:
+        """Handle WhatsApp message that includes document analysis context.
+        
+        This is called by process_message_with_document_analysis when a file
+        has been analyzed. The 'text' parameter contains the enriched prompt
+        with document content, while 'original_message' is what the user actually
+        sent.
+        """
+        logger.info("processing_message_with_document_context", 
+                   user_id=user_id, 
+                   has_analysis=document_analysis is not None)
+        
+        # Store the original message
+        await self.memory.add_conversation(user_id, "user", original_message or text, channel=platform)
+        
+        # Create a special system prompt for document analysis
+        doc_system_prompt = self.SYSTEM_PROMPT + """
+
+You have just received a document from the user via WhatsApp. The document content
+has been analyzed and extracted for you. Consider the document content carefully
+when responding to the user's message.
+
+When responding about a document:
+- Summarize key points if the user asks for a summary
+- Answer specific questions about the content
+- Suggest action items if relevant
+- If it's an image, describe what you see
+- If the document requires a response (like an invitation or request), draft one
+- Be concise but thorough
+"""
+        
+        # Retrieve context
+        context = self.memory.recall(text, user_id=user_id, n=3)
+        context_str = "\n".join(f"- {c['content']}" for c in context) if context else "No prior context."
+        
+        recent = await self.memory.get_recent_conversations(user_id, limit=10)
+        history_messages = [
+            ChatMessage(role=c.role, content=c.content) for c in recent[-8:]
+        ]
+        
+        system = doc_system_prompt + f"\n\nRelevant context:\n{context_str}"
+        history_messages.append(ChatMessage(role="user", content=text))
+        
+        request = LLMRequest(
+            messages=history_messages,
+            system_prompt=system,
+            temperature=0.3,
+        )
+        
+        try:
+            llm_response = await self.llm.complete(request)
+            response_text = llm_response.content
+            
+            # Store the response
+            await self.memory.add_conversation(
+                user_id, "assistant", response_text, channel=platform,
+                model=llm_response.model, tokens_used=llm_response.total_tokens,
+            )
+            
+            # If there was a document, store a reference to it
+            if document_analysis:
+                await self.memory.store_memory(
+                    user_id,
+                    category="document_received",
+                    content=f"Analyzed {document_analysis.filename}: {document_analysis.summary or 'No summary'}"[:500],
+                    importance=0.7,
+                    source="whatsapp_document",
+                )
+            
+            return response_text
+            
+        except RuntimeError as exc:
+            logger.error("whatsapp_document_processing_failed", error=str(exc))
+            return "I'm having trouble analyzing this document. Please try again or send a clearer version."
