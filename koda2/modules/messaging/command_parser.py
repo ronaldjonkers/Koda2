@@ -231,6 +231,7 @@ class CommonCommands:
             "/calendar [today/week] — View upcoming events\n"
             "/schedule <details> — Create a calendar event\n"
             "/schedules — List all scheduled background tasks\n"
+            "/cancel <id> — Cancel a scheduled task or agent task\n"
             "/meet [title] — Create a Google Meet link\n"
             "/email <request> — Check inbox or send email\n"
             "/remind <what> at <when> — Set a reminder\n"
@@ -278,8 +279,43 @@ class CommonCommands:
             )
 
         lines.append(f"\n*Total: {len(tasks)} tasks*")
+        lines.append("\n_To remove: /cancel <id>_")
         return "\n".join(lines)
-    
+
+    async def handle_cancel(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """Cancel/delete a scheduled task or agent task by ID (prefix match)."""
+        if not args:
+            return "Usage: /cancel <task_id>\n\nUse /schedules to see task IDs."
+
+        search = args.strip().lower()
+
+        # Try scheduler tasks first (prefix match on ID)
+        for t in self._orch.scheduler.list_tasks():
+            if t.task_id.lower().startswith(search):
+                success = self._orch.scheduler.cancel_task(t.task_id)
+                if success:
+                    return f"✅ Cancelled: *{t.name}*\n({t.task_type}: {t.schedule_info})"
+                return f"❌ Failed to cancel task: {t.task_id}"
+
+        # Try task queue
+        task = await self._orch.task_queue.get_task(search)
+        if task:
+            cancelled = await self._orch.task_queue.cancel_task(search)
+            if cancelled:
+                return f"✅ Cancelled queue task: *{task.name}*"
+            return f"❌ Failed to cancel queue task: {search}"
+
+        # Try agent tasks
+        try:
+            agent_task = self._orch.agent.get_task(search)
+            if agent_task:
+                await self._orch.agent.cancel_task(search)
+                return f"✅ Cancelled agent task: *{agent_task.original_request[:50]}...*"
+        except Exception:
+            pass
+
+        return f"❌ No task found matching: `{search}`\n\nUse /schedules to see active tasks."
+
     async def handle_email(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle email command."""
         if not args:
@@ -905,6 +941,7 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("status", common.handle_status, "Show system status")
     parser.register("schedule", common.handle_schedule, "Schedule a meeting")
     parser.register("schedules", common.handle_schedules, "List all scheduled tasks")
+    parser.register("cancel", common.handle_cancel, "Cancel a scheduled/agent task by ID")
     parser.register("email", common.handle_email, "Manage emails")
     parser.register("remind", common.handle_remind, "Set a reminder")
     parser.register("calendar", common.handle_calendar, "Check calendar")
