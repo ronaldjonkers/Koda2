@@ -400,18 +400,18 @@ class Orchestrator:
             to = params.get("to", "")
             caption = params.get("caption", "")
             if channel == "whatsapp" and to:
-                result = await self.whatsapp.send_media(
-                    to, f"file://{file_path}", caption=caption,
+                # Use send_file for local files (more reliable than file:// URLs)
+                result = await self.whatsapp.send_file(
+                    to, file_path, caption=caption,
                 )
                 return result
             elif channel == "email":
-                msg = EmailMessage(
+                success = await self.email.send_email_with_attachments(
+                    to=params.get("to_email", [to]) if to else [],
                     subject=params.get("subject", "File from Koda2"),
-                    recipients=params.get("to_email", [to]) if to else [],
                     body_text=caption or "See attached file.",
-                    attachments=[file_path],
+                    attachment_paths=[file_path],
                 )
-                success = await self.email.send_email(msg)
                 return {"sent": success}
             return {"status": "no_channel", "path": file_path}
 
@@ -487,7 +487,8 @@ class Orchestrator:
 
         elif action_name == "download_whatsapp_media":
             path = await self.whatsapp.download_media(
-                media_url=params.get("media_url", ""),
+                message_id=params.get("message_id"),
+                media_url=params.get("media_url"),
                 output_dir=params.get("output_dir", "data/whatsapp_media"),
                 filename=params.get("filename"),
             )

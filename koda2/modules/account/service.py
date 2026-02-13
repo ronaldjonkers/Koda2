@@ -261,6 +261,9 @@ class AccountService:
         if provider:
             stmt = stmt.where(Account.provider == provider.value)
         
+        # Use .first() instead of .scalar_one_or_none() because multiple
+        # accounts of the same type can be marked as default.
+        stmt = stmt.limit(1)
         async with self._get_session() as session:
             result = await session.execute(stmt)
             return result.scalar_one_or_none()

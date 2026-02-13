@@ -103,6 +103,8 @@ async function onMessageCreate(msg) {
         timestamp: msg.timestamp,
         chatName: chat.name || msg.from,
         hasMedia: msg.hasMedia,
+        mimetype: msg.mimetype || null,
+        filename: msg.filename || null,
         myWid: myWid,
         chatId: chat.id ? chat.id._serialized : null,
     };
@@ -160,6 +162,8 @@ async function onMessage(msg) {
         timestamp: msg.timestamp,
         chatName: chat.name || msg.from,
         hasMedia: msg.hasMedia,
+        mimetype: msg.mimetype || null,
+        filename: msg.filename || null,
         myWid: clientInfo ? clientInfo.wid : null,
         chatId: chat.id ? chat.id._serialized : null,
     };
@@ -236,6 +240,55 @@ app.post('/send', async (req, res) => {
     }
 });
 
+app.post('/send-media', async (req, res) => {
+    if (!clientReady) {
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
+    const { to, file_path, base64_data, mimetype, filename, caption } = req.body;
+    if (!to || (!file_path && !base64_data)) {
+        return res.status(400).json({ error: 'Missing "to" and "file_path" or "base64_data"' });
+    }
+
+    try {
+        // Normalize phone number to WhatsApp ID format
+        const chatId = to.includes('@') ? to : `${to.replace(/[^0-9]/g, '')}@c.us`;
+        
+        const { MessageMedia } = require('whatsapp-web.js');
+        let media;
+        
+        if (file_path) {
+            // Read file from disk
+            const fs = require('fs');
+            const path = require('path');
+            const fullPath = path.resolve(file_path);
+            
+            if (!fs.existsSync(fullPath)) {
+                return res.status(400).json({ error: `File not found: ${file_path}` });
+            }
+            
+            const fileData = fs.readFileSync(fullPath, { encoding: 'base64' });
+            const mimeType = mimetype || 'application/octet-stream';
+            const fileName = filename || path.basename(fullPath);
+            
+            media = new MessageMedia(mimeType, fileData, fileName);
+        } else if (base64_data) {
+            // Use provided base64 data
+            media = new MessageMedia(mimetype || 'application/octet-stream', base64_data, filename || 'file');
+        }
+        
+        isSendingReply = true;
+        const sent = await client.sendMessage(chatId, media, { caption: caption || '' });
+        isSendingReply = false;
+        
+        console.log(`[WhatsApp] Sent media (id=${sent.id._serialized})`);
+        res.json({ status: 'sent', id: sent.id._serialized, filename: filename || file_path });
+    } catch (err) {
+        isSendingReply = false;
+        console.error('Send media error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/typing', async (req, res) => {
     if (!clientReady) {
         return res.status(503).json({ error: 'WhatsApp not connected' });
@@ -304,18 +357,38 @@ app.post('/download', async (req, res) => {
     
     const { message_id, media_url, filename } = req.body;
     
+    console.log('[WhatsApp] Download request:', { message_id: message_id?.substring(0, 20), media_url: media_url?.substring(0, 50) });
+    
     try {
         // If message_id is provided, fetch media from that message
         if (message_id) {
-            const msg = await client.getMessageById(message_id);
+            console.log('[WhatsApp] Fetching message by ID:', message_id.substring(0, 30));
+            
+            let msg;
+            try {
+                msg = await client.getMessageById(message_id);
+            } catch (err) {
+                console.error('[WhatsApp] Failed to get message:', err.message);
+                return res.status(404).json({ error: 'Message not found or expired: ' + err.message });
+            }
+            
+            if (!msg) {
+                return res.status(404).json({ error: 'Message not found' });
+            }
+            
+            console.log('[WhatsApp] Message found, hasMedia:', msg.hasMedia);
+            
             if (!msg.hasMedia) {
                 return res.status(400).json({ error: 'Message has no media' });
             }
             
+            console.log('[WhatsApp] Downloading media...');
             const media = await msg.downloadMedia();
             if (!media) {
-                return res.status(500).json({ error: 'Failed to download media' });
+                return res.status(500).json({ error: 'Failed to download media from WhatsApp' });
             }
+            
+            console.log('[WhatsApp] Media downloaded, mimetype:', media.mimetype);
             
             // Generate filename if not provided
             let ext = '';

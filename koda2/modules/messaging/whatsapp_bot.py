@@ -372,7 +372,10 @@ class WhatsAppBot:
     async def send_media(
         self, to: str, media_url: str, caption: str = "",
     ) -> dict[str, Any]:
-        """Send a media message (image, document, etc.)."""
+        """Send a media message from URL (image, document, etc.).
+        
+        For local files, use send_file() instead.
+        """
         if not self.is_configured:
             return {"status": "not_configured"}
 
@@ -384,6 +387,73 @@ class WhatsAppBot:
             )
             resp.raise_for_status()
             return resp.json()
+    
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10),
+           retry=retry_if_not_exception_type(ValueError))
+    async def send_file(
+        self, 
+        to: str, 
+        file_path: str, 
+        caption: str = "",
+        mimetype: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Send a local file via WhatsApp.
+        
+        Args:
+            to: Phone number (e.g., "+31612345678")
+            file_path: Path to local file
+            caption: Optional caption
+            mimetype: Optional MIME type (auto-detected if not provided)
+        """
+        if not self.is_configured:
+            return {"status": "not_configured"}
+        
+        path = Path(file_path)
+        if not path.exists():
+            return {"status": "error", "error": f"File not found: {file_path}"}
+        
+        # Auto-detect mimetype if not provided
+        if not mimetype:
+            mimetype = self._guess_mime_type(path.name)
+        
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                f"{self._bridge_url}/send-media",
+                json={
+                    "to": to, 
+                    "file_path": str(path.resolve()),
+                    "mimetype": mimetype,
+                    "filename": path.name,
+                    "caption": caption,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return resp.json()
+    
+    def _guess_mime_type(self, filename: str) -> str:
+        """Guess MIME type from filename."""
+        ext = Path(filename).suffix.lower()
+        mime_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".xls": "application/vnd.ms-excel",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".mp4": "video/mp4",
+            ".mp3": "audio/mpeg",
+            ".txt": "text/plain",
+            ".csv": "text/csv",
+            ".zip": "application/zip",
+        }
+        return mime_types.get(ext, "application/octet-stream")
 
     async def get_messages(self, since: int = 0, self_only: bool = True) -> list[dict[str, Any]]:
         """Get recent messages from the bridge queue.
@@ -527,7 +597,6 @@ class WhatsAppBot:
         
         user_message = base_result.get("text", "")
         has_media = base_result.get("has_media", False)
-        media_info = payload.get("media", {})
         
         # If no media, just handle as text message
         if not has_media:
@@ -545,9 +614,11 @@ class WhatsAppBot:
         
         try:
             # Get media details from payload
-            media_url = media_info.get("url") or payload.get("mediaUrl")
-            mimetype = media_info.get("mimetype", "application/octet-stream")
-            original_filename = media_info.get("filename", "unknown")
+            # The bridge sends hasMedia=true with the message id
+            # We need to use the message_id to download the media
+            message_id = payload.get("id")  # This is the serialized message ID
+            mimetype = payload.get("mimetype", "application/octet-stream")
+            original_filename = payload.get("filename", "unknown")
             
             # Generate appropriate filename
             timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
@@ -559,9 +630,11 @@ class WhatsAppBot:
             else:
                 filename = f"whatsapp_{timestamp}{ext}"
             
-            # Download the file
+            logger.info("downloading_media", message_id=message_id, filename=filename)
+            
+            # Download the file using message_id
             download_path = await self.download_media(
-                media_url=media_url,
+                message_id=message_id,
                 output_dir="data/whatsapp_received",
                 filename=filename,
             )
@@ -673,14 +746,16 @@ class WhatsAppBot:
 
     async def download_media(
         self,
-        media_url: str,
+        media_url: Optional[str] = None,
+        message_id: Optional[str] = None,
         output_dir: str = "data/whatsapp_media",
         filename: Optional[str] = None,
     ) -> Optional[str]:
         """Download WhatsApp media (image, video, document, audio).
         
         Args:
-            media_url: URL or path identifier from webhook payload
+            media_url: URL to download from (optional, for external URLs)
+            message_id: WhatsApp message ID to download media from (preferred)
             output_dir: Directory to save the file
             filename: Optional filename (auto-generated if not provided)
             
@@ -690,36 +765,50 @@ class WhatsAppBot:
         if not self.is_configured:
             logger.warning("whatsapp_not_configured_for_media_download")
             return None
+        
+        if not message_id and not media_url:
+            logger.error("download_media_requires_message_id_or_url")
+            return None
 
         try:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
 
             async with httpx.AsyncClient() as client:
-                # First try to get via bridge download endpoint
+                # Build request payload
+                request_payload = {"filename": filename}
+                if message_id:
+                    request_payload["message_id"] = message_id
+                elif media_url:
+                    request_payload["media_url"] = media_url
+                
+                logger.debug("calling_bridge_download", payload=request_payload)
+                
+                # Call bridge download endpoint
                 resp = await client.post(
                     f"{self._bridge_url}/download",
-                    json={"media_url": media_url, "filename": filename},
+                    json=request_payload,
                     timeout=60,
                 )
                 
                 if resp.status_code == 200:
                     data = resp.json()
                     if data.get("success"):
-                        file_path = output_path / data["filename"]
-                        # The bridge returns base64 encoded content
-                        if "content" in data:
-                            import base64
-                            content = base64.b64decode(data["content"])
-                            file_path.write_bytes(content)
+                        # Bridge saved the file directly and returns the path
+                        if "path" in data:
+                            logger.info("whatsapp_media_downloaded", path=data["path"])
+                            return data["path"]
+                        # Or bridge returns filename for us to save
+                        elif "filename" in data:
+                            file_path = output_path / data["filename"]
                             logger.info("whatsapp_media_downloaded", path=str(file_path))
                             return str(file_path)
-                        elif "path" in data:
-                            # Bridge saved directly
-                            return data["path"]
-                
-                logger.warning("whatsapp_media_download_failed", status=resp.status_code)
-                return None
+                else:
+                    error_data = resp.json() if resp.status_code < 500 else {}
+                    logger.warning("whatsapp_media_download_failed", 
+                                 status=resp.status_code, 
+                                 error=error_data.get("error", "Unknown error"))
+                    return None
 
         except Exception as exc:
             logger.error("whatsapp_media_download_error", error=str(exc))
@@ -736,15 +825,21 @@ class WhatsAppBot:
         """
         result = await self.process_webhook(payload)
         if result and result.get("has_media") and auto_download_media:
-            media_info = payload.get("media", {})
-            media_url = media_info.get("url") or payload.get("mediaUrl")
-            mimetype = media_info.get("mimetype", "application/octet-stream")
+            message_id = payload.get("id")
+            mimetype = payload.get("mimetype", "application/octet-stream")
+            original_filename = payload.get("filename")
             
-            # Generate filename from mimetype
+            # Generate filename
             ext = self._mime_to_extension(mimetype)
-            filename = f"whatsapp_{payload.get('timestamp', '0')}{ext}"
+            if original_filename:
+                filename = f"{payload.get('timestamp', '0')}_{original_filename}"
+            else:
+                filename = f"whatsapp_{payload.get('timestamp', '0')}{ext}"
             
-            download_path = await self.download_media(media_url, filename=filename)
+            download_path = await self.download_media(
+                message_id=message_id,
+                filename=filename,
+            )
             if download_path:
                 result["downloaded_media_path"] = download_path
                 result["media_mimetype"] = mimetype

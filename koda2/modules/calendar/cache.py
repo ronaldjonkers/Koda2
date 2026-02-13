@@ -139,7 +139,7 @@ class CalendarCache:
                     select(CachedCalendarEvent).where(
                         CachedCalendarEvent.provider_id == db_data["provider_id"],
                         CachedCalendarEvent.account_name == db_data["account_name"],
-                    )
+                    ).limit(1)
                 )).scalar_one_or_none()
 
                 if existing:
