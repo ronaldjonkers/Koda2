@@ -96,6 +96,7 @@ dev = [
 
 [project.scripts]
 koda2 = "koda2.cli:app"
+koda2-supervisor = "koda2.supervisor.cli:app"
 koda2-server = "koda2.main:main"
 koda2-setup = "setup_wizard:main"
 koda2-config = "setup_wizard:main"
