@@ -618,25 +618,38 @@ class WhatsAppBot:
             # We need to use the message_id to download the media
             message_id = payload.get("id")  # This is the serialized message ID
             mimetype = payload.get("mimetype", "application/octet-stream")
-            original_filename = payload.get("filename", "unknown")
+            original_filename = payload.get("filename")
             
-            # Generate appropriate filename
-            timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
-            ext = self._mime_to_extension(mimetype)
+            logger.info("whatsapp_media_details", 
+                       message_id=message_id, 
+                       original_filename=original_filename,
+                       mimetype=mimetype)
             
-            # Use original filename if available, otherwise generate one
+            # Strategy:
+            # 1. If WhatsApp gives us a filename with extension, use that
+            # 2. If not, let the bridge try to determine from msg.filename
+            # 3. Only as last resort, use mimetype to generate extension
+            
+            filename = None  # Let bridge use original filename by default
+            
             if original_filename and original_filename != "unknown":
-                filename = f"{timestamp}_{original_filename}"
-            else:
-                filename = f"whatsapp_{timestamp}{ext}"
+                # Check if filename has an extension
+                if "." in original_filename:
+                    timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
+                    filename = f"{timestamp}_{original_filename}"
+                else:
+                    # No extension in original filename, try to add from mimetype
+                    ext = self._mime_to_extension(mimetype)
+                    timestamp = payload.get("timestamp", str(int(dt.datetime.now().timestamp())))
+                    filename = f"{timestamp}_{original_filename}{ext}"
             
-            logger.info("downloading_media", message_id=message_id, filename=filename)
+            logger.info("downloading_media", message_id=message_id, filename=filename or "using_original")
             
             # Download the file using message_id
             download_path = await self.download_media(
                 message_id=message_id,
                 output_dir="data/whatsapp_received",
-                filename=filename,
+                filename=filename,  # Can be None, then bridge uses original
             )
             
             if not download_path:
@@ -776,11 +789,15 @@ class WhatsAppBot:
 
             async with httpx.AsyncClient() as client:
                 # Build request payload
-                request_payload = {"filename": filename}
+                request_payload = {}
                 if message_id:
                     request_payload["message_id"] = message_id
                 elif media_url:
                     request_payload["media_url"] = media_url
+                # Only include filename if explicitly provided
+                # If not provided, bridge will use original filename from WhatsApp
+                if filename:
+                    request_payload["filename"] = filename
                 
                 logger.debug("calling_bridge_download", payload=request_payload)
                 

@@ -52,8 +52,13 @@ class CalendarService:
         if account_id and account_id in self._providers:
             return account_id, self._providers[account_id]
         
-        # Get default calendar account
-        account = await self._account_service.get_default_account(AccountType.CALENDAR)
+        if account_id:
+            # Look up the specific account by ID
+            account = await self._account_service.get_account(account_id)
+        else:
+            # Fall back to default calendar account
+            account = await self._account_service.get_default_account(AccountType.CALENDAR)
+        
         if not account:
             raise ValueError("No calendar account configured")
         
@@ -102,7 +107,7 @@ class CalendarService:
                 logger.error("unsupported_calendar_provider", provider=provider_type)
                 return None
         except Exception as exc:
-            logger.error("failed_to_create_provider", account_id=account.id, error=str(exc))
+            logger.error("failed_to_create_provider", account_id=account.id, account_name=account.name, provider=account.provider, error=str(exc))
             return None
 
     async def get_accounts(self, active_only: bool = True) -> list:

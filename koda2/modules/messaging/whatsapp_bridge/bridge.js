@@ -376,7 +376,7 @@ app.post('/download', async (req, res) => {
                 return res.status(404).json({ error: 'Message not found' });
             }
             
-            console.log('[WhatsApp] Message found, hasMedia:', msg.hasMedia);
+            console.log('[WhatsApp] Message found, hasMedia:', msg.hasMedia, 'filename:', msg.filename);
             
             if (!msg.hasMedia) {
                 return res.status(400).json({ error: 'Message has no media' });
@@ -390,24 +390,40 @@ app.post('/download', async (req, res) => {
             
             console.log('[WhatsApp] Media downloaded, mimetype:', media.mimetype);
             
-            // Generate filename if not provided
-            let ext = '';
-            if (media.mimetype) {
-                const mimeToExt = {
-                    'image/jpeg': '.jpg',
-                    'image/png': '.png',
-                    'image/gif': '.gif',
-                    'image/webp': '.webp',
-                    'video/mp4': '.mp4',
-                    'video/ogg': '.ogv',
-                    'audio/ogg': '.ogg',
-                    'audio/mpeg': '.mp3',
-                    'audio/mp4': '.m4a',
-                    'application/pdf': '.pdf',
-                };
-                ext = mimeToExt[media.mimetype] || '.bin';
+            // Use original filename from message if available, otherwise generate one
+            let finalFilename;
+            if (filename) {
+                // Use provided filename from Python
+                finalFilename = filename;
+                console.log('[WhatsApp] Using provided filename:', finalFilename);
+            } else if (msg.filename) {
+                // Use original filename from WhatsApp message
+                finalFilename = msg.filename;
+                console.log('[WhatsApp] Using original WhatsApp filename:', finalFilename);
+            } else {
+                // Generate filename from mimetype
+                let ext = '';
+                if (media.mimetype) {
+                    const mimeToExt = {
+                        'image/jpeg': '.jpg',
+                        'image/png': '.png',
+                        'image/gif': '.gif',
+                        'image/webp': '.webp',
+                        'video/mp4': '.mp4',
+                        'video/ogg': '.ogv',
+                        'audio/ogg': '.ogg',
+                        'audio/mpeg': '.mp3',
+                        'audio/mp4': '.m4a',
+                        'application/pdf': '.pdf',
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': '.docx',
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
+                        'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx',
+                    };
+                    ext = mimeToExt[media.mimetype] || '.bin';
+                }
+                finalFilename = `media_${Date.now()}${ext}`;
+                console.log('[WhatsApp] Generated filename from mimetype:', finalFilename);
             }
-            const finalFilename = filename || `media_${Date.now()}${ext}`;
             
             // Save to downloads directory
             const downloadDir = path.join(__dirname, '..', '..', '..', '..', 'data', 'whatsapp_downloads');
