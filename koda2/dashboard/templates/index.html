@@ -380,12 +380,40 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 
 <!-- ═══ MEMORY ══════════════════════════════════════════ -->
 <section class="section" id="section-memory">
-  <div class="page-head"><h2>Memory</h2></div>
+  <div class="page-head"><h2>Memory</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="loadMemory()">Refresh</button>
+      <button class="btn btn-primary btn-sm" onclick="toggleMemoryForm()">+ Add Memory</button>
+    </div>
+  </div>
+
+  <!-- Add memory form (hidden by default) -->
+  <div id="mem-form" style="display:none;padding:12px 16px;background:var(--bg-2);border-radius:8px;margin-bottom:12px">
+    <div style="display:flex;gap:8px;margin-bottom:8px">
+      <select id="mem-cat" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--tx-1);font-size:12px;min-width:120px">
+        <option value="note">Note</option>
+        <option value="fact">Fact</option>
+        <option value="preference">Preference</option>
+        <option value="project">Project</option>
+        <option value="contact">Contact</option>
+        <option value="habit">Habit</option>
+      </select>
+      <input id="mem-content" class="search-input" placeholder="What should I remember?" style="flex:1">
+      <button class="btn btn-primary btn-sm" onclick="addMemory()">Save</button>
+    </div>
+  </div>
+
+  <!-- Stats bar -->
+  <div style="font-size:10px;color:var(--tx-3);padding:0 4px 6px" id="mem-stats"></div>
+
+  <!-- Search -->
   <div class="search-bar">
     <input class="search-input" id="mem-q" placeholder="Search memories...">
     <button class="btn btn-primary btn-sm" onclick="searchMemory()">Search</button>
   </div>
-  <div class="panel"><div class="panel-body tall" id="mem-results"><div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Search your memory store</div><p>Enter a query above to find stored memories</p></div></div></div>
+
+  <!-- Memory list -->
+  <div class="panel"><div class="panel-body tall" id="mem-results"><div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Loading memories...</div></div></div></div>
 </section>
 
 <!-- ═══ INTEGRATIONS ════════════════════════════════════ -->
@@ -506,6 +534,7 @@ function onSection(s) {
     else if (s === 'tasks') loadTasks();
     else if (s === 'accounts') loadAccounts();
     else if (s === 'scheduler') loadScheduler();
+    else if (s === 'memory') loadMemory();
     else if (s === 'integrations' && S.health) renderIntegrations(S.health);
 }
 
@@ -824,9 +853,80 @@ async function syncContacts() {
 
 /* ── Memory ─────────────────────────────────────────────── */
 $('mem-q').addEventListener('keydown', e => { if (e.key === 'Enter') searchMemory(); });
+
+function toggleMemoryForm() {
+    const f = $('mem-form');
+    f.style.display = f.style.display === 'none' ? 'block' : 'none';
+    if (f.style.display !== 'none') $('mem-content').focus();
+}
+
+async function addMemory() {
+    const cat = $('mem-cat').value;
+    const content = $('mem-content').value.trim();
+    if (!content) return;
+    try {
+        await fetch('/api/memory/store', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: 'default', category: cat, content, importance: 0.5 }),
+        });
+        $('mem-content').value = '';
+        $('mem-form').style.display = 'none';
+        loadMemory();
+    } catch(e) { console.error('Store memory failed', e); }
+}
+
+async function deleteMemory(id) {
+    try {
+        await fetch(`/api/memory/${id}`, { method: 'DELETE' });
+        loadMemory();
+    } catch(e) { console.error('Delete memory failed', e); }
+}
+
+function memCatCls(cat) {
+    const m = { preference:'tag-purple', fact:'tag-blue', note:'tag-green', project:'tag-amber', contact:'tag-red', habit:'tag-blue' };
+    return m[cat] || 'tag-blue';
+}
+
+async function loadMemory() {
+    try {
+        const [listR, statsR] = await Promise.all([
+            fetch('/api/memory/list?limit=50'),
+            fetch('/api/memory/stats'),
+        ]);
+        const memories = await listR.json();
+        const stats = await statsR.json();
+
+        // Stats
+        const cats = Object.entries(stats.categories || {}).map(([k,v]) => `${v} ${k}`).join(' · ');
+        $('mem-stats').textContent = `${stats.total || 0} memories · ${stats.vector_count || 0} vectors${cats ? ' · ' + cats : ''}`;
+
+        if (memories.length === 0) {
+            $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">No memories stored yet</div><p>Click "+ Add Memory" or tell the assistant to remember something</p></div>';
+        } else {
+            $('mem-results').innerHTML = memories.map(m => {
+                const catCls = memCatCls(m.category);
+                const date = m.created_at ? timeAgo(m.created_at) : '';
+                const src = m.source ? `<span style="font-size:9px;color:var(--tx-3)">via ${esc(m.source)}</span>` : '';
+                return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
+                    <div style="display:flex;gap:6px;width:100%;align-items:center">
+                        <span class="tag ${catCls}" style="font-size:9px;padding:0 5px">${esc(m.category)}</span>
+                        ${src}
+                        <span style="font-size:9px;color:var(--tx-3);margin-left:auto">${date}</span>
+                        <button class="task-cancel" onclick="deleteMemory('${m.id}')">Delete</button>
+                    </div>
+                    <div style="font-size:12px;line-height:1.5;color:var(--tx-1);word-break:break-word">${esc(m.content)}</div>
+                </div>`;
+            }).join('');
+        }
+    } catch(e) {
+        $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Could not load memories</div></div>';
+    }
+}
+
 async function searchMemory() {
     const q = $('mem-q').value.trim();
-    if (!q) return;
+    if (!q) { loadMemory(); return; }
     $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🔍</div><div class="empty-title">Searching...</div></div>';
     try {
         const r = await fetch(`/api/memory/search?query=${encodeURIComponent(q)}&n=10`);
@@ -834,17 +934,20 @@ async function searchMemory() {
         if (results.length === 0) {
             $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">No results found</div></div>';
         } else {
-            $('mem-results').innerHTML = results.map(m => `
-                <div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px">
+            $('mem-results').innerHTML = results.map(m => {
+                const dist = m.distance != null ? `<span style="font-size:9px;color:var(--tx-3);margin-left:auto">${((1 - m.distance) * 100).toFixed(0)}% match</span>` : '';
+                const cat = (m.metadata && m.metadata.category) || 'general';
+                return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
                     <div style="display:flex;gap:6px;width:100%;align-items:center">
-                        <span class="tag tag-blue">${esc(m.category || 'general')}</span>
-                        ${m.score ? '<span style="font-size:10px;color:var(--tx-3);margin-left:auto">' + (m.score * 100).toFixed(0) + '% match</span>' : ''}
+                        <span class="tag ${memCatCls(cat)}" style="font-size:9px;padding:0 5px">${esc(cat)}</span>
+                        ${dist}
                     </div>
-                    <div style="font-size:12px;line-height:1.4;color:var(--tx-1);word-break:break-word">${esc(m.content || m.text || JSON.stringify(m))}</div>
-                </div>`).join('');
+                    <div style="font-size:12px;line-height:1.5;color:var(--tx-1);word-break:break-word">${esc(m.content || '')}</div>
+                </div>`;
+            }).join('');
         }
     } catch(e) {
-        $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Search failed</div><p>Memory service may not be available</p></div>';
+        $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Search failed</div></div>';
     }
 }
 

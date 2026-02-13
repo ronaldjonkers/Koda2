@@ -320,6 +320,42 @@ async def search_memory(
     return orch.memory.recall(query, user_id=user_id, n=n)
 
 
+@router.get("/memory/list")
+async def list_memories(
+    user_id: str = "default",
+    category: Optional[str] = None,
+    limit: int = Query(50),
+) -> list[dict[str, Any]]:
+    """List all stored memories for a user."""
+    orch = get_orchestrator()
+    entries = await orch.memory.list_memories(user_id, category=category, limit=limit)
+    return [{
+        "id": e.id,
+        "category": e.category,
+        "content": e.content,
+        "importance": e.importance,
+        "source": e.source,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+    } for e in entries]
+
+
+@router.get("/memory/stats")
+async def memory_stats(user_id: str = "default") -> dict[str, Any]:
+    """Get memory statistics."""
+    orch = get_orchestrator()
+    return await orch.memory.get_memory_stats(user_id)
+
+
+@router.delete("/memory/{memory_id}")
+async def delete_memory(memory_id: str) -> dict[str, Any]:
+    """Delete a memory entry."""
+    orch = get_orchestrator()
+    success = await orch.memory.delete_memory(memory_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"deleted": True, "id": memory_id}
+
+
 # ── Plugins / Self-Improvement ───────────────────────────────────────
 
 @router.get("/plugins")

@@ -721,6 +721,37 @@ class Orchestrator:
             results = self.memory.recall(params.get("query", ""), user_id=user_id)
             return results
 
+        elif action_name == "store_memory":
+            entry = await self.memory.store_memory(
+                user_id=user_id,
+                category=params.get("category", "note"),
+                content=params.get("content", ""),
+                importance=float(params.get("importance", 0.5)),
+                source="user",
+            )
+            return {"id": entry.id, "category": entry.category, "stored": True}
+
+        elif action_name == "list_memories":
+            entries = await self.memory.list_memories(
+                user_id=user_id,
+                category=params.get("category"),
+                limit=int(params.get("limit", 20)),
+            )
+            return [{
+                "id": e.id,
+                "category": e.category,
+                "content": e.content,
+                "importance": e.importance,
+                "source": e.source,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            } for e in entries]
+
+        elif action_name == "delete_memory":
+            success = await self.memory.delete_memory(params.get("memory_id", ""))
+            if success:
+                return {"deleted": True}
+            return {"error": "Memory not found"}
+
         elif action_name == "run_shell":
             result = await self.macos.run_shell(
                 params.get("command", ""),

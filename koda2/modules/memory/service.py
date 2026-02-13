@@ -172,6 +172,63 @@ class MemoryService:
         where = {"user_id": user_id} if user_id else None
         return self.vector.search(query, n_results=n, where=where)
 
+    async def list_memories(
+        self,
+        user_id: str,
+        category: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[MemoryEntry]:
+        """List all stored memory entries for a user, optionally filtered by category."""
+        async with get_session() as session:
+            stmt = (
+                select(MemoryEntry)
+                .where(MemoryEntry.user_id == user_id)
+                .where(MemoryEntry.active == True)  # noqa: E712
+                .order_by(MemoryEntry.created_at.desc())
+                .limit(limit)
+            )
+            if category:
+                stmt = stmt.where(MemoryEntry.category == category)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def delete_memory(self, memory_id: str) -> bool:
+        """Delete a memory entry by ID (soft-delete: sets active=False)."""
+        async with get_session() as session:
+            result = await session.execute(
+                select(MemoryEntry).where(MemoryEntry.id == memory_id)
+            )
+            entry = result.scalar_one_or_none()
+            if not entry:
+                return False
+            entry.active = False
+            await session.flush()
+            # Also remove from vector store
+            try:
+                self.vector.delete(memory_id)
+            except Exception:
+                pass
+            logger.info("memory_deleted", memory_id=memory_id)
+            return True
+
+    async def get_memory_stats(self, user_id: str) -> dict[str, Any]:
+        """Get memory statistics for a user."""
+        async with get_session() as session:
+            result = await session.execute(
+                select(MemoryEntry)
+                .where(MemoryEntry.user_id == user_id)
+                .where(MemoryEntry.active == True)  # noqa: E712
+            )
+            entries = list(result.scalars().all())
+            categories: dict[str, int] = {}
+            for e in entries:
+                categories[e.category] = categories.get(e.category, 0) + 1
+            return {
+                "total": len(entries),
+                "categories": categories,
+                "vector_count": self.vector.count(),
+            }
+
     # ── Contacts ─────────────────────────────────────────────────────
 
     async def add_contact(self, user_id: str, **kwargs: Any) -> Contact:

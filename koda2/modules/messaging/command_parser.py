@@ -235,6 +235,7 @@ class CommonCommands:
             "/meet [title] — Create a Google Meet link\n"
             "/email <request> — Check inbox or send email\n"
             "/remind <what> at <when> — Set a reminder\n"
+            "/memory [text] — List memories or store a new one\n"
             "/contacts [name] — Search contacts\n"
             "/accounts — Manage accounts (list/add/test/delete)\n"
             "/config — View settings\n\n"
@@ -315,6 +316,32 @@ class CommonCommands:
             pass
 
         return f"❌ No task found matching: `{search}`\n\nUse /schedules to see active tasks."
+
+    async def handle_memory(self, user_id: str, args: str = "", **kwargs: Any) -> str:
+        """List or add memories."""
+        if not args:
+            # List recent memories
+            entries = await self._orch.memory.list_memories(user_id, limit=15)
+            if not entries:
+                return "🧠 *No memories stored*\n\nTell me something to remember:\n• \"Onthoud dat ik meetings liever 's ochtends heb\"\n• /memory Mijn favoriete restaurant is De Kas"
+
+            lines = ["🧠 *Stored Memories*\n"]
+            for e in entries:
+                cat_emoji = {"preference": "⚙️", "fact": "📌", "note": "📝", "project": "📁", "contact": "👤", "habit": "🔄"}.get(e.category, "💡")
+                lines.append(f"{cat_emoji} *{e.category}*: {e.content[:100]}\n   ID: `{e.id[:8]}...`")
+            lines.append(f"\n*Total: {len(entries)} memories*")
+            lines.append("_Add: /memory <text> | Delete: /cancel <id>_")
+            return "\n".join(lines)
+
+        # Store new memory
+        entry = await self._orch.memory.store_memory(
+            user_id=user_id,
+            category="note",
+            content=args,
+            importance=0.5,
+            source="whatsapp",
+        )
+        return f"🧠 Stored: *{args[:80]}*\nCategory: note | ID: `{entry.id[:8]}...`"
 
     async def handle_email(self, user_id: str, args: str = "", **kwargs: Any) -> str:
         """Handle email command."""
@@ -942,6 +969,7 @@ def create_command_parser(orchestrator: Any) -> CommandParser:
     parser.register("schedule", common.handle_schedule, "Schedule a meeting")
     parser.register("schedules", common.handle_schedules, "List all scheduled tasks")
     parser.register("cancel", common.handle_cancel, "Cancel a scheduled/agent task by ID")
+    parser.register("memory", common.handle_memory, "List or store memories")
     parser.register("email", common.handle_email, "Manage emails")
     parser.register("remind", common.handle_remind, "Set a reminder")
     parser.register("calendar", common.handle_calendar, "Check calendar")

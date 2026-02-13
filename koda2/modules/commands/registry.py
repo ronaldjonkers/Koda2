@@ -424,12 +424,53 @@ COMMANDS: dict[str, Command] = {
     "search_memory": Command(
         name="search_memory",
         category="memory",
-        description="Search conversation history and stored memories",
+        description="Search conversation history and stored memories using semantic search",
         parameters=[
             CommandParameter("query", "string", True, description="Search query"),
         ],
         examples=[
             '{"action": "search_memory", "params": {"query": "meeting with John"}}',
+        ],
+    ),
+
+    "store_memory": Command(
+        name="store_memory",
+        category="memory",
+        description="Store a fact, preference, or note in the user's long-term memory. Use this to remember important information the user tells you.",
+        parameters=[
+            CommandParameter("category", "string", True, description="Category (e.g. preference, fact, contact, note, project, habit)"),
+            CommandParameter("content", "string", True, description="The information to remember"),
+            CommandParameter("importance", "number", False, 0.5, "Importance 0.0-1.0 (higher = more important)"),
+        ],
+        examples=[
+            '{"action": "store_memory", "params": {"category": "preference", "content": "User prefers meetings in the morning before 11am", "importance": 0.7}}',
+            '{"action": "store_memory", "params": {"category": "fact", "content": "Ronald works at GoSettle as CTO", "importance": 0.9}}',
+        ],
+    ),
+
+    "list_memories": Command(
+        name="list_memories",
+        category="memory",
+        description="List all stored memories, optionally filtered by category",
+        parameters=[
+            CommandParameter("category", "string", False, None, "Filter by category (preference, fact, contact, note, project, habit)"),
+            CommandParameter("limit", "integer", False, 20, "Max results"),
+        ],
+        examples=[
+            '{"action": "list_memories", "params": {}}',
+            '{"action": "list_memories", "params": {"category": "preference"}}',
+        ],
+    ),
+
+    "delete_memory": Command(
+        name="delete_memory",
+        category="memory",
+        description="Delete a stored memory by its ID",
+        parameters=[
+            CommandParameter("memory_id", "string", True, description="ID of the memory to delete"),
+        ],
+        examples=[
+            '{"action": "delete_memory", "params": {"memory_id": "abc-123"}}',
         ],
     ),
     
