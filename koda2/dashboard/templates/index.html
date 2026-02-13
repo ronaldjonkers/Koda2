@@ -103,7 +103,17 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 .task:last-child{border-bottom:none}.task:hover{background:var(--bg-2)}
 .task-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .task-dot.pending{background:var(--amber)}.task-dot.running{background:var(--blue);animation:blink 1.4s infinite}
-.task-dot.completed{background:var(--green)}.task-dot.failed{background:var(--red)}
+.task-dot.completed{background:var(--green)}.task-dot.failed{background:var(--red)}.task-dot.cancelled{background:var(--tx-3)}
+.task-filter{background:var(--bg-2);border:1px solid var(--border);color:var(--tx-2);font-size:10px;padding:3px 10px;border-radius:12px;cursor:pointer;transition:all var(--tr)}
+.task-filter:hover{background:var(--bg-3)}.task-filter.active{background:var(--accent-dim);color:var(--accent-h);border-color:var(--accent)}
+.task-actions{display:flex;gap:4px;align-items:center;flex-shrink:0}
+.task-cancel{background:none;border:1px solid var(--border);color:var(--tx-2);font-size:9px;padding:2px 8px;border-radius:4px;cursor:pointer;transition:all var(--tr)}
+.task-cancel:hover{border-color:var(--red);color:var(--red)}
+.task-status{font-size:9px;padding:1px 6px;border-radius:8px;font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.task-status.running{background:rgba(59,130,246,.15);color:var(--blue)}.task-status.completed{background:rgba(34,197,94,.15);color:var(--green)}
+.task-status.failed{background:rgba(239,68,68,.15);color:var(--red)}.task-status.pending{background:rgba(245,158,11,.15);color:var(--amber)}
+.task-status.cancelled{background:rgba(100,116,139,.15);color:var(--tx-3)}
+.task-error{font-size:10px;color:var(--red);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:300px}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
 .task-body{flex:1;min-width:0}
 .task-name{font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -321,7 +331,19 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 
 <!-- ═══ TASKS ═══════════════════════════════════════════ -->
 <section class="section" id="section-tasks">
-  <div class="page-head"><h2>Tasks</h2></div>
+  <div class="page-head"><h2>Tasks</h2>
+    <div style="display:flex;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="loadTasks()">Refresh</button>
+    </div>
+  </div>
+  <div class="task-filters" style="display:flex;gap:4px;padding:0 0 10px">
+    <button class="btn btn-sm task-filter active" data-filter="all" onclick="setTaskFilter('all')">All</button>
+    <button class="btn btn-sm task-filter" data-filter="running" onclick="setTaskFilter('running')">Running</button>
+    <button class="btn btn-sm task-filter" data-filter="completed" onclick="setTaskFilter('completed')">Completed</button>
+    <button class="btn btn-sm task-filter" data-filter="failed" onclick="setTaskFilter('failed')">Failed</button>
+    <button class="btn btn-sm task-filter" data-filter="cancelled" onclick="setTaskFilter('cancelled')">Cancelled</button>
+    <span style="margin-left:auto;font-size:10px;color:var(--tx-3);align-self:center" id="task-count"></span>
+  </div>
   <div class="panel"><div class="panel-body tall" id="all-tasks"><div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div><p>Tasks appear as the assistant works</p></div></div></div>
 </section>
 
@@ -476,6 +498,7 @@ function onSection(s) {
     if (s === 'calendar') loadCalendar();
     else if (s === 'email') loadEmail();
     else if (s === 'contacts') loadContacts();
+    else if (s === 'tasks') loadTasks();
     else if (s === 'accounts') loadAccounts();
     else if (s === 'scheduler') loadScheduler();
     else if (s === 'integrations' && S.health) renderIntegrations(S.health);
@@ -514,9 +537,46 @@ function updateMetrics(d) {
 }
 
 /* ── Tasks ──────────────────────────────────────────────── */
+let _taskFilter = 'all';
 function upsertTask(t) {
     const i = S.tasks.findIndex(x => x.id === t.id);
     if (i >= 0) Object.assign(S.tasks[i], t); else S.tasks.unshift(t);
+}
+function setTaskFilter(f) {
+    _taskFilter = f;
+    document.querySelectorAll('.task-filter').forEach(b => b.classList.toggle('active', b.dataset.filter === f));
+    renderTasks();
+}
+async function loadTasks() {
+    try {
+        const r = await fetch('/api/tasks?limit=100');
+        const tasks = await r.json();
+        // Merge with existing (keep WS-pushed ones, add API ones)
+        for (const t of tasks) {
+            const i = S.tasks.findIndex(x => x.id === t.id);
+            if (i >= 0) Object.assign(S.tasks[i], t); else S.tasks.push(t);
+        }
+        // Sort newest first
+        S.tasks.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        renderTasks();
+    } catch(e) {
+        console.error('Failed to load tasks', e);
+    }
+}
+async function cancelTask(id) {
+    try {
+        await fetch(`/api/tasks/${id}/cancel`, { method: 'POST' });
+        const t = S.tasks.find(x => x.id === id);
+        if (t) { t.status = 'cancelled'; renderTasks(); }
+    } catch(e) { console.error('Cancel failed', e); }
+}
+function taskDuration(t) {
+    if (!t.started_at) return '';
+    const end = t.completed_at ? new Date(t.completed_at) : new Date();
+    const ms = end - new Date(t.started_at);
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${(ms/1000).toFixed(1)}s`;
+    return `${Math.floor(ms/60000)}m ${Math.round((ms%60000)/1000)}s`;
 }
 function renderTasks() {
     const active = S.tasks.filter(t => t.status === 'pending' || t.status === 'running');
@@ -525,16 +585,44 @@ function renderTasks() {
     else badge.style.display = 'none';
     $('s-tasks').textContent = active.length;
 
+    // Dashboard: show active tasks only
     $('dash-tasks').innerHTML = active.length === 0
         ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No active tasks</div></div>'
-        : active.slice(0, 5).map(taskH).join('');
+        : active.slice(0, 5).map(t => taskH(t, true)).join('');
 
-    $('all-tasks').innerHTML = S.tasks.length === 0
-        ? '<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">No tasks yet</div></div>'
-        : S.tasks.slice(0, 100).map(taskH).join('');
+    // Tasks page: apply filter
+    let filtered = S.tasks;
+    if (_taskFilter !== 'all') filtered = S.tasks.filter(t => t.status === _taskFilter);
+
+    const countEl = $('task-count');
+    if (countEl) countEl.textContent = `${filtered.length} of ${S.tasks.length} tasks`;
+
+    $('all-tasks').innerHTML = filtered.length === 0
+        ? `<div class="empty"><div class="empty-icon">⚡</div><div class="empty-title">${_taskFilter === 'all' ? 'No tasks yet' : 'No ' + _taskFilter + ' tasks'}</div><p>Tasks appear as the assistant works</p></div>`
+        : filtered.slice(0, 200).map(t => taskH(t, false)).join('');
 }
-function taskH(t) {
-    return `<div class="task"><div class="task-dot ${t.status}"></div><div class="task-body"><div class="task-name">${esc(t.name)}</div><div class="task-meta">${t.progress_message || t.status} &middot; ${timeAgo(t.created_at)}</div></div><div class="task-prog"><div class="prog-bar"><div class="prog-fill" style="width:${t.progress || 0}%"></div></div><div class="prog-pct">${t.progress || 0}%</div></div></div>`;
+function taskH(t, compact) {
+    const dur = taskDuration(t);
+    const durStr = dur ? ` · ${dur}` : '';
+    const canCancel = t.status === 'pending' || t.status === 'running';
+    const cancelBtn = !compact && canCancel ? `<button class="task-cancel" onclick="cancelTask('${t.id}')">Cancel</button>` : '';
+    const statusTag = !compact ? `<span class="task-status ${t.status}">${t.status}</span>` : '';
+    const errorLine = t.error ? `<div class="task-error" title="${esc(t.error)}">⚠ ${esc(t.error)}</div>` : '';
+    const retryInfo = t.retry_count > 0 ? ` · retry ${t.retry_count}/${t.max_retries}` : '';
+
+    return `<div class="task">
+        <div class="task-dot ${t.status}"></div>
+        <div class="task-body">
+            <div class="task-name">${esc(t.name)}</div>
+            <div class="task-meta">${t.progress_message || t.status}${durStr} · ${timeAgo(t.created_at)}${retryInfo}</div>
+            ${errorLine}
+        </div>
+        <div class="task-actions">
+            ${statusTag}
+            ${cancelBtn}
+        </div>
+        <div class="task-prog"><div class="prog-bar"><div class="prog-fill" style="width:${t.progress || 0}%"></div></div><div class="prog-pct">${t.progress || 0}%</div></div>
+    </div>`;
 }
 
 /* ── Health check ───────────────────────────────────────── */
@@ -1077,6 +1165,10 @@ renderTasks();
 // Periodic updates
 setInterval(checkHealth, 30000);
 setInterval(() => { $('s-up').textContent = fmtUp(Date.now() - T0); }, 60000);
+// Auto-refresh tasks every 10s when tasks section is active
+setInterval(() => {
+    if (document.querySelector('#section-tasks.active')) loadTasks();
+}, 10000);
 </script>
 </body>
 </html>
