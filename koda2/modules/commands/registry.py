@@ -659,6 +659,19 @@ COMMANDS: dict[str, Command] = {
             '{"action": "build_capability", "params": {"capability": "weather_check", "description": "Check weather for a city"}}',
         ],
     ),
+    "self_improve_code": Command(
+        name="self_improve_code",
+        category="system",
+        description="Improve Koda2's own source code. The AI plans changes, modifies files, runs tests, and commits if successful. Use when the user asks to add features, fix recurring issues, or improve the assistant itself.",
+        parameters=[
+            CommandParameter("request", "string", True, description="Natural language description of the improvement to make"),
+        ],
+        examples=[
+            '{"action": "self_improve_code", "params": {"request": "add a /weather command that shows the forecast"}}',
+            '{"action": "self_improve_code", "params": {"request": "make email summaries include attachment names"}}',
+        ],
+        notes="Changes are tested before committing. Rolls back automatically if tests fail. Requires restart to activate.",
+    ),
 }
 
 

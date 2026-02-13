@@ -961,6 +961,17 @@ class Orchestrator:
             path = await self.self_improve.generate_plugin(capability, description)
             return {"plugin_path": path, "status": "generated"}
 
+        elif action_name == "self_improve_code":
+            request = params.get("request", "")
+            if not request:
+                return {"error": "No improvement request provided"}
+            from koda2.supervisor.safety import SafetyGuard
+            from koda2.supervisor.evolution import EvolutionEngine
+            safety = SafetyGuard()
+            engine = EvolutionEngine(safety)
+            success, message = await engine.implement_improvement(request)
+            return {"success": success, "message": message}
+
         # New Actions for Gaps
         elif action_name == "send_email_with_attachments":
             success = await self.email.send_email_with_attachments(
