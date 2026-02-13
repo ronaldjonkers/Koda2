@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, AsyncIterator, Optional
 
 from koda2.config import get_settings
@@ -24,6 +25,10 @@ from koda2.modules.llm.providers import (
 logger = get_logger(__name__)
 
 
+# Provider cooldown after failure (seconds) — inspired by OpenClaw auth-profiles
+PROVIDER_COOLDOWN_SECONDS = 60
+
+
 class LLMRouter:
     """Routes LLM requests to the optimal provider with automatic fallback."""
 
@@ -35,19 +40,43 @@ class LLMRouter:
             LLMProvider.OPENROUTER: OpenRouterProvider(),
         }
         self._settings = get_settings()
+        # Track provider failures for cooldown
+        self._cooldowns: dict[LLMProvider, float] = {}
 
     @property
     def available_providers(self) -> list[LLMProvider]:
         """List providers with valid credentials."""
         return [p for p, impl in self._providers.items() if impl.is_available()]
 
+    def _is_in_cooldown(self, provider: LLMProvider) -> bool:
+        """Check if a provider is in cooldown after a recent failure."""
+        cooldown_until = self._cooldowns.get(provider, 0)
+        return time.monotonic() < cooldown_until
+
+    def _mark_failed(self, provider: LLMProvider) -> None:
+        """Put a provider in cooldown after failure."""
+        self._cooldowns[provider] = time.monotonic() + PROVIDER_COOLDOWN_SECONDS
+        logger.warning("llm_provider_cooldown", provider=provider.value, seconds=PROVIDER_COOLDOWN_SECONDS)
+
+    def _mark_success(self, provider: LLMProvider) -> None:
+        """Clear cooldown on success."""
+        self._cooldowns.pop(provider, None)
+
     def _get_fallback_order(self, preferred: LLMProvider) -> list[LLMProvider]:
-        """Build fallback chain starting with the preferred provider."""
-        order = [preferred]
-        for p in LLMProvider:
-            if p != preferred and self._providers[p].is_available():
-                order.append(p)
-        return order
+        """Build fallback chain, deprioritizing cooled-down providers."""
+        available = []
+        cooled_down = []
+        for p in [preferred] + [x for x in LLMProvider if x != preferred]:
+            if not self._providers[p].is_available():
+                continue
+            if p in available or p in cooled_down:
+                continue
+            if self._is_in_cooldown(p):
+                cooled_down.append(p)
+            else:
+                available.append(p)
+        # Try non-cooled-down first, then cooled-down as last resort
+        return available + cooled_down
 
     def select_model(
         self,
@@ -80,6 +109,7 @@ class LLMRouter:
                     system_prompt=request.system_prompt,
                     tools=request.tools,
                 )
+                self._mark_success(p)
                 if p != provider:
                     logger.warning("llm_fallback_used", original=provider, fallback=p)
                 logger.info(
@@ -92,6 +122,7 @@ class LLMRouter:
                 return response
             except Exception as exc:
                 last_error = exc
+                self._mark_failed(p)
                 logger.error("llm_provider_failed", provider=p, error=str(exc))
 
         raise RuntimeError(f"All LLM providers failed. Last error: {last_error}")

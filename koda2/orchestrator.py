@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import json
 from collections.abc import Callable
@@ -72,6 +73,18 @@ MAX_TOOL_ITERATIONS = 15
 
 # If the first LLM response has more than this many tool calls, offload to background agent
 AGENT_AUTO_THRESHOLD = 4
+
+# Context window guard — rough token estimate (1 token ≈ 4 chars)
+# Keep total context under this to avoid overflow errors
+CONTEXT_MAX_TOKENS = 100_000
+CONTEXT_HISTORY_SHARE = 0.4  # max 40% of context for history
+CHARS_PER_TOKEN = 4
+
+# WhatsApp/Telegram message chunk limit
+MESSAGE_CHUNK_LIMIT = 4000
+
+# Inbound message debounce — batch rapid-fire messages (seconds)
+DEBOUNCE_SECONDS = 1.5
 
 # Workspace directory for personality/tool files
 _WORKSPACE_DIR = Path("workspace")
@@ -147,6 +160,10 @@ class Orchestrator:
         self.whatsapp.set_command_parser(self.command_parser)
         self.whatsapp.set_message_handler(self.process_message)
 
+        # Inbound message debounce — batch rapid-fire messages per user
+        self._debounce_buffers: dict[str, list[str]] = {}
+        self._debounce_tasks: dict[str, asyncio.Task] = {}
+
     def _get_system_prompt(self) -> str:
         """Generate the full system prompt from workspace files + date/time context."""
         soul = _load_workspace_file("SOUL.md")
@@ -159,6 +176,53 @@ class Orchestrator:
         if self._settings.user_name:
             base += f"\nUser: {self._settings.user_name}"
         return base
+
+    @staticmethod
+    def _chunk_message(text: str, limit: int = MESSAGE_CHUNK_LIMIT) -> list[str]:
+        """Split a long message into chunks at paragraph boundaries.
+
+        Inspired by OpenClaw's chunk.ts — respects markdown fences and
+        prefers splitting on blank lines so messages stay readable.
+        """
+        if not text or len(text) <= limit:
+            return [text] if text else []
+
+        chunks: list[str] = []
+        paragraphs = text.split("\n\n")
+        current = ""
+
+        for para in paragraphs:
+            candidate = f"{current}\n\n{para}" if current else para
+            if len(candidate) <= limit:
+                current = candidate
+            else:
+                if current:
+                    chunks.append(current.strip())
+                # If single paragraph exceeds limit, hard-split it
+                if len(para) > limit:
+                    while para:
+                        chunks.append(para[:limit].strip())
+                        para = para[limit:]
+                    current = ""
+                else:
+                    current = para
+
+        if current.strip():
+            chunks.append(current.strip())
+
+        return chunks if chunks else [text]
+
+    async def _send_chunked(self, user_id: str, text: str, channel: str) -> None:
+        """Send a response, splitting into chunks if it exceeds the platform limit."""
+        chunks = self._chunk_message(text)
+        for chunk in chunks:
+            try:
+                if channel == "whatsapp" and self.whatsapp.is_configured:
+                    await self.whatsapp.send_message(user_id, chunk)
+                elif channel == "telegram" and self.telegram.is_configured:
+                    await self.telegram.send_message(user_id, chunk)
+            except Exception as exc:
+                logger.error("send_chunked_failed", channel=channel, error=str(exc))
 
     async def _send_typing(self, user_id: str, channel: str) -> None:
         """Send typing indicator on the originating channel (best-effort)."""
@@ -196,18 +260,28 @@ class Orchestrator:
         # Send typing indicator on the originating channel
         await self._send_typing(user_id, channel)
 
-        # Build context
+        # Build context with token-aware pruning (inspired by OpenClaw context-window-guard)
         context = self.memory.recall(message, user_id=user_id, n=3)
         context_str = "\n".join(f"- {c['content']}" for c in context) if context else ""
-
-        recent = await self.memory.get_recent_conversations(user_id, limit=10)
-        history_messages: list[ChatMessage] = [
-            ChatMessage(role=c.role, content=c.content) for c in recent[-8:]
-        ]
 
         system = self._get_system_prompt()
         if context_str:
             system += f"\n\nRelevant memory:\n{context_str}"
+
+        # Estimate system prompt tokens
+        system_tokens = len(system) // CHARS_PER_TOKEN
+        history_budget = int((CONTEXT_MAX_TOKENS - system_tokens) * CONTEXT_HISTORY_SHARE)
+
+        # Load recent conversations and prune to fit budget
+        recent = await self.memory.get_recent_conversations(user_id, limit=20)
+        history_messages: list[ChatMessage] = []
+        history_tokens = 0
+        for c in reversed(recent):
+            msg_tokens = len(c.content) // CHARS_PER_TOKEN
+            if history_tokens + msg_tokens > history_budget:
+                break
+            history_messages.insert(0, ChatMessage(role=c.role, content=c.content))
+            history_tokens += msg_tokens
 
         history_messages.append(ChatMessage(role="user", content=message))
 
@@ -1542,7 +1616,7 @@ class Orchestrator:
                 logger.info("orchestrator_sending_whatsapp_reply_with_analysis", 
                           to=user_id, response_preview=response[:100])
                 print(f"[Koda2] Sending analysis reply: {response[:100]}...")
-                await self.whatsapp.send_message(user_id, response)
+                await self._send_chunked(user_id, response, "whatsapp")
                 return response
             
             return result.get("response") if result else None
@@ -1559,6 +1633,42 @@ class Orchestrator:
             return None
 
         user_id = parsed.get("from", "whatsapp_user")
+
+        # Commands bypass debounce — process immediately
+        if text.startswith("/"):
+            return await self._process_whatsapp_text(user_id, text)
+
+        # Debounce: buffer rapid-fire messages and process as one
+        # Inspired by OpenClaw's inbound-debounce.ts
+        if user_id not in self._debounce_buffers:
+            self._debounce_buffers[user_id] = []
+        self._debounce_buffers[user_id].append(text)
+
+        # Cancel any pending debounce task for this user
+        existing_task = self._debounce_tasks.get(user_id)
+        if existing_task and not existing_task.done():
+            existing_task.cancel()
+
+        # Show typing immediately so user knows we're working
+        await self.whatsapp.send_typing(user_id)
+
+        # Schedule processing after debounce delay
+        async def _debounced_process():
+            await asyncio.sleep(DEBOUNCE_SECONDS)
+            messages = self._debounce_buffers.pop(user_id, [])
+            self._debounce_tasks.pop(user_id, None)
+            if not messages:
+                return
+            combined = "\n".join(messages) if len(messages) > 1 else messages[0]
+            if len(messages) > 1:
+                logger.info("debounce_batched", user_id=user_id, count=len(messages))
+            await self._process_whatsapp_text(user_id, combined)
+
+        self._debounce_tasks[user_id] = asyncio.create_task(_debounced_process())
+        return None  # Response is sent asynchronously after debounce
+
+    async def _process_whatsapp_text(self, user_id: str, text: str) -> Optional[str]:
+        """Process a WhatsApp text message (after debounce) and send the reply."""
         logger.info("orchestrator_processing_whatsapp_message", user_id=user_id, text_preview=text[:100])
         print(f"[Koda2] Processing message from {user_id}: {text[:50]}...")
 
@@ -1575,7 +1685,7 @@ class Orchestrator:
         if response:
             logger.info("orchestrator_sending_whatsapp_reply", to=user_id, response_preview=response[:100])
             print(f"[Koda2] Sending reply: {response[:100]}...")
-            await self.whatsapp.send_message(user_id, response)
+            await self._send_chunked(user_id, response, "whatsapp")
         else:
             logger.warning("orchestrator_no_response_for_whatsapp_message")
             print("[Koda2] No response generated for message")

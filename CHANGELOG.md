@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Webhooks** — `POST /api/webhook/{hook_id}` receives external triggers (GitHub, Stripe, etc.), stores as memory, optionally processes through agent and notifies via WhatsApp/Telegram
 - **Browser control** — `BrowserService` with Playwright/Chrome CDP: `browse_url` (navigate + extract text), `browser_action` (click, type, scroll, screenshot, evaluate JS). LLM can now browse the web.
 - **`koda2 doctor`** — CLI health check command that validates environment, dependencies, database, LLM providers, messaging, workspace files, and security configuration
+- **Context window guard** — token-aware history pruning: estimates token count per message, keeps history within 40% of context budget, loads up to 20 recent messages but only keeps what fits
+- **Response chunking** — long responses are split at paragraph boundaries before sending to WhatsApp/Telegram (max 4000 chars per chunk), preserving readability
+- **LLM provider cooldown** — failed providers get 60-second cooldown, deprioritized in fallback chain, auto-cleared on success
+- **Inbound message debounce** — rapid-fire WhatsApp messages are batched (1.5s window) and processed as one combined message, commands bypass debounce
+- **Email account labels in dashboard** — each email shows a color-coded account tag (Gmail=red, Exchange=amber, IMAP=blue, Office365=purple) with summary line
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:
