@@ -59,7 +59,8 @@ class WhatsAppBot:
         if not self._command_parser:
             # Fallback to natural language only
             if self._message_handler:
-                return await self._message_handler(user_id=user_id, text=text, platform="whatsapp")
+                result = await self._message_handler(user_id, text, channel="whatsapp")
+                return result.get("response", "") if isinstance(result, dict) else str(result)
             return "Command parser not configured"
 
         # Check for active wizard first (multi-step conversations)
@@ -82,7 +83,8 @@ class WhatsAppBot:
         
         # Not a command or command not found - treat as natural language
         if self._message_handler:
-            return await self._message_handler(user_id=user_id, text=text, platform="whatsapp")
+            result = await self._message_handler(user_id, text, channel="whatsapp")
+            return result.get("response", "") if isinstance(result, dict) else str(result)
         
         return "I understand: " + text[:100]
 
