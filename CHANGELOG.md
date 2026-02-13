@@ -47,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **LLM provider cooldown** — failed providers get 60-second cooldown, deprioritized in fallback chain, auto-cleared on success
 - **Inbound message debounce** — rapid-fire WhatsApp messages are batched (1.5s window) and processed as one combined message, commands bypass debounce
 - **Email account labels in dashboard** — each email shows a color-coded account tag (Gmail=red, Exchange=amber, IMAP=blue, Office365=purple) with summary line
+- **Self-Healing Supervisor** (`koda2/supervisor/`):
+  - `safety.py` — git stash/pop backup+rollback, max 3 repair attempts per crash, max 5 restarts/10min, audit log (`data/supervisor/audit_log.jsonl`), safe patch workflow (backup→patch→test→commit or rollback)
+  - `monitor.py` — spawns koda2 as subprocess, captures stderr, periodic health checks, auto-restart with rate limiting, crash callback triggers repair
+  - `repair.py` — extracts crash info from traceback, reads source context, sends to Claude via OpenRouter, applies minimal fix, confidence filter (skips low-confidence)
+  - `evolution.py` — plans improvements from natural language, reads project structure, generates file create/modify ops, tests+commits or rollbacks
+  - `cli.py` — `koda2-supervisor run|repair|improve|status` commands
+  - `/improve` WhatsApp command — request self-improvement from chat
 
 ### Changed
 - **BREAKING:** `process_message` response format changed:
