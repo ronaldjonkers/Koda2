@@ -58,8 +58,7 @@ class EWSCalendarProvider(BaseCalendarProvider):
         password: str,
         email: str,
     ) -> None:
-        from koda2.modules.account.validators import _normalize_ews_server
-        self._server = _normalize_ews_server(server)
+        self._server = self._normalize_server(server)
         self._username = username
         self._password = password
         self._email = email
@@ -67,6 +66,73 @@ class EWSCalendarProvider(BaseCalendarProvider):
         self._headers = {"Content-Type": "text/xml; charset=utf-8"}
         self._auth = None  # Lazy init
         self._verified = False  # Whether we've verified the server works
+
+    @staticmethod
+    def _normalize_server(server: str) -> str:
+        """Strip protocol, path, and port from server string."""
+        s = server.strip()
+        for prefix in ("https://", "http://"):
+            if s.lower().startswith(prefix):
+                s = s[len(prefix):]
+                break
+        s = s.split("/")[0]
+        s = s.split(":")[0]
+        return s
+
+    @staticmethod
+    def _discover_servers(server: str, email: str) -> list[str]:
+        """Discover candidate EWS servers via DNS SRV and MX records."""
+        import subprocess
+        candidates = [server]
+        domain = email.split("@")[-1] if "@" in email else ""
+        if not domain:
+            return candidates
+
+        # Try SRV record: _autodiscover._tcp.<domain>
+        try:
+            result = subprocess.run(
+                ["dig", "+short", "SRV", f"_autodiscover._tcp.{domain}"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 4:
+                    host = parts[3].rstrip(".")
+                    if host and host not in candidates:
+                        # Derive exchange hostname from autodiscover host
+                        # e.g. autodiscover.cmdz.com -> exchange.cmdz.com
+                        host_parts = host.split(".", 1)
+                        if len(host_parts) == 2:
+                            exchange_host = f"exchange.{host_parts[1]}"
+                            if exchange_host not in candidates:
+                                candidates.append(exchange_host)
+                                logger.info("ews_srv_autodiscover", host=exchange_host)
+                        if host not in candidates:
+                            candidates.append(host)
+        except Exception:
+            pass
+
+        # Try MX records for the domain
+        try:
+            result = subprocess.run(
+                ["dig", "+short", "MX", domain],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.strip().splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    mx_host = parts[1].rstrip(".")
+                    # Derive exchange hostname from MX
+                    mx_parts = mx_host.split(".", 1)
+                    if len(mx_parts) == 2:
+                        exchange_host = f"exchange.{mx_parts[1]}"
+                        if exchange_host not in candidates:
+                            candidates.append(exchange_host)
+                            logger.info("ews_mx_autodiscover", host=exchange_host)
+        except Exception:
+            pass
+
+        return candidates
 
     def _get_auth(self):
         """Get httpx-ntlm auth, building DOMAIN\\user variants."""
@@ -122,8 +188,7 @@ class EWSCalendarProvider(BaseCalendarProvider):
 
         # Server didn't work — try autodiscover
         logger.info("ews_autodiscovering", original_server=self._server, email=self._email)
-        from koda2.modules.account.validators import _discover_ews_servers
-        candidates = _discover_ews_servers(self._server, self._email)
+        candidates = self._discover_servers(self._server, self._email)
 
         for srv in candidates:
             if srv == self._server:

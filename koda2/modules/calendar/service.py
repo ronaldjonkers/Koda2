@@ -107,7 +107,15 @@ class CalendarService:
                 logger.error("unsupported_calendar_provider", provider=provider_type)
                 return None
         except Exception as exc:
-            logger.error("failed_to_create_provider", account_id=account.id, account_name=account.name, provider=account.provider, error=str(exc))
+            import traceback
+            logger.error(
+                "failed_to_create_provider",
+                account_id=account.id,
+                account_name=account.name,
+                provider=account.provider,
+                error=f"{type(exc).__name__}: {exc}",
+                traceback=traceback.format_exc(),
+            )
             return None
 
     async def get_accounts(self, active_only: bool = True) -> list:
