@@ -895,9 +895,9 @@ class Orchestrator:
 
         # Show typing indicator while AI is thinking
         await self.whatsapp.send_typing(user_id)
-        
-        result = await self.process_message(user_id, text, channel="whatsapp")
-        response = result.get("response", "")
+
+        # Route through command parser first (handles /help, /meet, /accounts, wizards, etc.)
+        response = await self.whatsapp.handle_message(user_id, text)
 
         # Clean response - remove any JSON artifacts before sending
         response = self._clean_response_for_user(response)

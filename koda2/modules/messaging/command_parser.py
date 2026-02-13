@@ -164,6 +164,7 @@ class CommandParser:
                 args=parsed.args,
                 command=parsed.command,
                 platform=parsed.platform,
+                parser=self,
                 **kwargs,
             )
             return True, response
