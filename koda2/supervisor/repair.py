@@ -14,17 +14,14 @@ import traceback
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
-
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
 from koda2.supervisor.safety import SafetyGuard
+from koda2.supervisor.model_router import call_llm as _routed_llm_call
 
 logger = get_logger(__name__)
 
-# OpenRouter endpoint for Claude
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-REPAIR_MODEL = "anthropic/claude-sonnet-4-20250514"
+REPAIR_MODEL = "anthropic/claude-sonnet-4-20250514"  # kept for test compatibility
 MAX_SOURCE_LINES = 100  # max lines of source context to send
 
 
@@ -36,14 +33,6 @@ class RepairEngine:
         self._root = project_root or Path(__file__).parent.parent.parent
         self._settings = get_settings()
 
-    def _get_api_key(self) -> str:
-        """Get OpenRouter API key for LLM access."""
-        key = self._settings.openrouter_api_key
-        if not key:
-            key = self._settings.openai_api_key
-        if not key:
-            raise RuntimeError("No API key available for self-repair (need OPENROUTER_API_KEY or OPENAI_API_KEY)")
-        return key
 
     def _extract_crash_info(self, stderr: str) -> dict[str, Any]:
         """Extract structured crash information from stderr output."""
@@ -117,38 +106,12 @@ class RepairEngine:
         except Exception:
             return ""
 
-    async def _call_llm(self, system: str, user: str) -> str:
-        """Call the LLM via OpenRouter."""
-        api_key = self._get_api_key()
-
-        # Determine endpoint based on key type
-        if api_key.startswith("sk-or-"):
-            url = OPENROUTER_URL
-            model = REPAIR_MODEL
-        else:
-            url = "https://api.openai.com/v1/chat/completions"
-            model = "gpt-4o"
-
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.2,
-                    "max_tokens": 8000,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+    async def _call_llm(self, system: str, user: str, task_type: str = "repair") -> str:
+        """Call the LLM via the smart model router."""
+        return await _routed_llm_call(
+            system, user, task_type=task_type,
+            temperature=0.2, max_tokens=8000, timeout=60,
+        )
 
     async def analyze_crash(self, stderr: str) -> dict[str, Any]:
         """Analyze a crash and propose a fix.

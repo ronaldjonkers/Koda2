@@ -139,6 +139,26 @@ class SafetyGuard:
             logger.error("git_reset_hard_failed", error=str(exc))
             return False
 
+    # ── Restart Signal ─────────────────────────────────────────────────
+
+    def request_restart(self, reason: str = "code updated") -> None:
+        """Signal that the Koda2 process should be restarted.
+
+        The ProcessMonitor checks for this signal and gracefully restarts.
+        """
+        restart_file = AUDIT_LOG_DIR / "restart_requested"
+        restart_file.write_text(reason)
+        self.audit("restart_requested", {"reason": reason})
+
+    def check_restart_requested(self) -> str:
+        """Check if a restart has been requested. Returns reason or empty string."""
+        restart_file = AUDIT_LOG_DIR / "restart_requested"
+        if restart_file.exists():
+            reason = restart_file.read_text().strip()
+            restart_file.unlink(missing_ok=True)
+            return reason
+        return ""
+
     # ── Retry Limits ──────────────────────────────────────────────────
 
     def crash_signature(self, error: str) -> str:

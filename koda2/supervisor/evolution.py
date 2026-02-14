@@ -13,16 +13,13 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-import httpx
-
 from koda2.config import get_settings
 from koda2.logging_config import get_logger
 from koda2.supervisor.safety import SafetyGuard
+from koda2.supervisor.model_router import call_llm as _routed_llm_call
 
 logger = get_logger(__name__)
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-EVOLUTION_MODEL_FALLBACK = "anthropic/claude-3.5-sonnet"
 MAX_SELF_CORRECTION_ATTEMPTS = 3
 
 
@@ -34,49 +31,15 @@ class EvolutionEngine:
         self._root = project_root or Path(__file__).parent.parent.parent
         self._settings = get_settings()
 
-    def _get_api_key(self) -> str:
-        """Get API key for LLM access."""
-        key = self._settings.openrouter_api_key
-        if not key:
-            key = self._settings.openai_api_key
-        if not key:
-            raise RuntimeError("No API key for evolution engine")
-        return key
+    async def _call_llm(self, system: str, user: str, task_type: str = "code_generation") -> str:
+        """Call the LLM via the smart model router.
 
-    async def _call_llm(self, system: str, user: str) -> str:
-        """Call the LLM via OpenRouter or OpenAI."""
-        api_key = self._get_api_key()
-
-        if api_key.startswith("sk-or-"):
-            url = OPENROUTER_URL
-            model = self._settings.openrouter_model or EVOLUTION_MODEL_FALLBACK
-        else:
-            url = "https://api.openai.com/v1/chat/completions"
-            model = "gpt-4o"
-
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "messages": [
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": user},
-                    ],
-                    "temperature": 0.3,
-                    "max_tokens": 16000,
-                },
-            )
-            if resp.status_code != 200:
-                body = resp.text[:500]
-                logger.error("llm_call_failed", status=resp.status_code, body=body, model=model)
-                resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+        Args:
+            system: System prompt
+            user: User prompt
+            task_type: Task complexity hint (see model_router.TASK_COMPLEXITY_MAP)
+        """
+        return await _routed_llm_call(system, user, task_type=task_type)
 
     def _get_project_structure(self) -> str:
         """Get a summary of the project structure for context."""
@@ -237,9 +200,13 @@ Plan the minimal changes needed. Return JSON only."""
                 passed, test_output = self._safety.run_tests()
 
                 if passed:
-                    commit_msg = f"feat(evolution): {current_plan['summary'][:80]}"
+                    # Generate detailed commit message (cheap model)
+                    commit_msg = await self._generate_commit_message(current_plan, messages)
+                    # Update CHANGELOG.md with this improvement
+                    self._update_changelog(current_plan, messages)
                     self._safety.git_commit(commit_msg)
                     self._safety.git_push()
+                    self._safety.request_restart(f"evolution: {current_plan['summary'][:60]}")
                     self._safety.audit("evolution_success", {
                         "summary": current_plan["summary"],
                         "attempt": attempt,
@@ -336,7 +303,7 @@ RESPONSE FORMAT (JSON):
 Fix the plan so tests pass. Return JSON only."""
 
         try:
-            response = await self._call_llm(system_prompt, user_prompt)
+            response = await self._call_llm(system_prompt, user_prompt, task_type="self_correction")
             revised = self._parse_json_response(response)
             self._safety.audit("revise_plan_done", {
                 "changes": len(revised.get("changes", [])),
@@ -347,6 +314,72 @@ Fix the plan so tests pass. Return JSON only."""
             logger.error("revise_plan_failed", error=str(exc))
             self._safety.audit("revise_plan_failed", {"error": str(exc)})
             return {}
+
+    async def _generate_commit_message(
+        self, plan: dict[str, Any], changes_applied: list[str],
+    ) -> str:
+        """Generate a detailed, informative commit message using a cheap model."""
+        system = """Generate a git commit message for this code change.
+Format:
+- First line: type(scope): short summary (max 72 chars)
+- Blank line
+- Body: detailed description of WHAT changed and WHY
+- List each file changed and what was done
+- End with "Automated by: Koda2 Self-Improving Supervisor"
+
+Types: feat, fix, refactor, docs, chore
+Return ONLY the commit message text, no JSON."""
+
+        user = f"""Summary: {plan.get('summary', 'Improvement')}
+Risk: {plan.get('risk', 'unknown')}
+Changes applied: {'; '.join(changes_applied)}
+Change details: {json.dumps(plan.get('changes', [])[:5], default=str)[:2000]}"""
+
+        try:
+            msg = await self._call_llm(system, user, task_type="commit_message")
+            # Clean up: remove markdown fences if present
+            msg = msg.strip().strip('`').strip()
+            if msg.startswith("```"):
+                msg = "\n".join(msg.split("\n")[1:])
+            if msg.endswith("```"):
+                msg = msg[:-3].strip()
+            return msg
+        except Exception as exc:
+            logger.warning("commit_message_generation_failed", error=str(exc))
+            return f"feat(evolution): {plan.get('summary', 'Improvement')[:72]}"
+
+    def _update_changelog(self, plan: dict[str, Any], changes_applied: list[str]) -> None:
+        """Append an entry to CHANGELOG.md for this improvement."""
+        changelog_path = self._root / "CHANGELOG.md"
+        if not changelog_path.exists():
+            return
+
+        try:
+            import datetime as dt
+            today = dt.date.today().isoformat()
+            summary = plan.get("summary", "Improvement")
+            risk = plan.get("risk", "unknown")
+
+            entry_lines = [
+                f"\n### Auto-improvement ({today})",
+                f"- **{summary}** (risk: {risk})",
+            ]
+            for change in changes_applied:
+                entry_lines.append(f"  - {change}")
+            entry_lines.append("")
+
+            content = changelog_path.read_text()
+            # Insert after the first ## heading
+            marker = "\n## "
+            idx = content.find(marker, content.find(marker) + 1)
+            if idx == -1:
+                idx = len(content)
+
+            new_content = content[:idx] + "\n".join(entry_lines) + "\n" + content[idx:]
+            changelog_path.write_text(new_content)
+            logger.info("changelog_updated", summary=summary[:80])
+        except Exception as exc:
+            logger.warning("changelog_update_failed", error=str(exc))
 
     async def analyze_error_patterns(self) -> list[dict[str, Any]]:
         """Analyze the audit log for recurring error patterns.
@@ -413,7 +446,7 @@ RESPONSE FORMAT (JSON):
         user_prompt = f"User feedback: {feedback}"
 
         try:
-            response = await self._call_llm(system_prompt, user_prompt)
+            response = await self._call_llm(system_prompt, user_prompt, task_type="classify_feedback")
             return self._parse_json_response(response)
         except Exception as exc:
             logger.error("feedback_analysis_failed", error=str(exc))

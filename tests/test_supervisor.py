@@ -546,3 +546,111 @@ class TestImprovementQueue:
             nxt = q._next_pending()
             assert nxt is not None
             assert "High priority" in nxt["request"]
+
+
+# ── Model Router Tests ───────────────────────────────────────────────
+
+class TestModelRouter:
+    """Tests for the smart model routing system."""
+
+    def test_task_complexity_mapping(self) -> None:
+        from koda2.supervisor.model_router import get_complexity, TaskComplexity
+        assert get_complexity("signal_analysis") == TaskComplexity.LIGHT
+        assert get_complexity("classify_feedback") == TaskComplexity.LIGHT
+        assert get_complexity("crash_analysis") == TaskComplexity.MEDIUM
+        assert get_complexity("code_generation") == TaskComplexity.HEAVY
+        assert get_complexity("repair") == TaskComplexity.HEAVY
+        # Unknown defaults to MEDIUM
+        assert get_complexity("unknown_task") == TaskComplexity.MEDIUM
+
+    def test_select_model_openrouter(self) -> None:
+        from koda2.supervisor.model_router import select_model, TaskComplexity
+        with patch("koda2.supervisor.model_router.get_settings") as mock:
+            mock.return_value = MagicMock(
+                openrouter_api_key="sk-or-test123",
+                openai_api_key="",
+            )
+            url, model, complexity = select_model("signal_analysis")
+            assert "openrouter" in url
+            assert complexity == TaskComplexity.LIGHT
+
+            url, model, complexity = select_model("code_generation")
+            assert complexity == TaskComplexity.HEAVY
+            assert "claude" in model or "anthropic" in model
+
+    def test_select_model_openai_fallback(self) -> None:
+        from koda2.supervisor.model_router import select_model, TaskComplexity
+        with patch("koda2.supervisor.model_router.get_settings") as mock:
+            mock.return_value = MagicMock(
+                openrouter_api_key="",
+                openai_api_key="sk-test123",
+            )
+            url, model, complexity = select_model("code_generation")
+            assert "openai" in url
+            assert model == "gpt-4o"
+            assert complexity == TaskComplexity.HEAVY
+
+            url, model, complexity = select_model("signal_analysis")
+            assert model == "gpt-4o-mini"
+            assert complexity == TaskComplexity.LIGHT
+
+    def test_model_tiers_all_have_entries(self) -> None:
+        from koda2.supervisor.model_router import MODEL_TIERS, TaskComplexity
+        for complexity in TaskComplexity:
+            assert len(MODEL_TIERS[complexity]) > 0
+
+
+# ── Restart Signal Tests ─────────────────────────────────────────────
+
+class TestRestartSignal:
+    """Tests for the process restart signaling."""
+
+    def test_request_restart(self, tmp_path) -> None:
+        with patch("koda2.supervisor.safety.AUDIT_LOG_DIR", tmp_path), \
+             patch("koda2.supervisor.safety.AUDIT_LOG_FILE", tmp_path / "audit.jsonl"):
+            guard = SafetyGuard()
+            guard.request_restart("code updated")
+            assert (tmp_path / "restart_requested").exists()
+            assert "code updated" in (tmp_path / "restart_requested").read_text()
+
+    def test_check_restart_requested(self, tmp_path) -> None:
+        with patch("koda2.supervisor.safety.AUDIT_LOG_DIR", tmp_path), \
+             patch("koda2.supervisor.safety.AUDIT_LOG_FILE", tmp_path / "audit.jsonl"):
+            guard = SafetyGuard()
+            # No restart requested
+            assert guard.check_restart_requested() == ""
+            # Request one
+            guard.request_restart("new feature")
+            reason = guard.check_restart_requested()
+            assert reason == "new feature"
+            # Should be consumed
+            assert guard.check_restart_requested() == ""
+
+
+# ── Changelog Update Tests ───────────────────────────────────────────
+
+class TestChangelogUpdate:
+    """Tests for automatic CHANGELOG.md updates."""
+
+    def test_update_changelog(self, tmp_path) -> None:
+        from koda2.supervisor.evolution import EvolutionEngine
+        safety = SafetyGuard()
+        engine = EvolutionEngine(safety, project_root=tmp_path)
+        changelog = tmp_path / "CHANGELOG.md"
+        changelog.write_text("# Changelog\n\n## [0.5.0] - 2026-02-14\n\n### Added\n- Feature X\n")
+
+        engine._update_changelog(
+            {"summary": "Better error handling", "risk": "low"},
+            ["Modified koda2/orchestrator.py"],
+        )
+
+        content = changelog.read_text()
+        assert "Better error handling" in content
+        assert "Modified koda2/orchestrator.py" in content
+
+    def test_update_changelog_missing_file(self, tmp_path) -> None:
+        from koda2.supervisor.evolution import EvolutionEngine
+        safety = SafetyGuard()
+        engine = EvolutionEngine(safety, project_root=tmp_path)
+        # Should not raise when CHANGELOG.md doesn't exist
+        engine._update_changelog({"summary": "test"}, [])

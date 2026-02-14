@@ -170,6 +170,14 @@ class ProcessMonitor:
 
             # Monitor loop
             while self._running and self.is_running:
+                # Check if a code update requested a restart
+                restart_reason = self._safety.check_restart_requested()
+                if restart_reason:
+                    logger.info("restart_signal_received", reason=restart_reason)
+                    self._safety.audit("graceful_restart", {"reason": restart_reason})
+                    self.stop_process()
+                    break  # Will restart in the outer while loop
+
                 # Periodic health check
                 healthy = await self._health_check()
                 if not healthy and self.uptime > STARTUP_GRACE_PERIOD:

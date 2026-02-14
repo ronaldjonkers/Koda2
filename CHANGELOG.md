@@ -5,6 +5,31 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-02-14
+
+### Added
+- **Smart Model Router** (`koda2/supervisor/model_router.py`):
+  - Picks the optimal LLM model per task complexity via OpenRouter
+  - LIGHT (free/cheap): signal analysis, feedback classification, commit messages, docs
+  - MEDIUM: error analysis, crash analysis, plan revision
+  - HEAVY (Claude Sonnet 4): code generation, self-correction, repair, architecture
+  - Falls back to OpenAI `gpt-4o-mini`/`gpt-4o` when not using OpenRouter
+  - Logs model selection and token usage per call
+- **Auto-restart after code changes**:
+  - `SafetyGuard.request_restart()` / `check_restart_requested()` — file-based restart signal
+  - `ProcessMonitor` checks for restart signal every health-check cycle
+  - After successful evolution commit+push, the assistant process is gracefully restarted
+- **Detailed commit messages**: LLM-generated multi-line commit messages with file-level descriptions
+- **Auto CHANGELOG updates**: Every self-improvement appends to `CHANGELOG.md` before committing
+
+### Changed
+- `evolution.py` — replaced hardcoded LLM calls with smart model router
+- `repair.py` — replaced hardcoded LLM calls with smart model router
+- `learner.py` — signal analysis now uses cheap models, code generation uses top-tier
+
+### Tests
+- 348 tests pass (8 new: model router, restart signal, changelog updates)
+
 ## [0.5.0] - 2026-02-14
 
 ### Added

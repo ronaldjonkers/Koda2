@@ -306,7 +306,7 @@ If there's nothing meaningful to improve, return {"analysis": "...", "proposals"
 Analyze these signals and propose concrete improvements. Return JSON only."""
 
         try:
-            response = await engine._call_llm(system_prompt, user_prompt)
+            response = await engine._call_llm(system_prompt, user_prompt, task_type="signal_analysis")
             return engine._parse_json_response(response).get("proposals", [])
         except Exception as exc:
             logger.error("signal_analysis_failed", error=str(exc))
