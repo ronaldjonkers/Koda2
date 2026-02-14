@@ -352,7 +352,7 @@ class TestExecuteAction:
     @pytest.mark.asyncio
     async def test_read_email(self, orchestrator) -> None:
         """read_email fetches emails."""
-        orchestrator.email.fetch_emails = AsyncMock(return_value=[])
+        orchestrator.email.fetch_all_emails = AsyncMock(return_value=[])
         result = await orchestrator._execute_action(
             "user1", {"action": "read_email", "params": {"unread_only": True, "limit": 5}}, {},
         )

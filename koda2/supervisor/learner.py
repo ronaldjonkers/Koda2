@@ -217,6 +217,23 @@ class ContinuousLearner:
 
         return signals
 
+    def _gather_runtime_error_signals(self) -> list[dict[str, Any]]:
+        """Read runtime tool execution errors captured by the error collector."""
+        signals = []
+        try:
+            from koda2.supervisor.error_collector import get_error_summary
+            summary = get_error_summary()
+            if summary["total"] > 0:
+                signals.append({
+                    "type": "runtime_errors",
+                    "total": summary["total"],
+                    "by_tool": summary["by_tool"],
+                    "top_errors": summary["top_errors"],
+                })
+        except Exception as exc:
+            logger.warning("gather_runtime_errors_failed", error=str(exc))
+        return signals
+
     # ── LLM Analysis ──────────────────────────────────────────────────
 
     async def _analyze_signals(self, signals: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -225,16 +242,27 @@ class ContinuousLearner:
 
         engine = EvolutionEngine(self._safety, self._root)
 
-        system_prompt = """You are the autonomous improvement brain of Koda2, an AI executive assistant.
-You analyze signals from conversations, logs, and errors to propose concrete code improvements.
+        system_prompt = """You are the autonomous improvement brain of Koda2, an AI executive assistant
+designed to help entrepreneurs and company founders run their business solo.
+
+You analyze signals from multiple sources to propose concrete code improvements:
+- **Conversations**: Look for user frustration, confusion, repeated requests that
+  failed, feature wishes ("kan je ook...", "ik wil dat...", "waarom werkt X niet"),
+  and behavioral complaints ("je antwoord was fout", "dat klopt niet").
+- **Runtime errors**: Tool execution failures that users experienced.
+- **Audit logs**: Crashes, failed repairs, system errors.
+- **App logs**: Warnings, exceptions, recurring error patterns.
 
 RULES:
-1. Focus on HIGH-IMPACT improvements that users will notice.
-2. Prioritize: bug fixes > user complaints > feature requests > code quality.
+1. Focus on HIGH-IMPACT improvements that users will notice immediately.
+2. Prioritize: bug fixes > user complaints > runtime errors > feature requests > code quality.
 3. Each proposal must be specific and actionable (not vague).
 4. Max 3 proposals per analysis cycle.
 5. Skip proposals that are too risky or too vague.
 6. Consider what has already been tried and failed (listed below).
+7. For conversation signals: extract the UNDERLYING need, not just the surface complaint.
+   Example: "email werkt niet" → check email service error handling, not UI.
+8. For runtime errors: focus on the most FREQUENT errors first.
 
 RESPONSE FORMAT (JSON):
 {
@@ -582,6 +610,7 @@ Any organizational issues? Return JSON only."""
             signals.extend(await self._gather_conversation_signals())
             signals.extend(self._gather_audit_signals())
             signals.extend(self._gather_log_signals())
+            signals.extend(self._gather_runtime_error_signals())
             summary["signals_gathered"] = len(signals)
 
             if not signals:

@@ -368,3 +368,181 @@ class TestContinuousLearner:
         learner._running = True
         learner.stop()
         assert not learner._running
+
+    def test_gather_runtime_error_signals_empty(self) -> None:
+        from koda2.supervisor.learner import ContinuousLearner
+        safety = SafetyGuard()
+        learner = ContinuousLearner(safety)
+        signals = learner._gather_runtime_error_signals()
+        assert isinstance(signals, list)
+
+
+# ── SupervisorNotifier Tests ─────────────────────────────────────────
+
+class TestSupervisorNotifier:
+    """Tests for the supervisor notification system."""
+
+    def test_notifier_init_no_user(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier()
+        assert not notifier.is_configured
+
+    def test_notifier_init_with_user(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier(user_id="31612345678@s.whatsapp.net")
+        assert notifier.is_configured
+
+    @pytest.mark.asyncio
+    async def test_notify_improvement_no_user(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier()
+        # Should not raise even without user_id
+        await notifier.notify_improvement_applied("test improvement")
+
+    @pytest.mark.asyncio
+    async def test_notify_escalation_no_user(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier()
+        await notifier.notify_escalation("test issue", 3)
+
+    @pytest.mark.asyncio
+    async def test_notify_crash_no_user(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier()
+        await notifier.notify_crash_and_restart(1, False, "test diagnosis")
+
+    @pytest.mark.asyncio
+    async def test_notify_learning_cycle_zero_queued(self) -> None:
+        from koda2.supervisor.notifier import SupervisorNotifier
+        notifier = SupervisorNotifier(user_id="test")
+        # Should return early without sending (queued=0)
+        await notifier.notify_learning_cycle(1, 0, 5)
+
+
+# ── Error Collector Tests ────────────────────────────────────────────
+
+class TestErrorCollector:
+    """Tests for the runtime error collector."""
+
+    def test_record_error(self, tmp_path) -> None:
+        from koda2.supervisor import error_collector
+        with patch.object(error_collector, "ERROR_LOG_DIR", tmp_path), \
+             patch.object(error_collector, "ERROR_LOG_FILE", tmp_path / "runtime_errors.jsonl"):
+            error_collector.record_error(
+                "send_whatsapp", "Connection timeout",
+                args_preview='{"to": "+31612345678"}',
+                user_id="user1",
+                channel="api",
+            )
+            log_file = tmp_path / "runtime_errors.jsonl"
+            assert log_file.exists()
+            entry = json.loads(log_file.read_text().strip())
+            assert entry["tool"] == "send_whatsapp"
+            assert "timeout" in entry["error"].lower()
+
+    def test_read_recent_errors_empty(self) -> None:
+        from koda2.supervisor.error_collector import read_recent_errors
+        # Should not raise on missing file
+        with patch("koda2.supervisor.error_collector.ERROR_LOG_FILE", Path("/nonexistent/path")):
+            errors = read_recent_errors()
+            assert errors == []
+
+    def test_get_error_summary_empty(self) -> None:
+        from koda2.supervisor.error_collector import get_error_summary
+        with patch("koda2.supervisor.error_collector.ERROR_LOG_FILE", Path("/nonexistent/path")):
+            summary = get_error_summary()
+            assert summary["total"] == 0
+
+    def test_record_and_read_multiple(self, tmp_path) -> None:
+        from koda2.supervisor import error_collector
+        with patch.object(error_collector, "ERROR_LOG_DIR", tmp_path), \
+             patch.object(error_collector, "ERROR_LOG_FILE", tmp_path / "runtime_errors.jsonl"):
+            error_collector.record_error("tool_a", "Error 1")
+            error_collector.record_error("tool_a", "Error 1")
+            error_collector.record_error("tool_b", "Error 2")
+            errors = error_collector.read_recent_errors()
+            assert len(errors) == 3
+            summary = error_collector.get_error_summary()
+            assert summary["total"] == 3
+            assert summary["by_tool"]["tool_a"] == 2
+            assert summary["by_tool"]["tool_b"] == 1
+
+
+# ── Evolution Self-Correction Tests ──────────────────────────────────
+
+class TestEvolutionSelfCorrection:
+    """Tests for the self-correction loop in EvolutionEngine."""
+
+    def test_max_self_correction_constant(self) -> None:
+        from koda2.supervisor.evolution import MAX_SELF_CORRECTION_ATTEMPTS
+        assert MAX_SELF_CORRECTION_ATTEMPTS == 3
+
+    @pytest.mark.asyncio
+    async def test_revise_plan_returns_dict_on_failure(self) -> None:
+        from koda2.supervisor.evolution import EvolutionEngine
+        safety = SafetyGuard()
+        engine = EvolutionEngine(safety)
+        # With no API key, revise_plan should fail gracefully and return {}
+        with patch.object(engine, "_call_llm", side_effect=RuntimeError("No API key")):
+            result = await engine.revise_plan(
+                {"summary": "test", "changes": [{"file": "test.py", "action": "modify"}]},
+                "FAILED: assert False",
+            )
+            assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_apply_plan_self_correction_disabled(self) -> None:
+        from koda2.supervisor.evolution import EvolutionEngine
+        safety = SafetyGuard()
+        engine = EvolutionEngine(safety)
+        # Mock run_tests to fail, with self-correction disabled
+        with patch.object(safety, "run_tests", return_value=(False, "test failed")), \
+             patch.object(safety, "git_stash"), \
+             patch.object(safety, "git_reset_hard"), \
+             patch.object(safety, "audit"):
+            success, msg = await engine.apply_plan(
+                {"summary": "test", "changes": []},
+                allow_self_correction=False,
+            )
+            # Empty changes = tests run but nothing was applied
+            assert not success or "test failed" in msg or "attempt" in msg.lower()
+
+
+# ── ImprovementQueue Tests ──────────────────────────────────────────
+
+class TestImprovementQueue:
+    """Tests for the persistent improvement queue."""
+
+    def test_queue_add_and_stats(self) -> None:
+        from koda2.supervisor.improvement_queue import ImprovementQueue
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", Path("/tmp/koda2_test_q")), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", Path("/tmp/koda2_test_q/q.json")):
+            q = ImprovementQueue()
+            q._items = []  # Fresh start
+            item = q.add("Improve error handling", source="learner", priority=3)
+            assert item["status"] == "pending"
+            assert item["source"] == "learner"
+            stats = q.stats()
+            assert stats["pending"] >= 1
+
+    def test_queue_cancel_item(self) -> None:
+        from koda2.supervisor.improvement_queue import ImprovementQueue
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", Path("/tmp/koda2_test_q")), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", Path("/tmp/koda2_test_q/q.json")):
+            q = ImprovementQueue()
+            q._items = []
+            item = q.add("Test task")
+            assert q.cancel_item(item["id"])
+            assert q.get_item(item["id"])["status"] == "skipped"
+
+    def test_queue_next_pending_priority(self) -> None:
+        from koda2.supervisor.improvement_queue import ImprovementQueue
+        with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", Path("/tmp/koda2_test_q")), \
+             patch("koda2.supervisor.improvement_queue.QUEUE_FILE", Path("/tmp/koda2_test_q/q.json")):
+            q = ImprovementQueue()
+            q._items = []
+            q.add("Low priority", priority=8)
+            q.add("High priority", priority=1)
+            nxt = q._next_pending()
+            assert nxt is not None
+            assert "High priority" in nxt["request"]

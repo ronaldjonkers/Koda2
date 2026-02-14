@@ -38,6 +38,7 @@ from koda2.modules.browser import BrowserService
 from koda2.modules.commands import get_registry
 from koda2.modules.video import VideoService
 from koda2.security.audit import log_action
+from koda2.supervisor.error_collector import record_error as _record_runtime_error
 
 logger = get_logger(__name__)
 
@@ -387,6 +388,11 @@ class Orchestrator:
                     result_str = json.dumps({"error": str(exc)}, ensure_ascii=False)
                     action_log.append({"tool": func_name, "status": "error", "error": str(exc)})
                     logger.error("tool_execution_failed", tool=func_name, error=str(exc))
+                    _record_runtime_error(
+                        func_name, str(exc),
+                        args_preview=str(args)[:200],
+                        user_id=user_id, channel=channel,
+                    )
 
                 # Add tool result to conversation so LLM sees it
                 history_messages.append(ChatMessage(
@@ -1450,6 +1456,16 @@ class Orchestrator:
         except Exception as exc:
             logger.error("scheduler_start_failed", error=str(exc))
         
+        # Start improvement queue workers for self-improvement
+        try:
+            from koda2.supervisor.improvement_queue import get_improvement_queue
+            queue = get_improvement_queue()
+            if not queue.is_running:
+                queue.start_worker()
+                logger.info("improvement_queue_workers_started", workers=queue.max_workers)
+        except Exception as exc:
+            logger.warning("improvement_queue_start_failed", error=str(exc))
+
         logger.info("orchestrator_startup_complete")
 
     def _register_scheduled_tasks(self) -> None:

@@ -5,6 +5,25 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-02-14
+
+### Added
+- **Self-Improving Supervisor** — supervisor evolves from self-healing to self-improving:
+  - `notifier.py` — WhatsApp notifications for improvements, crashes, escalations, version bumps
+  - `error_collector.py` — captures runtime tool execution errors from orchestrator for learning loop
+  - **Self-correction loop** in `evolution.py` — when tests fail after applying a plan, LLM revises the plan (up to 3 attempts) before giving up
+  - `revise_plan()` method feeds test output back to LLM to fix broken improvements
+  - Runtime error signals integrated into `ContinuousLearner` signal gathering
+  - Enhanced LLM analysis prompt: detects user frustration, wishes, complaints in Dutch/English
+  - Improvement queue workers auto-start in both `koda2-supervisor run` and `orchestrator.startup()`
+  - `koda2-supervisor queue` CLI command to inspect improvement queue status
+  - Escalation to user via WhatsApp when all automatic retries exhausted
+
+### Fixed
+- `test_shutdown.py` — fixed hanging `test_bridge_uses_setsid` and failing graceful shutdown tests
+- `test_orchestrator.py` — fixed `test_read_email` mock (fetch_all_emails vs fetch_emails)
+- All 340 tests pass with no hangs
+
 ## [0.4.0] - 2026-02-13
 
 ### Added

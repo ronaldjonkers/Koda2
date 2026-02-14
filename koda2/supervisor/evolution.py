@@ -23,6 +23,7 @@ logger = get_logger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 EVOLUTION_MODEL_FALLBACK = "anthropic/claude-3.5-sonnet"
+MAX_SELF_CORRECTION_ATTEMPTS = 3
 
 
 class EvolutionEngine:
@@ -182,67 +183,170 @@ Plan the minimal changes needed. Return JSON only."""
         # Phase 2: Apply (git/files/tests — must be serialized)
         return await self.apply_plan(plan)
 
-    async def apply_plan(self, plan: dict[str, Any]) -> tuple[bool, str]:
+    async def apply_plan(
+        self, plan: dict[str, Any], *, allow_self_correction: bool = True,
+    ) -> tuple[bool, str]:
         """Apply a pre-computed plan: stash → write files → test → commit or rollback.
 
         This method touches git and the filesystem and must NOT run concurrently.
         The ImprovementQueue holds a git lock to enforce this.
-        """
-        self._safety.git_stash("pre-evolution-backup")
 
-        messages: list[str] = []
+        If tests fail and ``allow_self_correction`` is True, the plan is revised
+        using the test output as feedback (up to MAX_SELF_CORRECTION_ATTEMPTS).
+        """
+        current_plan = plan
+
+        for attempt in range(1, MAX_SELF_CORRECTION_ATTEMPTS + 1):
+            self._safety.git_stash("pre-evolution-backup")
+            messages: list[str] = []
+
+            try:
+                # Apply changes
+                for change in current_plan["changes"]:
+                    action = change.get("action", "modify")
+                    file_path = change.get("file", "")
+
+                    if not file_path:
+                        continue
+
+                    full_path = self._root / file_path
+
+                    if action == "create":
+                        full_path.parent.mkdir(parents=True, exist_ok=True)
+                        full_path.write_text(change.get("content", ""))
+                        messages.append(f"Created {file_path}")
+                        self._safety.audit("evolution_file_created", {"file": file_path})
+
+                    elif action == "modify":
+                        old_text = change.get("old_text", "")
+                        new_text = change.get("new_text", "")
+                        if not old_text or not new_text:
+                            continue
+
+                        current = self._read_file_safe(file_path)
+                        if old_text not in current:
+                            messages.append(f"Skipped {file_path}: old_text not found")
+                            continue
+
+                        patched = current.replace(old_text, new_text, 1)
+                        full_path.write_text(patched)
+                        messages.append(f"Modified {file_path}")
+                        self._safety.audit("evolution_file_modified", {"file": file_path})
+
+                # Run tests
+                passed, test_output = self._safety.run_tests()
+
+                if passed:
+                    commit_msg = f"feat(evolution): {current_plan['summary'][:80]}"
+                    self._safety.git_commit(commit_msg)
+                    self._safety.git_push()
+                    self._safety.audit("evolution_success", {
+                        "summary": current_plan["summary"],
+                        "attempt": attempt,
+                    })
+                    return True, f"Improvement applied (attempt {attempt}): {current_plan['summary']}\nChanges: {'; '.join(messages)}"
+
+                # Tests failed — rollback this attempt
+                self._safety.git_reset_hard()
+                self._safety.audit("evolution_rollback", {
+                    "test_output": test_output[:500],
+                    "attempt": attempt,
+                })
+
+                # Self-correction: ask LLM to revise the plan
+                if allow_self_correction and attempt < MAX_SELF_CORRECTION_ATTEMPTS:
+                    logger.info("self_correction_attempt", attempt=attempt, max=MAX_SELF_CORRECTION_ATTEMPTS)
+                    revised = await self.revise_plan(current_plan, test_output)
+                    if revised and revised.get("changes"):
+                        current_plan = revised
+                        continue
+
+                return False, f"Tests failed after {attempt} attempt(s) — rolled back.\n{test_output[:300]}"
+
+            except Exception as exc:
+                self._safety.git_reset_hard()
+                self._safety.audit("evolution_error", {"error": str(exc), "attempt": attempt})
+                return False, f"Evolution failed (attempt {attempt}): {exc}"
+
+        return False, "Self-correction attempts exhausted"
+
+    async def revise_plan(
+        self, original_plan: dict[str, Any], test_output: str,
+    ) -> dict[str, Any]:
+        """Ask the LLM to revise a failed plan based on test output.
+
+        Returns a new plan dict with corrected changes, or empty dict on failure.
+        """
+        self._safety.audit("revise_plan_start", {
+            "summary": original_plan.get("summary", "")[:100],
+        })
+
+        structure = self._get_project_structure()
+
+        # Read current file contents for files touched by the plan
+        file_contexts = ""
+        for change in original_plan.get("changes", []):
+            fpath = change.get("file", "")
+            if fpath:
+                content = self._read_file_safe(fpath)
+                if content:
+                    file_contexts += f"\n### {fpath}\n```python\n{content[:3000]}\n```\n"
+
+        system_prompt = """You are a senior Python developer fixing a failed code improvement.
+The previous attempt broke the test suite. Analyze the test output and fix the plan.
+
+RULES:
+1. Only fix what the tests are complaining about.
+2. Keep the original intent of the improvement.
+3. Use the SAME response format as the original plan.
+4. If the improvement is fundamentally wrong, return {"changes": [], "summary": "Cannot fix", "risk": "high"}.
+
+RESPONSE FORMAT (JSON):
+{
+    "summary": "Revised: ...",
+    "changes": [
+        {
+            "action": "create|modify",
+            "file": "relative/path/to/file.py",
+            "description": "What this change does",
+            "content": "Full file content (for create)",
+            "old_text": "Text to find (for modify)",
+            "new_text": "Replacement text (for modify)"
+        }
+    ],
+    "risk": "low|medium|high"
+}"""
+
+        user_prompt = f"""## Original Plan
+{json.dumps(original_plan, default=str, ensure_ascii=False)[:3000]}
+
+## Test Output (FAILED)
+```
+{test_output[:2000]}
+```
+
+## Current File Contents
+{file_contexts[:4000]}
+
+## Project Structure
+```
+{structure[:1500]}
+```
+
+Fix the plan so tests pass. Return JSON only."""
 
         try:
-            # Apply changes
-            for change in plan["changes"]:
-                action = change.get("action", "modify")
-                file_path = change.get("file", "")
-
-                if not file_path:
-                    continue
-
-                full_path = self._root / file_path
-
-                if action == "create":
-                    full_path.parent.mkdir(parents=True, exist_ok=True)
-                    full_path.write_text(change.get("content", ""))
-                    messages.append(f"Created {file_path}")
-                    self._safety.audit("evolution_file_created", {"file": file_path})
-
-                elif action == "modify":
-                    old_text = change.get("old_text", "")
-                    new_text = change.get("new_text", "")
-                    if not old_text or not new_text:
-                        continue
-
-                    current = self._read_file_safe(file_path)
-                    if old_text not in current:
-                        messages.append(f"Skipped {file_path}: old_text not found")
-                        continue
-
-                    patched = current.replace(old_text, new_text, 1)
-                    full_path.write_text(patched)
-                    messages.append(f"Modified {file_path}")
-                    self._safety.audit("evolution_file_modified", {"file": file_path})
-
-            # Run tests
-            passed, test_output = self._safety.run_tests()
-
-            if passed:
-                commit_msg = f"feat(evolution): {plan['summary'][:80]}"
-                self._safety.git_commit(commit_msg)
-                self._safety.git_push()
-                self._safety.audit("evolution_success", {"summary": plan["summary"]})
-                return True, f"Improvement applied: {plan['summary']}\nChanges: {'; '.join(messages)}"
-            else:
-                self._safety.git_reset_hard()
-                self._safety.audit("evolution_rollback", {"test_output": test_output[:500]})
-                return False, f"Tests failed after changes — rolled back.\n{test_output[:300]}"
-
+            response = await self._call_llm(system_prompt, user_prompt)
+            revised = self._parse_json_response(response)
+            self._safety.audit("revise_plan_done", {
+                "changes": len(revised.get("changes", [])),
+                "risk": revised.get("risk", "unknown"),
+            })
+            return revised
         except Exception as exc:
-            self._safety.git_reset_hard()
-            self._safety.audit("evolution_error", {"error": str(exc)})
-            return False, f"Evolution failed: {exc}"
+            logger.error("revise_plan_failed", error=str(exc))
+            self._safety.audit("revise_plan_failed", {"error": str(exc)})
+            return {}
 
     async def analyze_error_patterns(self) -> list[dict[str, Any]]:
         """Analyze the audit log for recurring error patterns.

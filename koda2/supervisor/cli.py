@@ -33,19 +33,30 @@ def run(
     repair = RepairEngine(safety) if not no_repair else None
     learner = ContinuousLearner(safety, notify_user_id=notify_user or None) if not no_learning else None
 
+    from koda2.supervisor.notifier import SupervisorNotifier
+    notifier = SupervisorNotifier(user_id=notify_user or None)
+
     async def on_crash(stderr: str, exit_code: int) -> None:
-        """Handle a crash — attempt self-repair."""
+        """Handle a crash — attempt self-repair, notify user."""
         console.print(f"\n[bold red]💥 Koda2 crashed (exit code {exit_code})[/bold red]")
+
+        repaired = False
+        diagnosis = ""
 
         if repair and safety.can_attempt_repair(stderr):
             console.print("[yellow]🔧 Attempting self-repair...[/yellow]")
             success, message = await repair.attempt_repair(stderr)
+            repaired = success
+            diagnosis = message
             if success:
                 console.print(f"[bold green]✅ Self-repair successful:[/bold green] {message}")
             else:
                 console.print(f"[red]❌ Self-repair failed:[/red] {message}")
         else:
             console.print("[yellow]⚠ Auto-repair disabled or attempts exhausted[/yellow]")
+
+        # Notify user about crash + restart
+        await notifier.notify_crash_and_restart(exit_code, repaired, diagnosis)
 
         console.print("[cyan]🔄 Restarting Koda2...[/cyan]\n")
 
@@ -77,10 +88,19 @@ def run(
     })
 
     async def _run_all():
-        """Run monitor and learner concurrently."""
+        """Run monitor, learner, and improvement queue workers concurrently."""
+        from koda2.supervisor.improvement_queue import get_improvement_queue
+
         tasks = [monitor.run()]
         if learner:
             tasks.append(learner.run_forever())
+
+        # Start improvement queue workers so queued items get processed
+        if not no_evolution:
+            queue = get_improvement_queue()
+            queue.start_worker()
+            console.print(f"  Workers:     [green]{queue.max_workers} queue workers[/green]")
+
         await asyncio.gather(*tasks)
 
     asyncio.run(_run_all())
@@ -231,6 +251,48 @@ def status() -> None:
     else:
         console.print("[dim]No audit log yet[/dim]")
 
+    console.print()
+
+
+@app.command()
+def queue(
+    limit: int = typer.Option(20, "--limit", "-n", help="Number of items to show"),
+) -> None:
+    """Show improvement queue status and recent items."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    q = get_improvement_queue()
+    stats = q.stats()
+
+    console.print("\n[bold cyan]🧬 Improvement Queue[/bold cyan]\n")
+    console.print(f"  Total items:     {stats['total']}")
+    console.print(f"  Pending:         {stats['pending']}")
+    console.print(f"  Planning:        {stats['planning']}")
+    console.print(f"  In progress:     {stats['in_progress']}")
+    console.print(f"  Completed:       [green]{stats['completed']}[/green]")
+    console.print(f"  Failed:          [red]{stats['failed']}[/red]")
+    console.print(f"  Skipped:         {stats['skipped']}")
+    console.print(f"  Max workers:     {stats['max_workers']}")
+    console.print()
+
+    items = q.list_items(limit=limit)
+    if items:
+        console.print("[bold]Recent items:[/bold]")
+        for item in items[-limit:]:
+            status_color = {
+                "pending": "yellow",
+                "planning": "cyan",
+                "in_progress": "blue",
+                "completed": "green",
+                "failed": "red",
+                "skipped": "dim",
+            }.get(item["status"], "white")
+            source = item.get("source", "?")
+            request = item.get("request", "")[:60]
+            console.print(
+                f"  [{status_color}]{item['status']:12s}[/{status_color}] "
+                f"[dim]{item['id']}[/dim] [{source}] {request}"
+            )
     console.print()
 
 
