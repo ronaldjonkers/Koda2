@@ -1560,6 +1560,13 @@ class Orchestrator:
         except Exception as exc:
             logger.error("scheduler_start_failed", error=str(exc))
         
+        # Load self-improvement plugins
+        try:
+            self.self_improve.load_all_plugins()
+            logger.info("self_improve_plugins_loaded")
+        except Exception as exc:
+            logger.warning("self_improve_plugins_load_failed", error=str(exc))
+
         # Start improvement queue workers for self-improvement
         try:
             from koda2.supervisor.improvement_queue import get_improvement_queue

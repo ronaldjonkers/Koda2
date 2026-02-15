@@ -142,9 +142,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _orchestrator.metrics = _metrics
     set_orchestrator(_orchestrator)
 
-    _orchestrator.self_improve.load_all_plugins()
-
-    # Full startup: scheduler + restore persisted tasks + system tasks + proactive + task queue
+    # Full startup: scheduler + restore persisted tasks + system tasks + proactive + task queue + plugins
     await _orchestrator.startup()
 
     # Initialize WebSocket with orchestrator's task queue and metrics
