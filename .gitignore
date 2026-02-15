@@ -55,6 +55,11 @@ chroma/
 
 # Node (if any tooling)
 node_modules/
+package-lock.json
+
+# WhatsApp bridge cache
+.wwebjs_cache/
+.wwebjs_auth/
 
 # mypy
 .mypy_cache/

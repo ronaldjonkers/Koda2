@@ -144,7 +144,7 @@ class TestEvolutionEngine:
         safety = SafetyGuard()
         engine = EvolutionEngine(safety)
         structure = engine._get_project_structure()
-        assert "orchestrator.py" in structure
+        assert "koda2/" in structure
         assert ".venv" not in structure
 
     def test_read_file_safe(self) -> None:

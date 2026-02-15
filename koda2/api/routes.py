@@ -5,11 +5,9 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
-from typing import Any, Optional, Dict, List
-from datetime import datetime, timedelta
+from typing import Any, Optional
 
 import httpx
-import psutil
 from fastapi import APIRouter, HTTPException, Query, UploadFile, File
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
@@ -19,25 +17,6 @@ from koda2.logging_config import get_logger
 logger = get_logger(__name__)
 
 router = APIRouter()
-_last_errors: List[Dict] = []
-_start_time = datetime.now()
-
-@router.get('/health')
-async def health_check():
-    try:
-        memory = psutil.virtual_memory()
-        uptime = datetime.now() - _start_time
-        recent_errors = len([e for e in _last_errors if e['timestamp'] > datetime.now() - timedelta(minutes=5)])
-        
-        return {
-            'status': 'healthy' if recent_errors < 3 else 'degraded',
-            'uptime_seconds': int(uptime.total_seconds()),
-            'memory_percent': memory.percent,
-            'recent_errors': recent_errors
-        }
-    except Exception as e:
-        logger.error(f'Health check failed: {str(e)}')
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Request / Response Models ────────────────────────────────────────
