@@ -382,9 +382,14 @@ class EWSCalendarProvider(BaseCalendarProvider):
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def create_event(self, event: CalendarEvent) -> CalendarEvent:
         import asyncio
+        from koda2.config import get_local_tz
 
-        start_str = event.start.strftime("%Y-%m-%dT%H:%M:%SZ")
-        end_str = event.end.strftime("%Y-%m-%dT%H:%M:%SZ")
+        local_tz = get_local_tz()
+        # Ensure tz-aware, then convert to UTC for EWS
+        ev_start = event.start if event.start.tzinfo else event.start.replace(tzinfo=local_tz)
+        ev_end = event.end if event.end.tzinfo else event.end.replace(tzinfo=local_tz)
+        start_str = ev_start.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end_str = ev_end.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         attendees_xml = ""
         if event.attendees:
@@ -558,11 +563,15 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         service = self._get_service()
 
         def _fetch():
-            # Convert to naive UTC for Google API (RFC3339 with Z suffix)
-            start_utc = start.replace(tzinfo=None) if start.tzinfo else start
-            end_utc = end.replace(tzinfo=None) if end.tzinfo else end
-            time_min = start_utc.isoformat() + "Z"
-            time_max = end_utc.isoformat() + "Z"
+            from koda2.config import get_local_tz, get_settings
+            local_tz = get_local_tz()
+            tz_name = get_settings().koda2_timezone
+
+            # Ensure start/end are tz-aware for the Google API
+            _start = start if start.tzinfo else start.replace(tzinfo=local_tz)
+            _end = end if end.tzinfo else end.replace(tzinfo=local_tz)
+            time_min = _start.isoformat()
+            time_max = _end.isoformat()
 
             # If a specific calendar is requested, use it; otherwise fetch from ALL calendars
             if calendar_name:
@@ -632,12 +641,20 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         service = self._get_service()
 
         def _create():
+            from koda2.config import get_local_tz, get_settings
+            local_tz = get_local_tz()
+            tz_name = get_settings().koda2_timezone
+
+            # Ensure datetimes carry timezone info
+            ev_start = event.start if event.start.tzinfo else event.start.replace(tzinfo=local_tz)
+            ev_end = event.end if event.end.tzinfo else event.end.replace(tzinfo=local_tz)
+
             body = {
                 "summary": event.title,
                 "description": event.description,
                 "location": event.location,
-                "start": {"dateTime": event.start.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": event.end.isoformat(), "timeZone": "UTC"},
+                "start": {"dateTime": ev_start.isoformat(), "timeZone": tz_name},
+                "end": {"dateTime": ev_end.isoformat(), "timeZone": tz_name},
                 "attendees": [{"email": a.email} for a in event.attendees],
                 "reminders": {"useDefault": False, "overrides": [
                     {"method": "popup", "minutes": m} for m in event.reminders
@@ -660,12 +677,19 @@ class GoogleCalendarProvider(BaseCalendarProvider):
         service = self._get_service()
 
         def _update():
+            from koda2.config import get_local_tz, get_settings
+            local_tz = get_local_tz()
+            tz_name = get_settings().koda2_timezone
+
+            ev_start = event.start if event.start.tzinfo else event.start.replace(tzinfo=local_tz)
+            ev_end = event.end if event.end.tzinfo else event.end.replace(tzinfo=local_tz)
+
             body = {
                 "summary": event.title,
                 "description": event.description,
                 "location": event.location,
-                "start": {"dateTime": event.start.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": event.end.isoformat(), "timeZone": "UTC"},
+                "start": {"dateTime": ev_start.isoformat(), "timeZone": tz_name},
+                "end": {"dateTime": ev_end.isoformat(), "timeZone": tz_name},
             }
             service.events().update(
                 calendarId=event.calendar_name or "primary",
@@ -773,13 +797,19 @@ class MSGraphCalendarProvider(BaseCalendarProvider):
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def create_event(self, event: CalendarEvent) -> CalendarEvent:
         import httpx
+        from koda2.config import get_local_tz, get_settings
+
+        local_tz = get_local_tz()
+        tz_name = get_settings().koda2_timezone
+        ev_start = event.start if event.start.tzinfo else event.start.replace(tzinfo=local_tz)
+        ev_end = event.end if event.end.tzinfo else event.end.replace(tzinfo=local_tz)
 
         token = await self._get_token()
         body = {
             "subject": event.title,
             "body": {"contentType": "text", "content": event.description},
-            "start": {"dateTime": event.start.isoformat(), "timeZone": "UTC"},
-            "end": {"dateTime": event.end.isoformat(), "timeZone": "UTC"},
+            "start": {"dateTime": ev_start.isoformat(), "timeZone": tz_name},
+            "end": {"dateTime": ev_end.isoformat(), "timeZone": tz_name},
             "location": {"displayName": event.location},
             "attendees": [
                 {"emailAddress": {"address": a.email, "name": a.name}, "type": "required"}
@@ -802,12 +832,18 @@ class MSGraphCalendarProvider(BaseCalendarProvider):
     async def update_event(self, event: CalendarEvent) -> CalendarEvent:
         import httpx
 
+        from koda2.config import get_local_tz, get_settings
+        local_tz = get_local_tz()
+        tz_name = get_settings().koda2_timezone
+        ev_start = event.start if event.start.tzinfo else event.start.replace(tzinfo=local_tz)
+        ev_end = event.end if event.end.tzinfo else event.end.replace(tzinfo=local_tz)
+
         token = await self._get_token()
         body = {
             "subject": event.title,
             "body": {"contentType": "text", "content": event.description},
-            "start": {"dateTime": event.start.isoformat(), "timeZone": "UTC"},
-            "end": {"dateTime": event.end.isoformat(), "timeZone": "UTC"},
+            "start": {"dateTime": ev_start.isoformat(), "timeZone": tz_name},
+            "end": {"dateTime": ev_end.isoformat(), "timeZone": tz_name},
             "location": {"displayName": event.location},
         }
         async with httpx.AsyncClient() as client:

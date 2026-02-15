@@ -176,8 +176,12 @@ class Orchestrator:
         base = soul if soul else _DEFAULT_SYSTEM_PROMPT
         if tools_md:
             base += f"\n\n{tools_md}"
-        now = dt.datetime.now()
-        base += f"\n\nCurrent date/time: {now.strftime('%A %d %B %Y, %H:%M')} (Europe/Amsterdam)"
+        from koda2.config import get_local_tz
+        local_tz = get_local_tz()
+        tz_name = self._settings.koda2_timezone
+        now = dt.datetime.now(local_tz)
+        base += f"\n\nCurrent date/time: {now.strftime('%A %d %B %Y, %H:%M')} ({tz_name})"
+        base += f"\nTimezone: {tz_name}. ALL datetimes in tool calls (start, end) must be in ISO format with this local timezone, e.g. {now.strftime('%Y-%m-%dT%H:%M:%S')}. Never use UTC for user-facing times."
         if self._settings.user_name:
             base += f"\nUser: {self._settings.user_name}"
         return base
@@ -658,19 +662,23 @@ class Orchestrator:
         params = action.get("params", {})
 
         if action_name == "check_calendar":
-            start = dt.datetime.fromisoformat(params.get("start", dt.datetime.now(dt.UTC).isoformat()))
-            end = dt.datetime.fromisoformat(
+            from koda2.config import ensure_local_tz
+            start = ensure_local_tz(dt.datetime.fromisoformat(
+                params.get("start", dt.datetime.now(dt.UTC).isoformat())
+            ))
+            end = ensure_local_tz(dt.datetime.fromisoformat(
                 params.get("end", (dt.datetime.now(dt.UTC) + dt.timedelta(days=1)).isoformat())
-            )
+            ))
             events = await self.calendar.list_events(start, end)
             return [{"title": e.title, "start": e.start.isoformat(), "end": e.end.isoformat()} for e in events]
 
         elif action_name == "schedule_meeting":
+            from koda2.config import ensure_local_tz
             event = CalendarEvent(
                 title=params.get("title", entities.get("subject", "Meeting")),
                 description=params.get("description", ""),
-                start=dt.datetime.fromisoformat(params.get("start", "")),
-                end=dt.datetime.fromisoformat(params.get("end", "")),
+                start=ensure_local_tz(dt.datetime.fromisoformat(params.get("start", ""))),
+                end=ensure_local_tz(dt.datetime.fromisoformat(params.get("end", ""))),
                 location=params.get("location", ""),
             )
             if params.get("attendee_email"):

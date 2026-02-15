@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     # ── Personalization ───────────────────────────────────────────────
     assistant_name: str = "Koda2"
     user_name: str = ""
+    koda2_timezone: str = "Europe/Amsterdam"
 
     # ── API Server ───────────────────────────────────────────────────
     api_host: str = "0.0.0.0"
@@ -149,3 +150,21 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def get_local_tz():
+    """Return the configured local timezone as a zoneinfo.ZoneInfo."""
+    from zoneinfo import ZoneInfo
+    return ZoneInfo(get_settings().koda2_timezone)
+
+
+def ensure_local_tz(naive_dt):
+    """Attach the configured local timezone to a naive datetime.
+
+    If the datetime already has tzinfo, return it unchanged.
+    """
+    if naive_dt is None:
+        return naive_dt
+    if naive_dt.tzinfo is not None:
+        return naive_dt
+    return naive_dt.replace(tzinfo=get_local_tz())
