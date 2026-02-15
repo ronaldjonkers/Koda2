@@ -242,6 +242,22 @@ class ProcessMonitor:
         commit_count = len(summary.splitlines())
         logger.info("remote_updates_found", commits=commit_count, summary=summary[:200])
 
+        # Check if the remote HEAD is a commit we made ourselves (evolution)
+        remote_head = ""
+        try:
+            branch_res = self._safety._git("rev-parse", "--abbrev-ref", "HEAD", check=False)
+            branch = branch_res.stdout.strip() or "main"
+            remote_head = self._safety._git("rev-parse", f"origin/{branch}", check=False).stdout.strip()
+        except Exception:
+            pass
+
+        if remote_head and remote_head == self._safety._last_local_commit:
+            logger.info("auto_pull_skip_own_commit", commit=remote_head[:12])
+            # Still pull to stay in sync, but don't restart
+            self._safety.git_pull()
+            self._pip_install_editable()
+            return False
+
         success, output = self._safety.git_pull()
         if success:
             logger.info("auto_pull_complete", output=output[:200])

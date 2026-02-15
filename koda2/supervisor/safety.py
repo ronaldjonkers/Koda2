@@ -20,6 +20,7 @@ logger = get_logger(__name__)
 MAX_REPAIR_ATTEMPTS = 3          # per unique crash signature
 MAX_RESTARTS_PER_WINDOW = 5      # max restarts in RESTART_WINDOW_SECONDS
 RESTART_WINDOW_SECONDS = 600     # 10 minutes
+RESTART_COOLDOWN_SECONDS = 300   # minimum 5 minutes between restarts
 AUDIT_LOG_DIR = Path("data/supervisor")
 AUDIT_LOG_FILE = AUDIT_LOG_DIR / "audit_log.jsonl"
 REPAIR_STATE_FILE = AUDIT_LOG_DIR / "repair_state.json"
@@ -34,6 +35,8 @@ class SafetyGuard:
         AUDIT_LOG_DIR.mkdir(parents=True, exist_ok=True)
         self._repair_counts: dict[str, int] = {}
         self._restart_times: list[float] = []
+        self._last_restart_time: float = 0
+        self._last_local_commit: str = ""  # track commits we made
         self._load_state()
 
     def _load_state(self) -> None:
@@ -106,6 +109,7 @@ class SafetyGuard:
             self._git("add", ".")
             self._git("commit", "-m", message)
             self.audit("git_commit", {"message": message})
+            self.record_local_commit()
             return True
         except Exception as exc:
             logger.error("git_commit_failed", error=str(exc))
@@ -257,7 +261,15 @@ class SafetyGuard:
         """Signal that the Koda2 process should be restarted.
 
         The ProcessMonitor checks for this signal and gracefully restarts.
+        Respects a cooldown period to prevent rapid restart loops.
         """
+        import time
+        now = time.monotonic()
+        if self._last_restart_time and (now - self._last_restart_time) < RESTART_COOLDOWN_SECONDS:
+            elapsed = int(now - self._last_restart_time)
+            logger.info("restart_cooldown_active", elapsed=elapsed, cooldown=RESTART_COOLDOWN_SECONDS, reason=reason)
+            self.audit("restart_skipped_cooldown", {"reason": reason, "elapsed": elapsed})
+            return
         restart_file = AUDIT_LOG_DIR / "restart_requested"
         restart_file.write_text(reason)
         self.audit("restart_requested", {"reason": reason})
@@ -325,8 +337,18 @@ class SafetyGuard:
     def record_restart(self) -> None:
         """Record a restart event."""
         import time
-        self._restart_times.append(time.monotonic())
+        now = time.monotonic()
+        self._restart_times.append(now)
+        self._last_restart_time = now
         self.audit("process_restart", {"count_in_window": len(self._restart_times)})
+
+    def record_local_commit(self) -> None:
+        """Record the current HEAD so auto-pull can skip our own commits."""
+        try:
+            result = self._git("rev-parse", "HEAD", check=False)
+            self._last_local_commit = result.stdout.strip()
+        except Exception:
+            pass
 
     # ── Test Runner ───────────────────────────────────────────────────
 

@@ -61,22 +61,27 @@ class MacOSService:
         Returns list of contacts with name, emails, phones, company, job title, etc.
         """
         # Build AppleScript with more comprehensive field extraction
+        # NOTE: uses .replace() instead of .format() because AppleScript
+        # uses {} for empty lists which conflicts with Python format strings.
+        # Delimiter is ASCII "|||" — the ¬ character is AppleScript's line
+        # continuation operator and causes syntax errors inside scripts.
+        delim = "|||"
         base_script = '''
         tell application "Contacts"
-            {search_clause}
-            set results to {{}}
-            repeat with p in {target}
+            __SEARCH_CLAUSE__
+            set results to {}
+            repeat with p in __TARGET__
                 set pName to ""
                 try
                     set pName to name of p
                 end try
                 
-                set pEmails to {{}}
+                set pEmails to {}
                 try
                     set pEmails to value of every email of p
                 end try
                 
-                set pPhones to {{}}
+                set pPhones to {}
                 try
                     set pPhones to value of every phone of p
                 end try
@@ -93,7 +98,7 @@ class MacOSService:
                 
                 set pBday to ""
                 try
-                    set pBday to birth date of p as string
+                    set pBday to birth date of p as text
                 end try
                 
                 set pAddress to ""
@@ -102,19 +107,19 @@ class MacOSService:
                     set pAddress to (street address of pAddr) & ", " & (city of pAddr)
                 end try
                 
-                -- Build pipe-delimited string: name|emails|phones|company|job|birthday|address
-                set recordStr to pName & "¬" & (pEmails as string) & "¬" & (pPhones as string) & "¬" & pCompany & "¬" & pJobTitle & "¬" & pBday & "¬" & pAddress
+                set d to "|||"
+                set recordStr to pName & d & (pEmails as text) & d & (pPhones as text) & d & pCompany & d & pJobTitle & d & pBday & d & pAddress
                 set end of results to recordStr
             end repeat
-            return results as string
+            return results as text
         end tell
         '''
         
         if search:
             search_clause = f'set target to (every person whose name contains "{search}")'
-            script = base_script.format(search_clause=search_clause, target="target")
+            script = base_script.replace("__SEARCH_CLAUSE__", search_clause).replace("__TARGET__", "target")
         else:
-            script = base_script.format(search_clause="", target="every person")
+            script = base_script.replace("__SEARCH_CLAUSE__", "").replace("__TARGET__", "every person")
         
         try:
             raw = await self.run_applescript(script)
@@ -123,18 +128,16 @@ class MacOSService:
             return []
         
         contacts = []
-        # AppleScript returns items separated by ", " when casting list to string
-        # But we use a special delimiter (¬) for fields
         if not raw or raw == "":
             return contacts
             
+        # AppleScript returns list items separated by ", " when cast to text
         for line in raw.split(", "):
             line = line.strip()
             if not line:
                 continue
                 
-            # Split by our custom delimiter
-            parts = line.split("¬")
+            parts = line.split(delim)
             if len(parts) >= 1 and parts[0].strip():
                 contact: dict[str, Any] = {
                     "name": parts[0].strip(),

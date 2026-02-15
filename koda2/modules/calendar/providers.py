@@ -514,6 +514,7 @@ class GoogleCalendarProvider(BaseCalendarProvider):
             "https://www.googleapis.com/auth/gmail.send",
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/drive.file",
+            "https://www.googleapis.com/auth/contacts.readonly",
         ]
 
         token_path = Path(self._token_file)

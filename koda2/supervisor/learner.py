@@ -729,8 +729,8 @@ Any organizational issues? Return JSON only."""
         logger.info("continuous_learner_starting", interval=LEARNING_INTERVAL_SECONDS)
         self._safety.audit("learner_start", {"interval_seconds": LEARNING_INTERVAL_SECONDS})
 
-        # Wait a bit before first cycle (let the system stabilize)
-        await asyncio.sleep(60)
+        # Wait before first cycle (let the system fully stabilize after restart)
+        await asyncio.sleep(300)
 
         while self._running:
             try:

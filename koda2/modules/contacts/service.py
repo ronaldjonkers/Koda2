@@ -331,7 +331,12 @@ class ContactSyncService:
             from googleapiclient.discovery import build
             
             def _fetch():
-                creds = Credentials.from_authorized_user_file(credentials["token_file"])
+                from google.auth.transport.requests import Request
+
+                SCOPES = ["https://www.googleapis.com/auth/contacts.readonly"]
+                creds = Credentials.from_authorized_user_file(credentials["token_file"], SCOPES)
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
                 service = build("people", "v1", credentials=creds, cache_discovery=False)
                 
                 results = service.people().connections().list(
