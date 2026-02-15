@@ -1599,7 +1599,19 @@ class Orchestrator:
         logger.info("orchestrator_startup_complete")
 
     def _register_scheduled_tasks(self) -> None:
-        """Register all recurring background tasks in the scheduler."""
+        """Register all recurring background tasks in the scheduler.
+
+        System tasks are always needed, but we skip registration if a task
+        with the same name already exists (e.g. restored from DB) to avoid
+        duplicates.
+        """
+        existing_names = {t.name for t in self.scheduler.list_tasks()}
+
+        def _already_exists(name: str) -> bool:
+            if name in existing_names:
+                logger.debug("system_task_already_exists", name=name)
+                return True
+            return False
 
         # ── Contact sync — every 6 hours ──
         async def _sync_contacts():
@@ -1609,11 +1621,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.error("scheduled_contact_sync_failed", error=str(exc))
 
-        self.scheduler.schedule_interval(
-            name="Contact Sync",
-            func=_sync_contacts,
-            hours=6,
-        )
+        if not _already_exists("Contact Sync"):
+            self.scheduler.schedule_interval(
+                name="Contact Sync",
+                func=_sync_contacts,
+                hours=6,
+            )
 
         # ── Email check — every 15 minutes ──
         async def _check_email():
@@ -1625,11 +1638,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.error("scheduled_email_check_failed", error=str(exc))
 
-        self.scheduler.schedule_interval(
-            name="Email Check (unread)",
-            func=_check_email,
-            minutes=15,
-        )
+        if not _already_exists("Email Check (unread)"):
+            self.scheduler.schedule_interval(
+                name="Email Check (unread)",
+                func=_check_email,
+                minutes=15,
+            )
 
         # ── Calendar sync — every 30 minutes ──
         async def _sync_calendar():
@@ -1641,11 +1655,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.error("scheduled_calendar_sync_failed", error=str(exc))
 
-        self.scheduler.schedule_interval(
-            name="Calendar Sync",
-            func=_sync_calendar,
-            minutes=30,
-        )
+        if not _already_exists("Calendar Sync"):
+            self.scheduler.schedule_interval(
+                name="Calendar Sync",
+                func=_sync_calendar,
+                minutes=30,
+            )
 
         # ── Daily morning summary — every day at 07:00 ──
         async def _daily_summary():
@@ -1680,11 +1695,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.error("daily_summary_failed", error=str(exc))
 
-        self.scheduler.schedule_recurring(
-            name="Daily Morning Summary",
-            func=_daily_summary,
-            cron_expression="0 7 * * *",
-        )
+        if not _already_exists("Daily Morning Summary"):
+            self.scheduler.schedule_recurring(
+                name="Daily Morning Summary",
+                func=_daily_summary,
+                cron_expression="0 7 * * *",
+            )
 
         # ── Proactive alerts check — every 10 minutes ──
         async def _proactive_check():
@@ -1695,11 +1711,12 @@ class Orchestrator:
             except Exception as exc:
                 logger.error("scheduled_proactive_check_failed", error=str(exc))
 
-        self.scheduler.schedule_interval(
-            name="Proactive Alerts Check",
-            func=_proactive_check,
-            minutes=10,
-        )
+        if not _already_exists("Proactive Alerts Check"):
+            self.scheduler.schedule_interval(
+                name="Proactive Alerts Check",
+                func=_proactive_check,
+                minutes=10,
+            )
 
         logger.info("scheduled_tasks_registered", count=len(self.scheduler.list_tasks()))
 

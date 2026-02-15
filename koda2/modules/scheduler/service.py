@@ -207,24 +207,26 @@ class SchedulerService:
     def cancel_task(self, task_id: str) -> bool:
         """Cancel a scheduled task and remove from DB if persisted."""
         task = self._tasks.get(task_id)
+        if task is None:
+            return False
         try:
             self._scheduler.remove_job(task_id)
-            self._tasks.pop(task_id, None)
-            # Remove from DB if it was persisted
-            if task and task.persisted:
-                import asyncio
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        asyncio.ensure_future(self._delete_from_db(task_id))
-                    else:
-                        loop.run_until_complete(self._delete_from_db(task_id))
-                except Exception as exc:
-                    logger.error("cancel_db_delete_failed", task_id=task_id, error=str(exc))
-            logger.info("task_cancelled", task_id=task_id)
-            return True
         except Exception:
-            return False
+            pass  # Job may already be gone from APScheduler
+        self._tasks.pop(task_id, None)
+        # Always try DB deletion — the task may have been persisted even if
+        # the in-memory flag is missing (e.g. after a restart with stale state).
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(self._delete_from_db(task_id))
+            else:
+                loop.run_until_complete(self._delete_from_db(task_id))
+        except Exception as exc:
+            logger.error("cancel_db_delete_failed", task_id=task_id, error=str(exc))
+        logger.info("task_cancelled", task_id=task_id)
+        return True
 
     def list_tasks(self) -> list[ScheduledTask]:
         """List all registered tasks."""
