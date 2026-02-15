@@ -743,9 +743,37 @@ class TestGitRemotePolling:
         safety.git_pull.return_value = (True, "Fast-forward")
         monitor = ProcessMonitor(safety)
         monitor._last_git_check = 0  # Force check
-        assert monitor._check_remote_updates() is True
-        safety.git_pull.assert_called_once()
-        safety.request_restart.assert_called_once()
+        with patch.object(monitor, "_rebuild_npm_packages") as mock_npm:
+            assert monitor._check_remote_updates() is True
+            safety.git_pull.assert_called_once()
+            mock_npm.assert_called_once()
+            safety.request_restart.assert_called_once()
+
+    def test_rebuild_npm_packages(self, tmp_path) -> None:
+        """npm install is called for each package.json (excluding node_modules)."""
+        from koda2.supervisor.monitor import ProcessMonitor
+        safety = MagicMock()
+        safety._root = tmp_path
+        monitor = ProcessMonitor(safety)
+
+        # Create a package.json in a subdirectory
+        bridge_dir = tmp_path / "koda2" / "modules" / "messaging" / "whatsapp_bridge"
+        bridge_dir.mkdir(parents=True)
+        (bridge_dir / "package.json").write_text('{"name": "test"}')
+
+        # Create a package.json inside node_modules (should be skipped)
+        nm_dir = bridge_dir / "node_modules" / "some-pkg"
+        nm_dir.mkdir(parents=True)
+        (nm_dir / "package.json").write_text('{"name": "skip-me"}')
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            monitor._rebuild_npm_packages()
+            # Only the bridge package.json should trigger npm install, not node_modules
+            assert mock_run.call_count == 1
+            call_args = mock_run.call_args
+            assert call_args[0][0] == ["npm", "install", "--production"]
+            assert str(bridge_dir) in str(call_args)
 
 
 # ── Pip Install Tests ────────────────────────────────────────────────

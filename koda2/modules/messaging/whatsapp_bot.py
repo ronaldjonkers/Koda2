@@ -111,19 +111,20 @@ class WhatsAppBot:
         # Kill any stale bridge process from a previous run
         await self._kill_stale_bridge()
 
-        if not (BRIDGE_DIR / "node_modules").exists():
-            logger.info("whatsapp_bridge_installing_deps")
-            proc = await asyncio.create_subprocess_exec(
-                "npm", "install", "--production",
-                cwd=str(BRIDGE_DIR),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            await proc.wait()
-            if proc.returncode != 0:
-                stderr = (await proc.stderr.read()).decode() if proc.stderr else ""
-                logger.error("whatsapp_bridge_npm_install_failed", error=stderr)
-                return
+        # Always run npm install to pick up any dependency changes after git pull
+        logger.info("whatsapp_bridge_installing_deps")
+        proc = await asyncio.create_subprocess_exec(
+            "npm", "install", "--production",
+            cwd=str(BRIDGE_DIR),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.wait()
+        if proc.returncode != 0:
+            stderr = (await proc.stderr.read()).decode() if proc.stderr else ""
+            logger.error("whatsapp_bridge_npm_install_failed", error=stderr)
+            if not (BRIDGE_DIR / "node_modules").exists():
+                return  # Can't start without node_modules
 
         self._spawn_bridge()
         logger.info("whatsapp_bridge_started", port=self._settings.whatsapp_bridge_port)

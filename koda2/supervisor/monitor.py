@@ -150,6 +150,38 @@ class ProcessMonitor:
         except Exception:
             return False
 
+    def _rebuild_npm_packages(self) -> None:
+        """Run npm install for all package.json files in the project.
+
+        Called after git pull to ensure Node.js dependencies (WhatsApp bridge
+        etc.) are up to date with any changes pulled from remote.
+        """
+        project_root = self._safety._root
+        for pkg_json in project_root.rglob("package.json"):
+            # Skip node_modules directories
+            if "node_modules" in pkg_json.parts:
+                continue
+            pkg_dir = pkg_json.parent
+            logger.info("npm_install_after_pull", directory=str(pkg_dir.relative_to(project_root)))
+            try:
+                result = subprocess.run(
+                    ["npm", "install", "--production"],
+                    cwd=str(pkg_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                if result.returncode == 0:
+                    logger.info("npm_install_success", directory=str(pkg_dir.relative_to(project_root)))
+                else:
+                    logger.warning("npm_install_failed", directory=str(pkg_dir.relative_to(project_root)),
+                                   error=result.stderr[:200])
+            except FileNotFoundError:
+                logger.warning("npm_not_found_skipping")
+                break  # npm not installed, skip all
+            except Exception as exc:
+                logger.warning("npm_install_error", error=str(exc))
+
     def _check_remote_updates(self) -> bool:
         """Check for new commits on the remote and auto-pull if found.
 
@@ -177,6 +209,8 @@ class ProcessMonitor:
         success, output = self._safety.git_pull()
         if success:
             logger.info("auto_pull_complete", output=output[:200])
+            # Rebuild npm packages after pull (WhatsApp bridge etc.)
+            self._rebuild_npm_packages()
             self._safety.request_restart(f"auto-pull: {commit_count} new commit(s)")
             return True
 
