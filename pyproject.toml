@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "koda2"
-version = "0.5.1"
+version = "0.5.2"
 description = "Professional AI Executive Assistant — fully automated director-level secretary"
 readme = "README.md"
 license = {text = "MIT"}

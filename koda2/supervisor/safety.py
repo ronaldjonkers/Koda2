@@ -139,6 +139,80 @@ class SafetyGuard:
             logger.error("git_reset_hard_failed", error=str(exc))
             return False
 
+    # ── Remote Update Detection ────────────────────────────────────────
+
+    def git_fetch(self) -> bool:
+        """Fetch latest refs from remote without merging."""
+        try:
+            self._git("fetch", "--quiet", check=False)
+            return True
+        except Exception as exc:
+            logger.warning("git_fetch_failed", error=str(exc))
+            return False
+
+    def check_remote_ahead(self) -> tuple[bool, str]:
+        """Check if the remote has commits we don't have locally.
+
+        Returns:
+            (has_updates, summary) — True if remote is ahead, with a summary of new commits.
+        """
+        try:
+            # Get current branch
+            branch_result = self._git("rev-parse", "--abbrev-ref", "HEAD", check=False)
+            branch = branch_result.stdout.strip() or "main"
+
+            # Compare local HEAD with remote tracking branch
+            local = self._git("rev-parse", "HEAD", check=False).stdout.strip()
+            remote = self._git("rev-parse", f"origin/{branch}", check=False).stdout.strip()
+
+            if not local or not remote or local == remote:
+                return False, ""
+
+            # Check if remote is actually ahead (not behind)
+            merge_base = self._git("merge-base", local, remote, check=False).stdout.strip()
+            if merge_base != local:
+                # We have local commits not on remote — don't pull (would cause conflicts)
+                return False, ""
+
+            # Get commit summaries for the new commits
+            log_result = self._git(
+                "log", "--oneline", f"{local}..{remote}", "--max-count=10", check=False,
+            )
+            summary = log_result.stdout.strip()
+            if summary:
+                count = len(summary.splitlines())
+                self.audit("remote_updates_detected", {
+                    "branch": branch,
+                    "new_commits": count,
+                    "summary": summary[:500],
+                })
+                return True, summary
+
+            return False, ""
+        except Exception as exc:
+            logger.warning("check_remote_ahead_failed", error=str(exc))
+            return False, ""
+
+    def git_pull(self) -> tuple[bool, str]:
+        """Pull latest changes from remote.
+
+        Returns:
+            (success, output)
+        """
+        try:
+            result = self._git("pull", "--ff-only", check=False)
+            output = result.stdout.strip()
+            if result.returncode != 0:
+                err = result.stderr.strip()
+                logger.warning("git_pull_failed", error=err)
+                self.audit("git_pull_failed", {"error": err[:300]})
+                return False, err
+            self.audit("git_pull_success", {"output": output[:300]})
+            return True, output
+        except Exception as exc:
+            logger.error("git_pull_exception", error=str(exc))
+            return False, str(exc)
+
     # ── Restart Signal ─────────────────────────────────────────────────
 
     def request_restart(self, reason: str = "code updated") -> None:

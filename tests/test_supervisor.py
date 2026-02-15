@@ -654,3 +654,95 @@ class TestChangelogUpdate:
         engine = EvolutionEngine(safety, project_root=tmp_path)
         # Should not raise when CHANGELOG.md doesn't exist
         engine._update_changelog({"summary": "test"}, [])
+
+
+# ── Git Remote Polling Tests ─────────────────────────────────────────
+
+class TestGitRemotePolling:
+    """Tests for git fetch, remote ahead detection, and auto-pull."""
+
+    def test_git_fetch(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch.object(guard, "_git") as mock_git:
+            mock_git.return_value = MagicMock(returncode=0)
+            assert guard.git_fetch() is True
+            mock_git.assert_called_once_with("fetch", "--quiet", check=False)
+
+    def test_git_fetch_failure(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch.object(guard, "_git", side_effect=Exception("network error")):
+            assert guard.git_fetch() is False
+
+    def test_check_remote_ahead_no_updates(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch.object(guard, "_git") as mock_git:
+            # Same local and remote hash
+            mock_git.return_value = MagicMock(stdout="abc123\n", returncode=0)
+            has_updates, summary = guard.check_remote_ahead()
+            assert has_updates is False
+            assert summary == ""
+
+    def test_check_remote_ahead_with_updates(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        call_count = [0]
+        def fake_git(*args, **kwargs):
+            call_count[0] += 1
+            m = MagicMock(returncode=0)
+            if args[0] == "rev-parse" and args[1] == "--abbrev-ref":
+                m.stdout = "main\n"
+            elif args[0] == "rev-parse" and args[1] == "HEAD":
+                m.stdout = "aaa111\n"
+            elif args[0] == "rev-parse" and "origin/" in args[1]:
+                m.stdout = "bbb222\n"
+            elif args[0] == "merge-base":
+                m.stdout = "aaa111\n"  # local is ancestor of remote
+            elif args[0] == "log":
+                m.stdout = "bbb222 feat: new feature\nccc333 fix: bug fix\n"
+            else:
+                m.stdout = ""
+            return m
+
+        with patch.object(guard, "_git", side_effect=fake_git), \
+             patch.object(guard, "audit"):
+            has_updates, summary = guard.check_remote_ahead()
+            assert has_updates is True
+            assert "new feature" in summary
+
+    def test_git_pull_success(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch.object(guard, "_git") as mock_git, \
+             patch.object(guard, "audit"):
+            mock_git.return_value = MagicMock(returncode=0, stdout="Updating aaa..bbb\n", stderr="")
+            success, output = guard.git_pull()
+            assert success is True
+            mock_git.assert_called_once_with("pull", "--ff-only", check=False)
+
+    def test_git_pull_failure(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch.object(guard, "_git") as mock_git, \
+             patch.object(guard, "audit"):
+            mock_git.return_value = MagicMock(returncode=1, stdout="", stderr="merge conflict\n")
+            success, output = guard.git_pull()
+            assert success is False
+            assert "merge conflict" in output
+
+    def test_monitor_check_remote_updates_rate_limit(self) -> None:
+        from koda2.supervisor.monitor import ProcessMonitor, GIT_POLL_INTERVAL
+        safety = MagicMock()
+        monitor = ProcessMonitor(safety)
+        # First call within interval should skip
+        monitor._last_git_check = time.monotonic()
+        assert monitor._check_remote_updates() is False
+        safety.git_fetch.assert_not_called()
+
+    def test_monitor_check_remote_updates_pulls(self) -> None:
+        from koda2.supervisor.monitor import ProcessMonitor
+        safety = MagicMock()
+        safety.git_fetch.return_value = True
+        safety.check_remote_ahead.return_value = (True, "abc123 new commit")
+        safety.git_pull.return_value = (True, "Fast-forward")
+        monitor = ProcessMonitor(safety)
+        monitor._last_git_check = 0  # Force check
+        assert monitor._check_remote_updates() is True
+        safety.git_pull.assert_called_once()
+        safety.request_restart.assert_called_once()

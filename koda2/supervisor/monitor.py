@@ -27,6 +27,7 @@ HEALTH_CHECK_INTERVAL = 30       # seconds between health checks
 HEALTH_CHECK_URL = "http://localhost:8000/api/health"
 STARTUP_GRACE_PERIOD = 15        # seconds to wait before first health check
 STDERR_BUFFER_LINES = 200        # last N lines of stderr to keep for crash analysis
+GIT_POLL_INTERVAL = 120          # seconds between git remote checks (2 minutes)
 
 
 class ProcessMonitor:
@@ -45,6 +46,7 @@ class ProcessMonitor:
         self._stderr_buffer: list[str] = []
         self._running = False
         self._start_time: float = 0
+        self._last_git_check: float = 0
 
     @property
     def is_running(self) -> bool:
@@ -148,6 +150,39 @@ class ProcessMonitor:
         except Exception:
             return False
 
+    def _check_remote_updates(self) -> bool:
+        """Check for new commits on the remote and auto-pull if found.
+
+        Runs git fetch + compare + pull --ff-only. If new commits are
+        pulled, a restart signal is written so the process picks up
+        the new code on the next loop iteration.
+
+        Returns True if a pull was performed (restart needed).
+        """
+        now = time.monotonic()
+        if now - self._last_git_check < GIT_POLL_INTERVAL:
+            return False
+        self._last_git_check = now
+
+        if not self._safety.git_fetch():
+            return False
+
+        has_updates, summary = self._safety.check_remote_ahead()
+        if not has_updates:
+            return False
+
+        commit_count = len(summary.splitlines())
+        logger.info("remote_updates_found", commits=commit_count, summary=summary[:200])
+
+        success, output = self._safety.git_pull()
+        if success:
+            logger.info("auto_pull_complete", output=output[:200])
+            self._safety.request_restart(f"auto-pull: {commit_count} new commit(s)")
+            return True
+
+        logger.warning("auto_pull_failed", output=output[:200])
+        return False
+
     async def run(self) -> None:
         """Main supervisor loop — start, monitor, restart on crash."""
         self._running = True
@@ -177,6 +212,9 @@ class ProcessMonitor:
                     self._safety.audit("graceful_restart", {"reason": restart_reason})
                     self.stop_process()
                     break  # Will restart in the outer while loop
+
+                # Check for new commits on remote (non-blocking, runs in-process)
+                self._check_remote_updates()
 
                 # Periodic health check
                 healthy = await self._health_check()

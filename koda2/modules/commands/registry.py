@@ -580,15 +580,17 @@ COMMANDS: dict[str, Command] = {
     "schedule_recurring_task": Command(
         name="schedule_recurring_task",
         category="scheduler",
-        description="Schedule a recurring task using a cron expression (minute hour day month weekday). The task will run a shell command or send a message at the specified schedule.",
+        description="Schedule a recurring task using a cron expression (minute hour day month weekday). Provide exactly ONE of: command (shell), message (WhatsApp text), or chat (AI-processed prompt that Koda handles and replies to the user).",
         parameters=[
             CommandParameter("name", "string", True, description="Human-readable name for the task"),
             CommandParameter("cron", "string", True, description="Cron expression: minute hour day month weekday (e.g. '0 9 * * 1-5' for weekdays at 9am)"),
             CommandParameter("command", "string", False, None, "Shell command to run"),
-            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+            CommandParameter("message", "string", False, None, "Raw message to send via WhatsApp"),
+            CommandParameter("chat", "string", False, None, "Prompt for Koda to process as AI (e.g. 'check my inbox and summarize unread emails'). The response is sent to the user via WhatsApp."),
         ],
         examples=[
             '{"action": "schedule_recurring_task", "params": {"name": "Daily backup", "cron": "0 2 * * *", "command": "tar -czf /tmp/backup.tar.gz ~/Documents"}}',
+            '{"action": "schedule_recurring_task", "params": {"name": "Morning inbox summary", "cron": "0 8 * * 1-5", "chat": "Check my inbox and give me a summary of important unread emails"}}',
             '{"action": "schedule_recurring_task", "params": {"name": "Weekly report reminder", "cron": "0 9 * * 1", "message": "Reminder: weekly report is due today"}}',
         ],
     ),
@@ -596,28 +598,31 @@ COMMANDS: dict[str, Command] = {
     "schedule_once_task": Command(
         name="schedule_once_task",
         category="scheduler",
-        description="Schedule a one-time task at a specific date/time. The task will run a shell command or send a message.",
+        description="Schedule a one-time task at a specific date/time. Provide exactly ONE of: command (shell), message (WhatsApp text), or chat (AI-processed prompt).",
         parameters=[
             CommandParameter("name", "string", True, description="Human-readable name for the task"),
             CommandParameter("run_at", "string", True, description="ISO datetime when to run (e.g. '2026-02-14T09:00:00')"),
             CommandParameter("command", "string", False, None, "Shell command to run"),
-            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+            CommandParameter("message", "string", False, None, "Raw message to send via WhatsApp"),
+            CommandParameter("chat", "string", False, None, "Prompt for Koda to process as AI. The response is sent to the user via WhatsApp."),
         ],
         examples=[
             '{"action": "schedule_once_task", "params": {"name": "Deploy release", "run_at": "2026-02-14T09:00:00", "command": "cd /app && ./deploy.sh"}}',
+            '{"action": "schedule_once_task", "params": {"name": "Prep meeting notes", "run_at": "2026-02-15T08:30:00", "chat": "Check my calendar for today and prepare a summary of upcoming meetings"}}',
         ],
     ),
 
     "schedule_interval_task": Command(
         name="schedule_interval_task",
         category="scheduler",
-        description="Schedule a task that repeats at a fixed interval (hours/minutes). The task will run a shell command or send a message.",
+        description="Schedule a task that repeats at a fixed interval (hours/minutes). Provide exactly ONE of: command (shell), message (WhatsApp text), or chat (AI-processed prompt).",
         parameters=[
             CommandParameter("name", "string", True, description="Human-readable name for the task"),
             CommandParameter("hours", "integer", False, 0, "Repeat every N hours"),
             CommandParameter("minutes", "integer", False, 0, "Repeat every N minutes"),
             CommandParameter("command", "string", False, None, "Shell command to run"),
-            CommandParameter("message", "string", False, None, "Message to send via WhatsApp (alternative to command)"),
+            CommandParameter("message", "string", False, None, "Raw message to send via WhatsApp"),
+            CommandParameter("chat", "string", False, None, "Prompt for Koda to process as AI. The response is sent to the user via WhatsApp."),
         ],
         examples=[
             '{"action": "schedule_interval_task", "params": {"name": "Health check", "minutes": 5, "command": "curl -s http://localhost:8000/api/health"}}',

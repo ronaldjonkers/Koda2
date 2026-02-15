@@ -5,6 +5,26 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-02-15
+
+### Added
+- **Git auto-pull & restart** — supervisor polls remote every 2 minutes:
+  - `SafetyGuard.git_fetch()` / `check_remote_ahead()` / `git_pull()` — safe remote detection
+  - `ProcessMonitor._check_remote_updates()` — fetch → compare → pull --ff-only → restart
+  - Only pulls when remote is strictly ahead (no local commits that would conflict)
+  - Audit log tracks all detected updates, pulls, and restarts
+
+### Fixed
+- **Scheduler `chat` action type** — users can now schedule AI-processed tasks:
+  - Added `chat` parameter to `schedule_recurring_task`, `schedule_once_task`, `schedule_interval_task`
+  - `chat` tasks process the prompt through the orchestrator and send the AI response via WhatsApp
+  - Previously `chat` was only supported during restore, not creation (caused schedules to fail)
+  - Updated command registry with `chat` parameter and examples for LLM awareness
+- **Silent WhatsApp failures** — scheduled message tasks now log a warning when WhatsApp is not configured instead of silently doing nothing
+
+### Tests
+- 356 tests pass (8 new: git fetch, remote ahead, pull, monitor polling)
+
 ## [0.5.1] - 2026-02-14
 
 ### Added

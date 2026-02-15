@@ -1193,6 +1193,7 @@ class Orchestrator:
             cron = params.get("cron", "")
             command = params.get("command", "")
             message = params.get("message", "")
+            chat = params.get("chat", "")
 
             if command:
                 async def _run_cmd():
@@ -1203,10 +1204,27 @@ class Orchestrator:
                     schedule_info=cron, action_type="command", action_payload=command,
                     created_by=user_id,
                 )
+            elif chat:
+                async def _run_chat():
+                    result = await self.process_message(user_id, chat, channel="scheduler")
+                    response = result.get("response", "")
+                    if self.whatsapp.is_configured and response:
+                        try:
+                            await self.whatsapp.send_message(user_id, response)
+                        except Exception as exc:
+                            logger.warning("scheduled_chat_send_failed", error=str(exc))
+                task_id = self.scheduler.schedule_recurring(name=name, func=_run_chat, cron_expression=cron)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="cron",
+                    schedule_info=cron, action_type="chat", action_payload=chat,
+                    created_by=user_id,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
+                    else:
+                        logger.warning("scheduled_message_skipped_no_whatsapp", message=message[:100])
                 task_id = self.scheduler.schedule_recurring(name=name, func=_send_msg, cron_expression=cron)
                 await self.scheduler.persist_task(
                     task_id=task_id, name=name, task_type="cron",
@@ -1214,7 +1232,7 @@ class Orchestrator:
                     created_by=user_id,
                 )
             else:
-                return {"error": "Either 'command' or 'message' is required"}
+                return {"error": "Provide 'command', 'message', or 'chat' for the task"}
 
             return {"task_id": task_id, "name": name, "schedule": cron, "type": "recurring", "status": "scheduled"}
 
@@ -1224,6 +1242,7 @@ class Orchestrator:
             run_at_str = params.get("run_at", "")
             command = params.get("command", "")
             message = params.get("message", "")
+            chat = params.get("chat", "")
 
             try:
                 run_at = dt.datetime.fromisoformat(run_at_str)
@@ -1239,10 +1258,27 @@ class Orchestrator:
                     schedule_info=run_at_str, action_type="command", action_payload=command,
                     created_by=user_id,
                 )
+            elif chat:
+                async def _run_chat():
+                    result = await self.process_message(user_id, chat, channel="scheduler")
+                    response = result.get("response", "")
+                    if self.whatsapp.is_configured and response:
+                        try:
+                            await self.whatsapp.send_message(user_id, response)
+                        except Exception as exc:
+                            logger.warning("scheduled_chat_send_failed", error=str(exc))
+                task_id = self.scheduler.schedule_once(name=name, func=_run_chat, run_at=run_at)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="once",
+                    schedule_info=run_at_str, action_type="chat", action_payload=chat,
+                    created_by=user_id,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
+                    else:
+                        logger.warning("scheduled_message_skipped_no_whatsapp", message=message[:100])
                 task_id = self.scheduler.schedule_once(name=name, func=_send_msg, run_at=run_at)
                 await self.scheduler.persist_task(
                     task_id=task_id, name=name, task_type="once",
@@ -1250,7 +1286,7 @@ class Orchestrator:
                     created_by=user_id,
                 )
             else:
-                return {"error": "Either 'command' or 'message' is required"}
+                return {"error": "Provide 'command', 'message', or 'chat' for the task"}
 
             return {"task_id": task_id, "name": name, "run_at": run_at_str, "type": "once", "status": "scheduled"}
 
@@ -1261,6 +1297,7 @@ class Orchestrator:
             minutes = int(params.get("minutes", 0))
             command = params.get("command", "")
             message = params.get("message", "")
+            chat = params.get("chat", "")
 
             if not hours and not minutes:
                 return {"error": "Specify hours and/or minutes for the interval"}
@@ -1274,10 +1311,27 @@ class Orchestrator:
                     schedule_info=f"{hours}h{minutes}m", action_type="command", action_payload=command,
                     created_by=user_id, interval_hours=hours, interval_minutes=minutes,
                 )
+            elif chat:
+                async def _run_chat():
+                    result = await self.process_message(user_id, chat, channel="scheduler")
+                    response = result.get("response", "")
+                    if self.whatsapp.is_configured and response:
+                        try:
+                            await self.whatsapp.send_message(user_id, response)
+                        except Exception as exc:
+                            logger.warning("scheduled_chat_send_failed", error=str(exc))
+                task_id = self.scheduler.schedule_interval(name=name, func=_run_chat, hours=hours, minutes=minutes)
+                await self.scheduler.persist_task(
+                    task_id=task_id, name=name, task_type="interval",
+                    schedule_info=f"{hours}h{minutes}m", action_type="chat", action_payload=chat,
+                    created_by=user_id, interval_hours=hours, interval_minutes=minutes,
+                )
             elif message:
                 async def _send_msg():
                     if self.whatsapp.is_configured:
                         await self.whatsapp.send_message("me", message)
+                    else:
+                        logger.warning("scheduled_message_skipped_no_whatsapp", message=message[:100])
                 task_id = self.scheduler.schedule_interval(name=name, func=_send_msg, hours=hours, minutes=minutes)
                 await self.scheduler.persist_task(
                     task_id=task_id, name=name, task_type="interval",
@@ -1285,7 +1339,7 @@ class Orchestrator:
                     created_by=user_id, interval_hours=hours, interval_minutes=minutes,
                 )
             else:
-                return {"error": "Either 'command' or 'message' is required"}
+                return {"error": "Provide 'command', 'message', or 'chat' for the task"}
 
             interval = f"{hours}h{minutes}m" if hours else f"{minutes}m"
             return {"task_id": task_id, "name": name, "interval": interval, "type": "interval", "status": "scheduled"}
