@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Modified koda2/api/routes.py
 
 
+### Auto-improvement (2026-02-15)
+- **Add channel-aware response formatting to handle WhatsApp/Telegram vs dashboard differently** (risk: low)
+  - Skipped koda2/orchestrator.py: old_text not found
+
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
