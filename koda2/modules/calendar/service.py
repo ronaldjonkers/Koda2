@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as dt
 from typing import Optional
 
+from koda2.config import ensure_local_tz
 from koda2.logging_config import get_logger
 from koda2.modules.account.models import AccountType, ProviderType
 from koda2.modules.account.service import AccountService
@@ -219,13 +220,12 @@ class CalendarService:
                 seen_ids.add(key)
             unique_events.append(event)
 
-        # Normalize to naive UTC for sorting (some providers return tz-aware, others naive)
-        def _sort_key(e):
-            s = e.start
-            if s.tzinfo is not None:
-                s = s.replace(tzinfo=None)
-            return s
-        unique_events.sort(key=_sort_key)
+        # Ensure all events have timezone-aware start/end datetimes
+        for event in unique_events:
+            event.start = ensure_local_tz(event.start)
+            event.end = ensure_local_tz(event.end)
+
+        unique_events.sort(key=lambda e: e.start)
         return unique_events
 
     async def sync_all(self) -> dict[str, int]:
@@ -311,6 +311,8 @@ class CalendarService:
         account_id: Optional[str] = None,
     ) -> PrepTimeResult:
         """Calculate available preparation time before an event."""
+        event.start = ensure_local_tz(event.start)
+        event.end = ensure_local_tz(event.end)
         search_start = event.start - dt.timedelta(hours=4)
         earlier_events = await self.list_events(search_start, event.start, account_id)
         earlier_events = [e for e in earlier_events if e.end <= event.start]
