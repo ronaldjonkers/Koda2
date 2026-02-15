@@ -266,7 +266,7 @@ class Orchestrator:
         await self._send_typing(user_id, channel)
 
         # Build context with token-aware pruning (inspired by OpenClaw context-window-guard)
-        context = self.memory.recall(message, user_id=user_id, n=3)
+        context = self.memory.recall(message, user_id=user_id, n=3, max_distance=0.4)
         context_str = "\n".join(f"- {c['content']}" for c in context) if context else ""
 
         system = self._get_system_prompt()
@@ -278,7 +278,7 @@ class Orchestrator:
         history_budget = int((CONTEXT_MAX_TOKENS - system_tokens) * CONTEXT_HISTORY_SHARE)
 
         # Load recent conversations and prune to fit budget
-        recent = await self.memory.get_recent_conversations(user_id, limit=20)
+        recent = await self.memory.get_recent_conversations(user_id, limit=20, max_age_hours=4)
         history_messages: list[ChatMessage] = []
         history_tokens = 0
         for c in reversed(recent):

@@ -113,9 +113,14 @@ class MemoryService:
             return convo
 
     async def get_recent_conversations(
-        self, user_id: str, limit: int = 20
+        self, user_id: str, limit: int = 20, max_age_hours: float = 0,
     ) -> list[Conversation]:
-        """Get the most recent conversation turns for a user."""
+        """Get the most recent conversation turns for a user.
+
+        Args:
+            max_age_hours: If >0, only return conversations from the last N hours.
+                           This prevents stale context from old sessions bleeding in.
+        """
         async with get_session() as session:
             result = await session.execute(
                 select(UserProfile).where(UserProfile.user_id == user_id)
@@ -124,12 +129,17 @@ class MemoryService:
             if profile is None:
                 return []
 
-            result = await session.execute(
+            stmt = (
                 select(Conversation)
                 .where(Conversation.profile_id == profile.id)
                 .order_by(Conversation.created_at.desc())
                 .limit(limit)
             )
+            if max_age_hours > 0:
+                cutoff = dt.datetime.now(dt.UTC) - dt.timedelta(hours=max_age_hours)
+                stmt = stmt.where(Conversation.created_at >= cutoff)
+
+            result = await session.execute(stmt)
             return list(reversed(result.scalars().all()))
 
     def search_conversations(self, query: str, user_id: Optional[str] = None, n: int = 5) -> list[dict]:
@@ -167,10 +177,22 @@ class MemoryService:
             logger.debug("memory_stored", user_id=user_id, category=category)
             return entry
 
-    def recall(self, query: str, user_id: Optional[str] = None, n: int = 5) -> list[dict]:
-        """Recall relevant memories using semantic search."""
+    def recall(
+        self, query: str, user_id: Optional[str] = None, n: int = 5,
+        max_distance: float = 0,
+    ) -> list[dict]:
+        """Recall relevant memories using semantic search.
+
+        Args:
+            max_distance: If >0, discard results with cosine distance above this
+                          threshold.  Lower distance = more relevant.  Good default
+                          for cosine space: 0.35–0.45.
+        """
         where = {"user_id": user_id} if user_id else None
-        return self.vector.search(query, n_results=n, where=where)
+        results = self.vector.search(query, n_results=n, where=where)
+        if max_distance > 0:
+            results = [r for r in results if r.get("distance", 1.0) <= max_distance]
+        return results
 
     async def list_memories(
         self,
