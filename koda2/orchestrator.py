@@ -329,7 +329,23 @@ class Orchestrator:
                 # Clean any accidental JSON from the response
                 response_text = self._clean_response_for_user(response_text)
                 if not response_text.strip():
-                    response_text = "I processed your request but couldn't formulate a response. Could you rephrase?"
+                    # Last-resort: force a summary LLM call with all tool results
+                    logger.warning("empty_response_forcing_summary", iteration=iteration)
+                    try:
+                        summary_req = LLMRequest(
+                            messages=history_messages + [
+                                ChatMessage(role="user", content="Summarise what you've found and respond to the user concisely. Do NOT call any more tools."),
+                            ],
+                            system_prompt=system,
+                            temperature=0.3,
+                        )
+                        summary_resp = await self.llm.complete(summary_req)
+                        total_tokens += summary_resp.total_tokens
+                        response_text = self._clean_response_for_user(summary_resp.content or "")
+                    except Exception:
+                        pass
+                    if not response_text.strip():
+                        response_text = "I've reached the limit for this request. Could you try rephrasing or simplifying your question?"
                 break
 
             # ── Auto-detect complex tasks → offload to background agent ──
