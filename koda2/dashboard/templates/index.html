@@ -1532,6 +1532,9 @@ async function loadQueue() {
             const detailBtn = (i.status === 'failed' || i.status === 'completed')
                 ? `<button class="btn btn-ghost btn-sm" onclick="toggleQueueDetail('${i.id}')" style="font-size:9px;padding:1px 4px;margin-left:4px">Details</button>`
                 : '';
+            const retryBtn = (i.status === 'failed' || i.status === 'skipped')
+                ? `<button class="btn btn-ghost btn-sm" onclick="retryQueueItem('${i.id}')" style="font-size:9px;padding:1px 4px;margin-left:4px;color:var(--blue)">🔄 Retry</button>`
+                : '';
             const sourceTag = i.source !== 'user'
                 ? `<span class="tag" style="font-size:8px;padding:0 4px;background:var(--bg-3);margin-left:4px">${esc(i.source)}</span>`
                 : '';
@@ -1558,6 +1561,7 @@ async function loadQueue() {
                     <span style="color:${color};font-size:10px;font-weight:600">${esc(i.status)}</span>
                     ${workerTag}
                     ${detailBtn}
+                    ${retryBtn}
                     ${cancelBtn}
                 </div>
                 <div style="font-size:9px;color:var(--tx-3);padding-left:18px">${ts} · #${i.id}</div>
@@ -1605,6 +1609,13 @@ async function toggleQueueDetail(itemId) {
     } catch(e) {
         el.innerHTML = `<span style="color:#ef4444">Failed to load: ${esc(e.message)}</span>`;
     }
+}
+
+async function retryQueueItem(itemId) {
+    try {
+        await fetch(`/api/supervisor/queue/${itemId}/retry`, { method: 'POST' });
+        loadQueue();
+    } catch(e) { console.error('Retry failed', e); }
 }
 
 async function cancelQueueItem(itemId) {

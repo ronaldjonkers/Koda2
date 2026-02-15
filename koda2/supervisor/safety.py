@@ -377,7 +377,7 @@ class SafetyGuard:
         try:
             cmd = [
                 str(self._root / ".venv" / "bin" / "python"), "-m", "pytest",
-                *targets, "-x", "--tb=short", "-q",
+                *targets, "-x", "--tb=short", "-q", "-o", "addopts=",
             ]
             result = subprocess.run(
                 cmd, cwd=str(self._root),
@@ -416,6 +416,11 @@ class SafetyGuard:
                 mod = mod[:-3]
             if mod.startswith("."):
                 mod = mod[1:]
+            # __init__.py → import the package, not the __init__ module
+            if mod.endswith(".__init__"):
+                mod = mod[:-9]
+            if not mod:
+                continue
             modules.append(mod)
 
         import_script = "; ".join(f"__import__('{m}')" for m in modules)

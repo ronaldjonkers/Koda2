@@ -260,6 +260,18 @@ async def supervisor_queue_cancel(item_id: str) -> dict[str, Any]:
     return {"cancelled": True, "item_id": item_id}
 
 
+@router.post("/supervisor/queue/{item_id}/retry")
+async def supervisor_queue_retry(item_id: str) -> dict[str, Any]:
+    """Retry a failed or skipped queue item."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    success = queue.retry_item(item_id)
+    if not success:
+        raise HTTPException(404, "Item not found or not retryable")
+    return {"retried": True, "item_id": item_id}
+
+
 @router.post("/supervisor/queue/start")
 async def supervisor_queue_start(request: dict[str, Any] = {}) -> dict[str, Any]:
     """Start the improvement queue workers."""

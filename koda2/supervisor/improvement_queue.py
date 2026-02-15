@@ -159,6 +159,22 @@ class ImprovementQueue:
                 return True
         return False
 
+    def retry_item(self, item_id: str) -> bool:
+        """Reset a failed/skipped item back to pending so it can be retried."""
+        for item in self._items:
+            if item["id"] == item_id and item.get("status") in (
+                QueueItemStatus.FAILED, QueueItemStatus.SKIPPED,
+            ):
+                item["status"] = QueueItemStatus.PENDING
+                item["result_message"] = ""
+                item.pop("error_details", None)
+                item.pop("plan_summary", None)
+                item.pop("finished_at", None)
+                self._save()
+                logger.info("queue_item_retried", item_id=item_id)
+                return True
+        return False
+
     def purge_finished(self) -> int:
         """Remove all completed, failed, and skipped items from the queue.
 
