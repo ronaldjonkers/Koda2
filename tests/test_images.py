@@ -129,6 +129,41 @@ class TestImageService:
             assert "landscape" in result.lower() or "mountain" in result.lower()
 
     @pytest.mark.asyncio
+    async def test_generate_gemini(self, tmp_path) -> None:
+        """Gemini Imagen generation returns saved file paths."""
+        with patch("koda2.modules.images.service.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                google_ai_api_key="test-google-key",
+                image_provider="gemini",
+            )
+            service = ImageService()
+
+            mock_image = MagicMock()
+            mock_image.image.save = MagicMock()
+
+            mock_response = MagicMock()
+            mock_response.generated_images = [mock_image]
+
+            with patch("google.genai.Client") as mock_client_cls:
+                mock_client = MagicMock()
+                mock_client.models.generate_images.return_value = mock_response
+                mock_client_cls.return_value = mock_client
+
+                urls = await service.generate("A cat in space", provider="gemini")
+                assert len(urls) == 1
+                assert urls[0].endswith(".png")
+                mock_client.models.generate_images.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_generate_gemini_no_key(self) -> None:
+        """Gemini generation without key raises ValueError."""
+        with patch("koda2.modules.images.service.get_settings") as mock:
+            mock.return_value = MagicMock(google_ai_api_key="", image_provider="gemini")
+            service = ImageService()
+            with pytest.raises(ValueError, match="Google AI API key"):
+                await service.generate("test", provider="gemini")
+
+    @pytest.mark.asyncio
     async def test_analyze_local_file(self, image_service, tmp_path) -> None:
         """Image analysis with local file source."""
         img_path = tmp_path / "test.jpg"

@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class ImageService:
-    """Unified image generation (DALL-E, Stability AI) and analysis (GPT-4 Vision)."""
+    """Unified image generation (DALL-E, Stability AI, Gemini Imagen) and analysis (GPT-4 Vision)."""
 
     def __init__(self) -> None:
         self._settings = get_settings()
@@ -39,6 +39,8 @@ class ImageService:
             return await self._generate_dalle(prompt, size, quality, n)
         elif provider == "stability":
             return await self._generate_stability(prompt, size)
+        elif provider == "gemini":
+            return await self._generate_gemini(prompt, n)
         else:
             raise ValueError(f"Unknown image provider: {provider}")
 
@@ -92,6 +94,40 @@ class ImageService:
             if artifact.get("finishReason") == "SUCCESS":
                 images.append(f"data:image/png;base64,{artifact['base64']}")
         logger.info("stability_generated", count=len(images))
+        return images
+
+    async def _generate_gemini(self, prompt: str, n: int = 1) -> list[str]:
+        """Generate images using Google Gemini Imagen."""
+        api_key = self._settings.google_ai_api_key
+        if not api_key:
+            raise ValueError("Google AI API key not configured (GOOGLE_AI_API_KEY)")
+
+        from google import genai
+        from google.genai import types
+
+        client = genai.Client(api_key=api_key)
+
+        response = client.models.generate_images(
+            model="imagen-3.0-generate-002",
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=min(n, 4),
+                output_mime_type="image/png",
+            ),
+        )
+
+        images: list[str] = []
+        if response.generated_images:
+            output_dir = Path("data/images")
+            output_dir.mkdir(parents=True, exist_ok=True)
+            import uuid
+            for img in response.generated_images:
+                filename = f"{uuid.uuid4().hex}.png"
+                filepath = output_dir / filename
+                img.image.save(str(filepath))
+                images.append(str(filepath))
+
+        logger.info("gemini_imagen_generated", count=len(images), prompt=prompt[:80])
         return images
 
     async def save_image(self, url_or_data: str, output_path: str) -> str:

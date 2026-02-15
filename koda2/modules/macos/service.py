@@ -64,19 +64,19 @@ class MacOSService:
         base_script = '''
         tell application "Contacts"
             {search_clause}
-            set results to {}
+            set results to {{}}
             repeat with p in {target}
                 set pName to ""
                 try
                     set pName to name of p
                 end try
                 
-                set pEmails to {}
+                set pEmails to {{}}
                 try
                     set pEmails to value of every email of p
                 end try
                 
-                set pPhones to {}
+                set pPhones to {{}}
                 try
                     set pPhones to value of every phone of p
                 end try

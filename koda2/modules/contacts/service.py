@@ -331,7 +331,7 @@ class ContactSyncService:
             from googleapiclient.discovery import build
             
             def _fetch():
-                creds = Credentials.from_authorized_user_file(credentials["credentials_file"])
+                creds = Credentials.from_authorized_user_file(credentials["token_file"])
                 service = build("people", "v1", credentials=creds, cache_discovery=False)
                 
                 results = service.people().connections().list(

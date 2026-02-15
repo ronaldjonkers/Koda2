@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     whatsapp_bridge_port: int = 3001
 
     # ── Image Generation ─────────────────────────────────────────────
-    image_provider: str = "openai"
+    image_provider: str = "gemini"
     stability_api_key: str = ""
 
     # ── Video Generation ─────────────────────────────────────────────

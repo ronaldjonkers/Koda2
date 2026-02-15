@@ -675,6 +675,12 @@ Any organizational issues? Return JSON only."""
                     self._safety.audit("learner_skip_high_risk", {"proposal": proposal_id})
                     continue
 
+                # Block dangerous refactoring proposals the engine can't handle
+                _blocked = ("split", "refactor into", "break up", "move into separate", "extract into")
+                if any(b in request.lower() for b in _blocked):
+                    logger.info("learner_skip_blocked_pattern", request=request[:80])
+                    continue
+
                 queue.add(
                     request=request,
                     source="learner",
