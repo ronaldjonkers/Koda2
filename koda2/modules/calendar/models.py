@@ -55,19 +55,6 @@ class CalendarEvent(BaseModel):
         """Event duration in minutes."""
         return int((self.end - self.start).total_seconds() / 60)
 
-    def conflicts_with(self, other: CalendarEvent) -> bool:
-        """Check if this event overlaps with another."""
-        return self.start < other.end and other.start < self.end
-
-
-class ConflictResult(BaseModel):
-    """Result of a conflict detection check."""
-
-    has_conflict: bool = False
-    conflicting_events: list[CalendarEvent] = Field(default_factory=list)
-    suggested_slots: list[tuple[dt.datetime, dt.datetime]] = Field(default_factory=list)
-
-
 class PrepTimeResult(BaseModel):
     """Preparation time calculation between events."""
 

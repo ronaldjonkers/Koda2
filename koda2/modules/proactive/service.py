@@ -23,7 +23,7 @@ class ProactiveService:
     """Proactive assistant that monitors user context and generates alerts.
     
     This service continuously monitors:
-    - Calendar events (upcoming, conflicts, preparation time)
+    - Calendar events (upcoming, preparation time)
     - Location and traffic (time to next meeting)
     - Emails (urgent unread messages)
     - Tasks (due dates)
@@ -270,28 +270,7 @@ class ProactiveService:
                         ))
                         self._last_alert_times[traffic_key] = now
         
-        # Check for meeting conflicts
-        if len(context.meetings_today) >= 2:
-            for i, m1 in enumerate(context.meetings_today):
-                for m2 in context.meetings_today[i+1:]:
-                    if self._meetings_overlap(m1, m2):
-                        alerts.append(ProactiveAlert(
-                            id=str(uuid.uuid4()),
-                            type=AlertType.MEETING_CONFLICT,
-                            priority=AlertPriority.CRITICAL,
-                            title="⚠️ Meeting Conflict",
-                            message=f"'{m1.title}' overlaps with '{m2.title}'",
-                            related_event_id=m1.id,
-                            suggested_actions=[
-                                {"label": "Reschedule", "action": "suggest_reschedule", "params": {"events": [m1.id, m2.id]}},
-                            ],
-                        ))
-        
         return alerts
-    
-    def _meetings_overlap(self, m1, m2) -> bool:
-        """Check if two meetings (CalendarEvent) overlap."""
-        return m1.start < m2.end and m2.start < m1.end
     
     async def _suggest_prep_materials(self, meeting) -> str:
         """Suggest preparation materials for a meeting."""

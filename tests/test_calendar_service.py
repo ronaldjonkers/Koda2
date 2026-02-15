@@ -1,4 +1,4 @@
-"""Tests for the calendar service (conflict detection, prep time, unified interface)."""
+"""Tests for the calendar service (prep time, unified interface)."""
 
 from __future__ import annotations
 
@@ -129,38 +129,6 @@ class TestCalendarService:
         )
         with pytest.raises(ValueError, match="No calendar account"):
             await service.create_event(event)
-
-    @pytest.mark.asyncio
-    async def test_detect_conflicts_none(self, calendar_service, mock_provider) -> None:
-        """No conflicts when calendar is empty."""
-        mock_provider.list_events = AsyncMock(return_value=[])
-
-        proposed = CalendarEvent(
-            title="New Meeting",
-            start=dt.datetime(2026, 2, 15, 10, 0),
-            end=dt.datetime(2026, 2, 15, 11, 0),
-        )
-        result = await calendar_service.detect_conflicts(proposed)
-        assert result.has_conflict is False
-
-    @pytest.mark.asyncio
-    async def test_detect_conflicts_found(self, calendar_service, mock_provider) -> None:
-        """Conflicts detected when events overlap."""
-        existing = CalendarEvent(
-            title="Existing",
-            start=dt.datetime(2026, 2, 15, 10, 30),
-            end=dt.datetime(2026, 2, 15, 11, 30),
-        )
-        mock_provider.list_events = AsyncMock(return_value=[existing])
-
-        proposed = CalendarEvent(
-            title="New Meeting",
-            start=dt.datetime(2026, 2, 15, 10, 0),
-            end=dt.datetime(2026, 2, 15, 11, 0),
-        )
-        result = await calendar_service.detect_conflicts(proposed)
-        assert result.has_conflict is True
-        assert len(result.conflicting_events) == 1
 
     @pytest.mark.asyncio
     async def test_calculate_prep_time_no_prior(self, calendar_service, mock_provider) -> None:

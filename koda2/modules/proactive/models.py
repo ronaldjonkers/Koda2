@@ -11,7 +11,6 @@ from typing import Optional, Any
 class AlertType(Enum):
     """Types of proactive alerts."""
     MEETING_SOON = "meeting_soon"  # Meeting starting in X minutes
-    MEETING_CONFLICT = "meeting_conflict"  # Overlapping meetings
     PREPARATION_NEEDED = "preparation_needed"  # Suggest prep for meeting
     TRAFFIC_WARNING = "traffic_warning"  # Heavy traffic to next meeting
     WEATHER_WARNING = "weather_warning"  # Weather affecting plans

@@ -17,7 +17,6 @@ from koda2.modules.calendar.cache import CalendarCache
 from koda2.modules.calendar.models import (
     CalendarEvent,
     CalendarProvider,
-    ConflictResult,
     PrepTimeResult,
 )
 from koda2.modules.calendar.providers import (
@@ -304,23 +303,6 @@ class CalendarService:
         """Delete an event by account and ID."""
         _, provider = await self._get_provider(account_id)
         return await provider.delete_event(event_id)
-
-    async def detect_conflicts(
-        self,
-        proposed: CalendarEvent,
-        buffer_minutes: int = 0,
-        account_id: Optional[str] = None,
-    ) -> ConflictResult:
-        """Detect scheduling conflicts with existing events."""
-        search_start = proposed.start - dt.timedelta(minutes=buffer_minutes)
-        search_end = proposed.end + dt.timedelta(minutes=buffer_minutes)
-        existing = await self.list_events(search_start, search_end, account_id)
-
-        conflicts = [e for e in existing if proposed.conflicts_with(e)]
-        return ConflictResult(
-            has_conflict=len(conflicts) > 0,
-            conflicting_events=conflicts,
-        )
 
     async def calculate_prep_time(
         self,
