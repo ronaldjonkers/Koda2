@@ -29,6 +29,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+# ── Enable faulthandler for SIGSEGV diagnostics ──────────────────────
+# Prints a Python traceback on SIGSEGV/SIGFPE/SIGABRT so we can identify
+# which C extension (ChromaDB/hnswlib, SQLite, etc.) caused a native crash.
+import faulthandler as _faulthandler
+_faulthandler.enable()
+
 # ── Startup hygiene: clean stale bytecode and shadow directories ──────
 # After git pull, stale __pycache__ .pyc files can shadow updated .py sources
 # on some systems (timestamp skew, NFS mounts, etc.). Purge them once at import.

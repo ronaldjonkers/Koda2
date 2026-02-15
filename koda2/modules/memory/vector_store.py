@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Optional
 
 import chromadb
@@ -13,6 +14,7 @@ from koda2.logging_config import get_logger
 logger = get_logger(__name__)
 
 _client: Optional[chromadb.ClientAPI] = None
+_chroma_lock = threading.Lock()
 
 
 def get_chroma_client() -> chromadb.ClientAPI:
@@ -53,11 +55,12 @@ class VectorMemory:
         meta = metadata or {}
         if not meta:
             meta = {"_source": "koda2"}
-        self.collection.upsert(
-            ids=[doc_id],
-            documents=[text],
-            metadatas=[meta],
-        )
+        with _chroma_lock:
+            self.collection.upsert(
+                ids=[doc_id],
+                documents=[text],
+                metadatas=[meta],
+            )
         logger.debug("vector_upserted", doc_id=doc_id)
 
     def search(
@@ -71,7 +74,8 @@ class VectorMemory:
         if where:
             kwargs["where"] = where
 
-        results = self.collection.query(**kwargs)
+        with _chroma_lock:
+            results = self.collection.query(**kwargs)
         documents = results.get("documents", [[]])[0]
         metadatas = results.get("metadatas", [[]])[0]
         distances = results.get("distances", [[]])[0]
@@ -89,9 +93,11 @@ class VectorMemory:
 
     def delete(self, doc_id: str) -> None:
         """Remove a document from the vector store."""
-        self.collection.delete(ids=[doc_id])
+        with _chroma_lock:
+            self.collection.delete(ids=[doc_id])
         logger.debug("vector_deleted", doc_id=doc_id)
 
     def count(self) -> int:
         """Return the total number of documents."""
-        return self.collection.count()
+        with _chroma_lock:
+            return self.collection.count()

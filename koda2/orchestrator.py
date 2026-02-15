@@ -1634,7 +1634,7 @@ class Orchestrator:
                 name="Contact Sync",
                 func=_sync_contacts,
                 hours=6,
-                run_immediately=True,
+                # Not run_immediately — startup() already calls contacts.sync_all()
             )
 
         # ── Email check — every 15 minutes ──
