@@ -38,12 +38,13 @@ _koda2_root = Path(__file__).parent
 for _cache_dir in _koda2_root.rglob("__pycache__"):
     _shutil.rmtree(_cache_dir, ignore_errors=True)
 
-# Remove stale package directories that shadow module files
-# (e.g. routes/ directory leftover from a refactor that shadows routes.py)
-_api_dir = _koda2_root / "api"
-_stale_routes_dir = _api_dir / "routes"
-if _stale_routes_dir.is_dir() and (_api_dir / "routes.py").exists():
-    _shutil.rmtree(_stale_routes_dir, ignore_errors=True)
+# Remove stale package directories that shadow module files.
+# The evolution engine sometimes creates directories (e.g. orchestrator/, routes/)
+# that shadow the corresponding .py files, breaking imports.
+for _py_file in _koda2_root.rglob("*.py"):
+    _shadow_dir = _py_file.with_suffix("")
+    if _shadow_dir.is_dir():
+        _shutil.rmtree(_shadow_dir, ignore_errors=True)
 
 from koda2 import __version__
 from koda2.api.routes import router, set_orchestrator
