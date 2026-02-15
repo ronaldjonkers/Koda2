@@ -1,9 +1,10 @@
-"""Evolution Engine — self-improvement loop for Koda2.
+"""Evolution Engine — self-development loop for Koda2.
 
 Allows the assistant to improve itself based on:
 - User requests ("Koda, verbeter jezelf: voeg X toe")
 - Recurring error patterns (auto-detected from logs)
 - Feature requests via /improve command
+- Continuous learning from conversations and audit logs
 """
 
 from __future__ import annotations

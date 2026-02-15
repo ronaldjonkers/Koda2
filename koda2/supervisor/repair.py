@@ -1,4 +1,4 @@
-"""Self-Repair Engine — analyzes crashes and generates code fixes via LLM.
+"""Self-Repair Engine — part of the Self-Development Supervisor.
 
 When Koda2 crashes, this engine:
 1. Extracts the error and relevant source code

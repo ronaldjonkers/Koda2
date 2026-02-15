@@ -243,7 +243,7 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
         <button class="nav-item" data-section="integrations"><span class="ic">🔌</span>Integrations</button>
         <button class="nav-item" data-section="accounts"><span class="ic">👤</span>Accounts</button>
         <button class="nav-item" data-section="scheduler"><span class="ic">⏰</span>Scheduler</button>
-        <button class="nav-item" data-section="supervisor"><span class="ic">🧬</span>Supervisor</button>
+        <button class="nav-item" data-section="supervisor"><span class="ic">🧬</span>Development</button>
       </div>
     </nav>
   </div>
@@ -480,7 +480,7 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 
 <!-- ═══ SUPERVISOR ══════════════════════════════════════ -->
 <section class="section" id="section-supervisor">
-  <div class="page-head"><h2>🧬 Self-Healing Supervisor</h2>
+  <div class="page-head"><h2>🧬 Self-Development Supervisor</h2>
     <div style="display:flex;gap:6px">
       <button class="btn btn-ghost btn-sm" onclick="loadSupervisor()">Refresh</button>
     </div>
@@ -1528,14 +1528,25 @@ async function loadQueue() {
             const cancelBtn = i.status === 'pending'
                 ? `<button class="btn btn-ghost btn-sm" onclick="cancelQueueItem('${i.id}')" style="font-size:9px;padding:1px 4px;margin-left:4px">Cancel</button>`
                 : '';
-            const resultMsg = i.result_message
-                ? `<div style="font-size:10px;color:var(--tx-3);margin-top:2px;padding-left:18px">${esc(i.result_message.substring(0, 120))}</div>`
+            const detailBtn = (i.status === 'failed' || i.status === 'completed')
+                ? `<button class="btn btn-ghost btn-sm" onclick="toggleQueueDetail('${i.id}')" style="font-size:9px;padding:1px 4px;margin-left:4px">Details</button>`
                 : '';
             const sourceTag = i.source !== 'user'
                 ? `<span class="tag" style="font-size:8px;padding:0 4px;background:var(--bg-3);margin-left:4px">${esc(i.source)}</span>`
                 : '';
             const workerTag = i.worker_id
                 ? `<span style="font-size:8px;color:var(--tx-3);margin-left:2px">W${i.worker_id}</span>`
+                : '';
+
+            // Show result message (more text for failed items)
+            const maxMsg = i.status === 'failed' ? 300 : 120;
+            const resultMsg = i.result_message
+                ? `<div style="font-size:10px;color:${i.status === 'failed' ? '#ef4444' : 'var(--tx-3)'};margin-top:2px;padding-left:18px;white-space:pre-wrap;word-break:break-word">${esc(i.result_message.substring(0, maxMsg))}${i.result_message.length > maxMsg ? '...' : ''}</div>`
+                : '';
+
+            // Plan info (if available)
+            const planInfo = i.plan_summary
+                ? `<div style="font-size:10px;color:var(--tx-2);margin-top:2px;padding-left:18px">📋 Plan: ${esc(i.plan_summary.substring(0, 100))} <span class="tag tag-${i.plan_risk === 'low' ? 'green' : i.plan_risk === 'high' ? 'red' : 'amber'}" style="font-size:8px;padding:0 3px">${esc(i.plan_risk || '?')}</span></div>`
                 : '';
 
             return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
@@ -1545,14 +1556,53 @@ async function loadQueue() {
                     ${sourceTag}
                     <span style="color:${color};font-size:10px;font-weight:600">${esc(i.status)}</span>
                     ${workerTag}
+                    ${detailBtn}
                     ${cancelBtn}
                 </div>
                 <div style="font-size:9px;color:var(--tx-3);padding-left:18px">${ts} · #${i.id}</div>
+                ${planInfo}
                 ${resultMsg}
+                <div id="qd-${i.id}" style="display:none"></div>
             </div>`;
         }).join('');
     } catch(e) {
         $('queue-stats').innerHTML = '<span style="color:var(--tx-3)">Could not load queue</span>';
+    }
+}
+
+async function toggleQueueDetail(itemId) {
+    const el = $('qd-' + itemId);
+    if (!el) return;
+    if (el.style.display !== 'none') { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    el.innerHTML = '<span style="color:var(--tx-3)">Loading...</span>';
+    try {
+        const r = await fetch(`/api/supervisor/queue/${itemId}`);
+        const d = await r.json();
+        let html = '<div style="margin-top:6px;padding:8px 12px;background:var(--bg-2);border-radius:6px;font-size:10px;font-family:monospace;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto">';
+
+        // Plan details
+        if (d.plan_summary) html += `<b>Plan:</b> ${esc(d.plan_summary)}\n<b>Risk:</b> ${esc(d.plan_risk || '?')}\n`;
+        if (d.plan_changes && d.plan_changes.length) {
+            html += '<b>Files:</b>\n';
+            d.plan_changes.forEach(c => { html += `  ${esc(c.action || '?')} ${esc(c.file || '?')} — ${esc((c.description||'').substring(0,120))}\n`; });
+        }
+
+        // Error details
+        const ed = d.error_details || {};
+        if (ed.phase) html += `\n<b style="color:#ef4444">Error Phase:</b> ${esc(ed.phase)}\n<b>Reason:</b> ${esc(ed.reason || '?')}\n`;
+        if (ed.full_output) html += `\n<b>Full Output:</b>\n${esc(ed.full_output)}\n`;
+        if (ed.traceback) html += `\n<b>Traceback:</b>\n${esc(ed.traceback)}\n`;
+        if (ed.message) html += `\n<b>Message:</b> ${esc(ed.message)}\n`;
+        if (ed.plan_response) html += `\n<b>LLM Response:</b> ${esc(ed.plan_response)}\n`;
+
+        // Full result message
+        if (d.result_message && d.result_message.length > 300) html += `\n<b>Full Result:</b>\n${esc(d.result_message)}\n`;
+
+        html += '</div>';
+        el.innerHTML = html;
+    } catch(e) {
+        el.innerHTML = `<span style="color:#ef4444">Failed to load: ${esc(e.message)}</span>`;
     }
 }
 

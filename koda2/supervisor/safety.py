@@ -1,4 +1,4 @@
-"""Safety guardrails for the self-healing supervisor.
+"""Safety guardrails for the self-development supervisor.
 
 Provides git-based backup/rollback, retry limits, and audit logging
 to ensure the supervisor never leaves the codebase in a broken state.

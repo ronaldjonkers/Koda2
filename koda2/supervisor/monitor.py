@@ -4,7 +4,7 @@ The monitor is the outer shell that keeps Koda2 running. It:
 - Starts koda2 as a subprocess
 - Captures stdout/stderr
 - Detects crashes (non-zero exit, health check failures)
-- Triggers restart with optional self-repair
+- Triggers restart with optional self-development
 - Rate-limits restarts to prevent infinite loops
 """
 

@@ -236,6 +236,18 @@ async def supervisor_queue(
     }
 
 
+@router.get("/supervisor/queue/{item_id}")
+async def supervisor_queue_item(item_id: str) -> dict[str, Any]:
+    """Get full detail of a single queue item (including error_details, plan, etc.)."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    item = queue.get_item(item_id)
+    if not item:
+        raise HTTPException(404, "Queue item not found")
+    return item
+
+
 @router.post("/supervisor/queue/{item_id}/cancel")
 async def supervisor_queue_cancel(item_id: str) -> dict[str, Any]:
     """Cancel a pending queue item."""

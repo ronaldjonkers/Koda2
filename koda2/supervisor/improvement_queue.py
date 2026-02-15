@@ -1,4 +1,4 @@
-"""Improvement Queue — persistent, chronological queue for self-improvement tasks.
+"""Improvement Queue — persistent, chronological queue for self-development tasks.
 
 Supports multiple concurrent worker agents:
 - LLM planning runs in parallel across workers (IO-bound, safe)
@@ -215,10 +215,12 @@ class ImprovementQueue:
             Stash → write files → run tests → commit/push or rollback.
             Only one worker can do this at a time.
         """
+        import traceback as _tb
         from koda2.supervisor.safety import SafetyGuard
         from koda2.supervisor.evolution import EvolutionEngine
 
         item["worker_id"] = worker_id
+        item.setdefault("error_details", {})
         logger.info("queue_planning", worker=worker_id, id=item["id"], request=item["request"][:80])
 
         try:
@@ -229,10 +231,23 @@ class ImprovementQueue:
             safety.audit("evolution_start", {"request": item["request"], "worker": worker_id})
             plan = await engine.plan_improvement(item["request"])
 
+            # Store plan details for debugging regardless of outcome
+            item["plan_summary"] = plan.get("summary", "")[:500]
+            item["plan_risk"] = plan.get("risk", "unknown")
+            item["plan_changes"] = [
+                {"action": c.get("action"), "file": c.get("file"), "description": c.get("description", "")[:200]}
+                for c in plan.get("changes", [])
+            ]
+
             if not plan.get("changes"):
                 item["success"] = False
                 item["status"] = QueueItemStatus.FAILED
-                item["result_message"] = f"No changes planned. {plan.get('summary', '')}"[:500]
+                item["result_message"] = f"No changes planned. {plan.get('summary', '')}"[:2000]
+                item["error_details"] = {
+                    "phase": "planning",
+                    "reason": "no_changes",
+                    "plan_response": plan.get("summary", ""),
+                }
                 item["finished_at"] = dt.datetime.now().isoformat()
                 self._save()
                 return
@@ -240,7 +255,12 @@ class ImprovementQueue:
             if plan.get("risk") == "high":
                 item["success"] = False
                 item["status"] = QueueItemStatus.FAILED
-                item["result_message"] = f"High-risk — needs manual review. {plan['summary']}"[:500]
+                item["result_message"] = f"High-risk — needs manual review. {plan['summary']}"[:2000]
+                item["error_details"] = {
+                    "phase": "planning",
+                    "reason": "high_risk",
+                    "plan_summary": plan["summary"],
+                }
                 item["finished_at"] = dt.datetime.now().isoformat()
                 self._save()
                 return
@@ -255,12 +275,26 @@ class ImprovementQueue:
 
             item["success"] = success
             item["status"] = QueueItemStatus.COMPLETED if success else QueueItemStatus.FAILED
-            item["result_message"] = message[:500]
+            item["result_message"] = message[:2000]
+            if not success:
+                item["error_details"] = {
+                    "phase": "apply",
+                    "reason": "tests_or_apply_failed",
+                    "full_output": message[:4000],
+                    "plan_summary": plan.get("summary", ""),
+                    "files_touched": [c.get("file", "") for c in plan.get("changes", [])],
+                }
 
         except Exception as exc:
             item["success"] = False
             item["status"] = QueueItemStatus.FAILED
-            item["result_message"] = f"Error: {exc}"[:500]
+            item["result_message"] = f"Error: {exc}"[:2000]
+            item["error_details"] = {
+                "phase": "exception",
+                "reason": type(exc).__name__,
+                "message": str(exc),
+                "traceback": _tb.format_exc()[:4000],
+            }
             logger.error("queue_item_error", worker=worker_id, id=item["id"], error=str(exc))
 
         item["finished_at"] = dt.datetime.now().isoformat()
