@@ -97,7 +97,7 @@ class ImageService:
         return images
 
     async def _generate_gemini(self, prompt: str, n: int = 1) -> list[str]:
-        """Generate images using Google Gemini Imagen."""
+        """Generate images using Google Imagen 4."""
         api_key = self._settings.google_ai_api_key
         if not api_key:
             raise ValueError("Google AI API key not configured (GOOGLE_AI_API_KEY)")
@@ -108,7 +108,7 @@ class ImageService:
         client = genai.Client(api_key=api_key)
 
         response = client.models.generate_images(
-            model="imagen-3.0-generate-002",
+            model="imagen-4.0-generate-001",
             prompt=prompt,
             config=types.GenerateImagesConfig(
                 number_of_images=min(n, 4),
