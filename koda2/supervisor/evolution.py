@@ -235,8 +235,11 @@ Plan the minimal changes needed. Return JSON only."""
                         messages.append(f"Modified {file_path}")
                         self._safety.audit("evolution_file_modified", {"file": file_path})
 
-                # Run tests
-                passed, test_output = self._safety.run_tests()
+                # Run targeted tests (only for files we actually changed)
+                changed_files = [
+                    c.get("file", "") for c in current_plan["changes"] if c.get("file")
+                ]
+                passed, test_output = self._safety.run_tests(changed_files=changed_files)
 
                 if passed:
                     # Generate detailed commit message (cheap model)

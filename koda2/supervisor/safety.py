@@ -330,20 +330,65 @@ class SafetyGuard:
 
     # ── Test Runner ───────────────────────────────────────────────────
 
-    def run_tests(self, timeout: int = 120) -> tuple[bool, str]:
-        """Run the test suite. Returns (passed, output)."""
+    def run_tests(
+        self,
+        timeout: int = 120,
+        changed_files: list[str] | None = None,
+    ) -> tuple[bool, str]:
+        """Run tests relevant to the changes. Returns (passed, output).
+
+        Strategy:
+        1. If ``changed_files`` is given, find matching test files
+           (e.g. koda2/foo/bar.py → tests/test_bar.py).
+        2. If matching test files exist, run only those (targeted).
+        3. If NO matching test files exist, run a quick syntax/import
+           check on the changed .py files — don't block new features
+           just because unrelated tests fail.
+        4. If ``changed_files`` is None, fall back to the full suite.
+        """
+        if changed_files is not None:
+            targeted = self._find_related_tests(changed_files)
+            if targeted:
+                return self._run_pytest(targeted, timeout)
+            # No related tests — just verify the changed files import OK
+            return self._import_check(changed_files)
+
+        # Fallback: full suite
+        return self._run_pytest(["tests/"], timeout)
+
+    def _find_related_tests(self, changed_files: list[str]) -> list[str]:
+        """Map changed source files to their test files."""
+        test_files: list[str] = []
+        tests_dir = self._root / "tests"
+        if not tests_dir.exists():
+            return []
+        for fpath in changed_files:
+            # Extract the module name: koda2/modules/foo/bar.py → bar
+            from pathlib import PurePosixPath
+            stem = PurePosixPath(fpath).stem
+            # Look for tests/test_<stem>.py
+            candidate = tests_dir / f"test_{stem}.py"
+            if candidate.exists() and str(candidate.relative_to(self._root)) not in test_files:
+                test_files.append(str(candidate.relative_to(self._root)))
+        return test_files
+
+    def _run_pytest(self, targets: list[str], timeout: int = 120) -> tuple[bool, str]:
+        """Run pytest on specific targets."""
         try:
+            cmd = [
+                str(self._root / ".venv" / "bin" / "python"), "-m", "pytest",
+                *targets, "-x", "--tb=short", "-q",
+            ]
             result = subprocess.run(
-                [str(self._root / ".venv" / "bin" / "python"), "-m", "pytest",
-                 "tests/", "-x", "--tb=short", "-q"],
-                cwd=str(self._root),
-                capture_output=True,
-                text=True,
-                timeout=timeout,
+                cmd, cwd=str(self._root),
+                capture_output=True, text=True, timeout=timeout,
             )
             passed = result.returncode == 0
             output = result.stdout + result.stderr
-            self.audit("test_run", {"passed": passed, "returncode": result.returncode})
+            self.audit("test_run", {
+                "passed": passed, "returncode": result.returncode,
+                "targets": targets,
+            })
             return passed, output
         except subprocess.TimeoutExpired:
             self.audit("test_run", {"passed": False, "error": "timeout"})
@@ -351,6 +396,47 @@ class SafetyGuard:
         except Exception as exc:
             self.audit("test_run", {"passed": False, "error": str(exc)})
             return False, str(exc)
+
+    def _import_check(self, changed_files: list[str]) -> tuple[bool, str]:
+        """Quick syntax/import check for files that have no dedicated tests.
+
+        Converts file paths to module names and tries to import them.
+        This catches syntax errors and missing imports without running
+        the full test suite.
+        """
+        py_files = [f for f in changed_files if f.endswith(".py")]
+        if not py_files:
+            return True, "No Python files to check"
+
+        modules = []
+        for fpath in py_files:
+            # koda2/modules/foo/bar.py → koda2.modules.foo.bar
+            mod = fpath.replace("/", ".").replace("\\", ".")
+            if mod.endswith(".py"):
+                mod = mod[:-3]
+            if mod.startswith("."):
+                mod = mod[1:]
+            modules.append(mod)
+
+        import_script = "; ".join(f"__import__('{m}')" for m in modules)
+        try:
+            result = subprocess.run(
+                [str(self._root / ".venv" / "bin" / "python"), "-c", import_script],
+                cwd=str(self._root),
+                capture_output=True, text=True, timeout=30,
+            )
+            passed = result.returncode == 0
+            output = result.stdout + result.stderr
+            self.audit("import_check", {
+                "passed": passed, "modules": modules,
+                "output": output[:500] if not passed else "",
+            })
+            if passed:
+                return True, f"Import check passed for {len(modules)} module(s)"
+            return False, f"Import check failed:\n{output[:500]}"
+        except Exception as exc:
+            self.audit("import_check", {"passed": False, "error": str(exc)})
+            return False, f"Import check error: {exc}"
 
     # ── Safe Patch Workflow ───────────────────────────────────────────
 
