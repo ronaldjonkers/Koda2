@@ -139,6 +139,44 @@ class SafetyGuard:
             logger.error("git_reset_hard_failed", error=str(exc))
             return False
 
+    # ── Package Management ─────────────────────────────────────────────
+
+    def pip_install(self, *packages: str) -> tuple[bool, str]:
+        """Install Python packages using pip in the project venv.
+
+        Returns:
+            (success, output)
+        """
+        if not packages:
+            return False, "No packages specified"
+
+        # Use the project venv python
+        python = str(self._root / ".venv" / "bin" / "python")
+        if not Path(python).exists():
+            import sys
+            python = sys.executable
+
+        try:
+            result = subprocess.run(
+                [python, "-m", "pip", "install", *packages],
+                cwd=str(self._root),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            output = result.stdout.strip()
+            if result.returncode != 0:
+                err = result.stderr.strip()
+                logger.warning("pip_install_failed", packages=packages, error=err[:300])
+                self.audit("pip_install_failed", {"packages": list(packages), "error": err[:300]})
+                return False, err
+            logger.info("pip_install_success", packages=packages)
+            self.audit("pip_install_success", {"packages": list(packages), "output": output[:300]})
+            return True, output
+        except Exception as exc:
+            logger.error("pip_install_exception", error=str(exc))
+            return False, str(exc)
+
     # ── Remote Update Detection ────────────────────────────────────────
 
     def git_fetch(self) -> bool:

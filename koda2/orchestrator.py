@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import json
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Optional
@@ -70,7 +71,7 @@ IMPORTANT RULES:
 8. Today's date/time context will be provided when available."""
 
 # Maximum tool-calling loop iterations to prevent runaway
-MAX_TOOL_ITERATIONS = 15
+MAX_TOOL_ITERATIONS = 8
 
 # If the first LLM response has more than this many tool calls, offload to background agent
 AGENT_AUTO_THRESHOLD = 4
@@ -324,6 +325,8 @@ class Orchestrator:
                 response_text = llm_response.content or ""
                 # Clean any accidental JSON from the response
                 response_text = self._clean_response_for_user(response_text)
+                if not response_text.strip():
+                    response_text = "I processed your request but couldn't formulate a response. Could you rephrase?"
                 break
 
             # ── Auto-detect complex tasks → offload to background agent ──
@@ -402,9 +405,22 @@ class Orchestrator:
                 ))
 
         else:
-            # Hit max iterations
-            response_text = "I've reached the maximum number of steps for this request. Here's what I've done so far."
+            # Hit max iterations — force a final text-only LLM call to summarise
             logger.warning("max_tool_iterations_reached", user_id=user_id, iterations=MAX_TOOL_ITERATIONS)
+            try:
+                summary_req = LLMRequest(
+                    messages=history_messages + [
+                        ChatMessage(role="user", content="Summarise what you've found and respond to the user. Do NOT call any more tools."),
+                    ],
+                    system_prompt=system,
+                    temperature=0.3,
+                )
+                summary_resp = await self.llm.complete(summary_req)
+                response_text = self._clean_response_for_user(summary_resp.content or "")
+            except Exception:
+                response_text = ""
+            if not response_text.strip():
+                response_text = "I've reached the maximum number of steps for this request. Could you try rephrasing or simplifying your question?"
 
         # Store response in memory
         await self.memory.add_conversation(
@@ -885,6 +901,40 @@ class Orchestrator:
                 url=params.get("url", ""),
             )
             return result
+
+        elif action_name == "install_package":
+            """Install a Python package using pip."""
+            packages = params.get("packages", [])
+            if isinstance(packages, str):
+                packages = [packages]
+            if not packages:
+                return {"error": "No packages specified"}
+
+            # Safety: block obviously dangerous packages
+            blocked = {"os", "sys", "subprocess", "shutil"}
+            for pkg in packages:
+                if pkg.lower().split("==")[0].split(">=")[0] in blocked:
+                    return {"error": f"Package '{pkg}' is blocked for safety"}
+
+            import subprocess as _sp
+            python = sys.executable
+            try:
+                result = _sp.run(
+                    [python, "-m", "pip", "install", *packages],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if result.returncode != 0:
+                    return {"error": result.stderr.strip()[:500], "packages": packages}
+
+                # For playwright, also install browsers
+                if any("playwright" in p.lower() for p in packages):
+                    _sp.run([python, "-m", "playwright", "install", "chromium"],
+                            capture_output=True, text=True, timeout=120)
+
+                logger.info("package_installed", packages=packages)
+                return {"installed": packages, "output": result.stdout.strip()[:300]}
+            except Exception as exc:
+                return {"error": str(exc), "packages": packages}
 
         elif action_name == "run_shell":
             result = await self.macos.run_shell(

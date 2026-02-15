@@ -746,3 +746,31 @@ class TestGitRemotePolling:
         assert monitor._check_remote_updates() is True
         safety.git_pull.assert_called_once()
         safety.request_restart.assert_called_once()
+
+
+# ── Pip Install Tests ────────────────────────────────────────────────
+
+class TestPipInstall:
+    """Tests for SafetyGuard.pip_install package management."""
+
+    def test_pip_install_no_packages(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        success, output = guard.pip_install()
+        assert success is False
+        assert "No packages" in output
+
+    def test_pip_install_success(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="Successfully installed foo", stderr="")
+            success, output = guard.pip_install("some-package")
+            assert success is True
+            assert "Successfully installed" in output
+
+    def test_pip_install_failure(self, tmp_path) -> None:
+        guard = SafetyGuard(project_root=tmp_path)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="No matching distribution")
+            success, output = guard.pip_install("nonexistent-pkg")
+            assert success is False
+            assert "No matching distribution" in output

@@ -147,7 +147,7 @@ class TestContextWindowGuard:
         assert CHARS_PER_TOKEN == 4
         assert MESSAGE_CHUNK_LIMIT == 4000
         assert DEBOUNCE_SECONDS > 0
-        assert MAX_TOOL_ITERATIONS == 15
+        assert MAX_TOOL_ITERATIONS == 8
         assert AGENT_AUTO_THRESHOLD == 4
 
     def test_history_budget_calculation(self) -> None:

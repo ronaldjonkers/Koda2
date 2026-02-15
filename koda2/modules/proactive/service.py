@@ -136,7 +136,6 @@ class ProactiveService:
                 events = await self._calendar.list_events(
                     start=now,
                     end=today_end,
-                    limit=20,
                 )
                 
                 context.meetings_today = events

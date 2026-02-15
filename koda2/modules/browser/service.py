@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import sys
 from typing import Any, Optional
 
 from koda2.logging_config import get_logger
@@ -32,9 +33,12 @@ class BrowserService:
         try:
             from playwright.async_api import async_playwright
         except ImportError:
-            raise RuntimeError(
-                "playwright is not installed. Run: pip install playwright && playwright install chromium"
-            )
+            logger.info("playwright_not_installed_auto_installing")
+            import subprocess as _sp
+            _sp.run([sys.executable, "-m", "pip", "install", "playwright"], check=True, capture_output=True)
+            _sp.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True, capture_output=True)
+            logger.info("playwright_installed_successfully")
+            from playwright.async_api import async_playwright
 
         if not self._playwright:
             self._playwright = await async_playwright().start()

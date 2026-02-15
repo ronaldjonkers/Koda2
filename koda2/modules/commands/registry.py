@@ -488,6 +488,19 @@ COMMANDS: dict[str, Command] = {
         ],
     ),
 
+    "install_package": Command(
+        name="install_package",
+        category="system",
+        description="Install Python packages using pip. Use this when a tool fails because a dependency is missing (e.g. playwright, pandas). Automatically installs browser binaries for playwright.",
+        parameters=[
+            CommandParameter("packages", "array", True, description="List of package names to install (e.g. ['playwright', 'pandas>=2.0'])"),
+        ],
+        examples=[
+            '{"action": "install_package", "params": {"packages": ["playwright"]}}',
+            '{"action": "install_package", "params": {"packages": ["pandas", "openpyxl"]}}',
+        ],
+    ),
+
     "browser_action": Command(
         name="browser_action",
         category="browser",

@@ -5,6 +5,32 @@ All notable changes to Koda2 will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-02-15
+
+### Fixed
+- **Tool loop runaway** — lowered `MAX_TOOL_ITERATIONS` from 15 → 8; AI was burning
+  14 iterations ($0.15+) for a simple "hoi joyce" greeting exploring the codebase
+- **Empty response after tool loop** — when max iterations hit, a final summary LLM
+  call is forced (no tools) so the user always gets a reply
+- **`orchestrator_no_response_for_whatsapp_message`** — guaranteed non-empty response
+  on every code path in `process_message`
+- **CalendarService.list_events() `limit` kwarg** — removed invalid keyword argument
+  in proactive service that caused `context_calendar_failed` every 10 minutes
+- **Playwright auto-install** — `BrowserService._ensure_browser()` now auto-installs
+  playwright + chromium when missing instead of crashing with RuntimeError
+
+### Added
+- **`install_package` action** — AI can now install Python packages via pip:
+  - New `install_package` command in registry (LLM-accessible)
+  - Blocks dangerous packages (os, sys, subprocess, shutil)
+  - Auto-installs chromium browser binaries when playwright is installed
+  - 120s timeout, captures output for user feedback
+- **`SafetyGuard.pip_install()`** — supervisor can install packages in the project venv
+  with full audit trail
+
+### Tests
+- 359 tests pass (3 new: pip_install no-packages, success, failure)
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
