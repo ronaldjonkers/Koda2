@@ -45,6 +45,7 @@ class ProcessMonitor:
         self._process: Optional[subprocess.Popen] = None
         self._stderr_buffer: list[str] = []
         self._running = False
+        self._graceful_restart = False
         self._start_time: float = 0
         self._last_git_check: float = 0
 
@@ -281,6 +282,7 @@ class ProcessMonitor:
                 if restart_reason:
                     logger.info("restart_signal_received", reason=restart_reason)
                     self._safety.audit("graceful_restart", {"reason": restart_reason})
+                    self._graceful_restart = True
                     self.stop_process()
                     break  # Will restart in the outer while loop
 
@@ -310,7 +312,12 @@ class ProcessMonitor:
             exit_code = self._process.returncode if self._process else -1
             stderr_output = self.last_stderr
 
-            if exit_code != 0 and self._running:
+            if self._graceful_restart:
+                # Planned restart (evolution, git pull, etc.) — not a crash
+                logger.info("graceful_restart_complete", exit_code=exit_code)
+                self._graceful_restart = False
+
+            elif exit_code != 0 and self._running:
                 logger.error("process_crashed", exit_code=exit_code)
                 self._safety.audit("process_crash", {
                     "exit_code": exit_code,

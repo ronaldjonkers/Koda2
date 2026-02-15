@@ -130,7 +130,9 @@ class ProactiveService:
         # Calendar context
         if self._calendar:
             try:
-                now = dt.datetime.now(dt.UTC)
+                from koda2.config import get_local_tz, ensure_local_tz
+                local_tz = get_local_tz()
+                now = dt.datetime.now(local_tz)
                 today_end = now.replace(hour=23, minute=59, second=59)
                 
                 events = await self._calendar.list_events(
@@ -142,8 +144,8 @@ class ProactiveService:
                 
                 # Find current and next meeting
                 for event in events:
-                    ev_start = event.start
-                    ev_end = event.end
+                    ev_start = ensure_local_tz(event.start)
+                    ev_end = ensure_local_tz(event.end)
                     
                     if ev_start <= now <= ev_end:
                         context.current_meeting = event
@@ -206,30 +208,30 @@ class ProactiveService:
         
         if context.next_meeting:
             meeting = context.next_meeting
-            start_time = meeting.get("start", now)
+            start_time = meeting.start
             time_until = (start_time - now).total_seconds() / 60  # minutes
             
             # Meeting soon (15 min warning)
             if 10 <= time_until <= 20:
                 # Check if we already sent this alert
-                alert_key = f"meeting_soon_{meeting.get('id', '')}"
+                alert_key = f"meeting_soon_{meeting.id}"
                 if not self._was_recently_alerted(alert_key):
                     alerts.append(ProactiveAlert(
                         id=str(uuid.uuid4()),
                         type=AlertType.MEETING_SOON,
                         priority=AlertPriority.HIGH,
                         title=f"📅 Meeting in {int(time_until)} minutes",
-                        message=f"'{meeting.get('title', 'Meeting')}' starts at {start_time.strftime('%H:%M')}",
-                        related_event_id=meeting.get("id"),
+                        message=f"'{meeting.title}' starts at {start_time.strftime('%H:%M')}",
+                        related_event_id=meeting.id,
                         valid_until=start_time,
                         suggested_actions=self._generate_meeting_actions(meeting, context),
-                        context={"minutes_until": time_until, "location": meeting.get("location")},
+                        context={"minutes_until": time_until, "location": meeting.location},
                     ))
                     self._last_alert_times[alert_key] = now
             
             # Preparation needed (30 min before)
             if 25 <= time_until <= 35:
-                prep_key = f"prep_needed_{meeting.get('id', '')}"
+                prep_key = f"prep_needed_{meeting.id}"
                 if not self._was_recently_alerted(prep_key):
                     # Check if prep materials exist
                     prep_suggestions = await self._suggest_prep_materials(meeting)
@@ -238,32 +240,32 @@ class ProactiveService:
                             id=str(uuid.uuid4()),
                             type=AlertType.PREPARATION_NEEDED,
                             priority=AlertPriority.MEDIUM,
-                            title=f"📝 Prep for: {meeting.get('title', 'Meeting')}",
+                            title=f"📝 Prep for: {meeting.title}",
                             message=prep_suggestions,
-                            related_event_id=meeting.get("id"),
+                            related_event_id=meeting.id,
                             suggested_actions=[
-                                {"label": "View documents", "action": "search_files", "params": {"query": meeting.get("title", "")}},
+                                {"label": "View documents", "action": "search_files", "params": {"query": meeting.title}},
                                 {"label": "Send prep message", "action": "draft_message", "params": {"context": "meeting_prep"}},
                             ],
                         ))
                         self._last_alert_times[prep_key] = now
             
             # Traffic warning (if location specified)
-            if meeting.get("location") and 20 <= time_until <= 40:
+            if meeting.location and 20 <= time_until <= 40:
                 # Simple heuristic - assume 30 min buffer needed for offsite
-                location = meeting.get("location", "").lower()
+                location = meeting.location.lower()
                 if any(word in location for word in ["client", "office", "meeting room", "conference"]):
-                    traffic_key = f"traffic_{meeting.get('id', '')}"
+                    traffic_key = f"traffic_{meeting.id}"
                     if not self._was_recently_alerted(traffic_key):
                         alerts.append(ProactiveAlert(
                             id=str(uuid.uuid4()),
                             type=AlertType.TRAFFIC_WARNING,
                             priority=AlertPriority.MEDIUM,
                             title="🚗 Leave soon for meeting",
-                            message=f"Allow extra time to get to: {meeting.get('location')}",
-                            related_event_id=meeting.get("id"),
+                            message=f"Allow extra time to get to: {meeting.location}",
+                            related_event_id=meeting.id,
                             suggested_actions=[
-                                {"label": "Open Maps", "action": "open_maps", "params": {"destination": meeting.get("location")}},
+                                {"label": "Open Maps", "action": "open_maps", "params": {"destination": meeting.location}},
                             ],
                         ))
                         self._last_alert_times[traffic_key] = now
@@ -278,29 +280,23 @@ class ProactiveService:
                             type=AlertType.MEETING_CONFLICT,
                             priority=AlertPriority.CRITICAL,
                             title="⚠️ Meeting Conflict",
-                            message=f"'{m1.get('title')}' overlaps with '{m2.get('title')}'",
-                            related_event_id=m1.get("id"),
+                            message=f"'{m1.title}' overlaps with '{m2.title}'",
+                            related_event_id=m1.id,
                             suggested_actions=[
-                                {"label": "Reschedule", "action": "suggest_reschedule", "params": {"events": [m1.get("id"), m2.get("id")]}},
+                                {"label": "Reschedule", "action": "suggest_reschedule", "params": {"events": [m1.id, m2.id]}},
                             ],
                         ))
         
         return alerts
     
-    def _meetings_overlap(self, m1: dict, m2: dict) -> bool:
-        """Check if two meetings overlap."""
-        s1, e1 = m1.get("start"), m1.get("end")
-        s2, e2 = m2.get("start"), m2.get("end")
-        
-        if not all([s1, e1, s2, e2]):
-            return False
-        
-        return s1 < e2 and s2 < e1
+    def _meetings_overlap(self, m1, m2) -> bool:
+        """Check if two meetings (CalendarEvent) overlap."""
+        return m1.start < m2.end and m2.start < m1.end
     
-    async def _suggest_prep_materials(self, meeting: dict) -> str:
+    async def _suggest_prep_materials(self, meeting) -> str:
         """Suggest preparation materials for a meeting."""
-        title = meeting.get("title", "")
-        attendees = meeting.get("attendees", [])
+        title = meeting.title or ""
+        attendees = meeting.attendees or []
         
         suggestions = []
         
@@ -316,16 +312,17 @@ class ProactiveService:
         
         # Suggest based on attendees
         if attendees:
-            suggestions.append(f"Meeting with: {', '.join(attendees[:3])}")
+            names = [a.name or a.email for a in attendees[:3]]
+            suggestions.append(f"Meeting with: {', '.join(names)}")
         
         return " ".join(suggestions) if suggestions else "Review the meeting agenda and any attached documents."
     
-    def _generate_meeting_actions(self, meeting: dict, context: UserContext) -> list[dict]:
+    def _generate_meeting_actions(self, meeting, context: UserContext) -> list[dict]:
         """Generate suggested actions for a meeting alert."""
         actions = []
         
         # Join action (for video calls)
-        location = meeting.get("location", "")
+        location = meeting.location or ""
         if any(word in location.lower() for word in ["zoom", "teams", "meet", "webex"]):
             actions.append({
                 "label": "Join meeting",
@@ -334,12 +331,12 @@ class ProactiveService:
             })
         
         # Quick message action
-        attendees = meeting.get("attendees", [])
+        attendees = meeting.attendees or []
         if attendees:
             actions.append({
                 "label": "Message attendees",
                 "action": "draft_message",
-                "params": {"recipients": attendees, "context": "running_late"},
+                "params": {"recipients": [a.email for a in attendees], "context": "running_late"},
             })
         
         # Reschedule action if tight schedule
@@ -347,7 +344,7 @@ class ProactiveService:
             actions.append({
                 "label": "Reschedule",
                 "action": "suggest_reschedule",
-                "params": {"event_id": meeting.get("id")},
+                "params": {"event_id": meeting.id},
             })
         
         return actions
@@ -404,11 +401,11 @@ class ProactiveService:
         
         # Suggest follow-up after meeting
         if context.current_meeting:
-            meeting_end = context.current_meeting.get("end")
+            meeting_end = context.current_meeting.end
             if meeting_end:
                 minutes_since_end = (context.current_time - meeting_end).total_seconds() / 60
                 if 5 <= minutes_since_end <= 30:
-                    meeting_id = context.current_meeting.get("id", "")
+                    meeting_id = context.current_meeting.id
                     followup_key = f"followup_{meeting_id}"
                     
                     if not self._was_recently_alerted(followup_key):
@@ -417,11 +414,11 @@ class ProactiveService:
                             type=AlertType.FOLLOW_UP_NEEDED,
                             priority=AlertPriority.LOW,
                             title="🤔 Follow-up from meeting?",
-                            message=f"Would you like to send a follow-up message about '{context.current_meeting.get('title')}'?",
+                            message=f"Would you like to send a follow-up message about '{context.current_meeting.title}'?",
                             related_event_id=meeting_id,
                             suggested_actions=[
-                                {"label": "Send thanks", "action": "draft_followup", "params": {"meeting": context.current_meeting, "type": "thanks"}},
-                                {"label": "Send summary", "action": "draft_followup", "params": {"meeting": context.current_meeting, "type": "summary"}},
+                                {"label": "Send thanks", "action": "draft_followup", "params": {"meeting_title": context.current_meeting.title, "type": "thanks"}},
+                                {"label": "Send summary", "action": "draft_followup", "params": {"meeting_title": context.current_meeting.title, "type": "summary"}},
                             ],
                         ))
                         self._last_alert_times[followup_key] = context.current_time
