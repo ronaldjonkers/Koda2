@@ -163,3 +163,80 @@ class TestSchedulerService:
         assert "reminder" in tasks[0].name
 
         await scheduler.stop()
+
+    @pytest.mark.asyncio
+    async def test_verify_selftest(self, scheduler: SchedulerService) -> None:
+        """Scheduler self-test fires a diagnostic job and confirms it works."""
+        await scheduler.start()
+        assert await scheduler.verify() is True
+        await scheduler.stop()
+
+    @pytest.mark.asyncio
+    async def test_fix_task_id_preserves_run_count(self, scheduler: SchedulerService) -> None:
+        """After _fix_task_id, the wrapper still increments run_count correctly."""
+        await scheduler.start()
+
+        fired = asyncio.Event()
+
+        async def callback(**kwargs):
+            fired.set()
+
+        scheduler.schedule_interval(
+            "trackable", callback, seconds=1, run_immediately=True,
+        )
+        # Simulate what restore_persisted_tasks does: rename the task ID
+        from unittest.mock import MagicMock
+        fake_rec = MagicMock()
+        fake_rec.id = "db-persisted-id-123"
+        fake_rec.name = "trackable"
+        fake_rec.run_count = 0
+        fake_rec.last_run = None
+        scheduler._fix_task_id(fake_rec)
+
+        # The task should now be stored under the new ID
+        assert "db-persisted-id-123" in scheduler._tasks
+
+        # Wait for the job to fire
+        try:
+            await asyncio.wait_for(fired.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pytest.fail("Job did not fire after _fix_task_id")
+
+        # Give a moment for the wrapper to update metadata
+        await asyncio.sleep(0.1)
+
+        task = scheduler._tasks["db-persisted-id-123"]
+        assert task.run_count >= 1, f"run_count should be >=1 but was {task.run_count}"
+        assert task.last_run is not None
+
+        await scheduler.stop()
+
+    @pytest.mark.asyncio
+    async def test_fix_task_id_preserves_next_run_time(self, scheduler: SchedulerService) -> None:
+        """_fix_task_id preserves the original next_run_time instead of resetting it."""
+        await scheduler.start()
+
+        async def noop(**kwargs):
+            pass
+
+        # Schedule with run_immediately=True so next_run_time is ~now
+        scheduler.schedule_interval("preserve_nrt", noop, hours=6, run_immediately=True)
+        old_key = list(scheduler._tasks.keys())[-1]
+        old_job = scheduler._scheduler.get_job(old_key)
+        original_nrt = old_job.next_run_time
+
+        from unittest.mock import MagicMock
+        fake_rec = MagicMock()
+        fake_rec.id = "preserved-nrt-id"
+        fake_rec.name = "preserve_nrt"
+        fake_rec.run_count = 0
+        fake_rec.last_run = None
+        scheduler._fix_task_id(fake_rec)
+
+        new_job = scheduler._scheduler.get_job("preserved-nrt-id")
+        assert new_job is not None, "Job not found after _fix_task_id"
+        # next_run_time should be close to original (not pushed out by 6 hours)
+        delta = abs((new_job.next_run_time - original_nrt).total_seconds())
+        assert delta < 2, f"next_run_time shifted by {delta}s — should be preserved"
+
+        await scheduler.stop()

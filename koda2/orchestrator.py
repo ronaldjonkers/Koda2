@@ -1650,9 +1650,18 @@ class Orchestrator:
         try:
             self.scheduler.set_executor(self)
             await self.scheduler.start()
+
+            # Self-test: prove the scheduler actually fires jobs
+            ok = await self.scheduler.verify()
+            if not ok:
+                logger.error("scheduler_BROKEN_jobs_will_not_fire")
+
             restored = await self.scheduler.restore_persisted_tasks()
             self._register_scheduled_tasks()
-            logger.info("scheduler_started", restored=restored, total=len(self.scheduler.list_tasks()))
+            logger.info("scheduler_ready", restored=restored, total=len(self.scheduler.list_tasks()), selftest=ok)
+
+            # Log every job's next_run_time for diagnostics
+            self.scheduler.log_job_schedule()
         except Exception as exc:
             logger.error("scheduler_start_failed", error=str(exc))
         

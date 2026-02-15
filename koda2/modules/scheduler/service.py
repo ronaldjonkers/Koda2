@@ -74,7 +74,44 @@ class SchedulerService:
             return
         self._scheduler.add_listener(self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
         self._scheduler.start()
-        logger.info("scheduler_started")
+        import asyncio
+        loop = asyncio.get_running_loop()
+        logger.info("scheduler_started", loop_id=id(loop), scheduler_loop_id=id(self._scheduler._eventloop), same_loop=(loop is self._scheduler._eventloop))
+
+    async def verify(self) -> bool:
+        """Run a self-test: schedule a one-shot job and confirm it fires.
+
+        Returns True if the scheduler is genuinely executing jobs.
+        """
+        import asyncio
+        fired = asyncio.Event()
+
+        async def _selftest():
+            fired.set()
+
+        self._scheduler.add_job(
+            _selftest,
+            trigger=DateTrigger(run_date=dt.datetime.now(dt.UTC) + dt.timedelta(seconds=1)),
+            id="__selftest__",
+            name="Scheduler Self-Test",
+        )
+        try:
+            await asyncio.wait_for(fired.wait(), timeout=10)
+            logger.info("scheduler_selftest_passed")
+            return True
+        except asyncio.TimeoutError:
+            logger.error("scheduler_selftest_FAILED_jobs_not_firing")
+            return False
+        finally:
+            try:
+                self._scheduler.remove_job("__selftest__")
+            except Exception:
+                pass
+
+    def log_job_schedule(self) -> None:
+        """Log each APScheduler job's next_run_time for diagnostics."""
+        for job in self._scheduler.get_jobs():
+            logger.info("scheduler_job_info", job_id=job.id, name=job.name, next_run=str(job.next_run_time), pending=job.pending)
 
     @staticmethod
     def _on_job_event(event) -> None:
@@ -103,17 +140,19 @@ class SchedulerService:
     ) -> str:
         """Schedule a one-time task at a specific datetime."""
         task_id = str(uuid4())
+        # Mutable ref so _fix_task_id can update the ID the wrapper uses
+        id_ref = [task_id]
 
         async def _wrapper():
             try:
                 await func(**(kwargs or {}))
-                meta = self._tasks.get(task_id)
+                meta = self._tasks.get(id_ref[0])
                 if meta:
                     meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
-                logger.info("task_executed", task_id=task_id, name=name)
+                logger.info("task_executed", task_id=id_ref[0], name=name)
             except Exception as exc:
-                logger.error("task_failed", task_id=task_id, name=name, error=str(exc))
+                logger.error("task_failed", task_id=id_ref[0], name=name, error=str(exc))
 
         self._scheduler.add_job(
             _wrapper,
@@ -121,10 +160,12 @@ class SchedulerService:
             id=task_id,
             name=name,
         )
-        self._tasks[task_id] = ScheduledTask(
+        meta = ScheduledTask(
             task_id=task_id, name=name, task_type="once",
             schedule_info=run_at.isoformat(), func_name=func.__name__,
         )
+        meta._id_ref = id_ref  # keep ref alive
+        self._tasks[task_id] = meta
         logger.info("task_scheduled_once", task_id=task_id, name=name, at=run_at.isoformat())
         return task_id
 
@@ -140,6 +181,7 @@ class SchedulerService:
         Cron format: minute hour day_of_month month day_of_week
         """
         task_id = str(uuid4())
+        id_ref = [task_id]
         parts = cron_expression.split()
         trigger_kwargs: dict[str, str] = {}
         fields = ["minute", "hour", "day", "month", "day_of_week"]
@@ -150,13 +192,13 @@ class SchedulerService:
         async def _wrapper():
             try:
                 await func(**(kwargs or {}))
-                meta = self._tasks.get(task_id)
+                meta = self._tasks.get(id_ref[0])
                 if meta:
                     meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
-                logger.info("recurring_task_executed", task_id=task_id, name=name)
+                logger.info("recurring_task_executed", task_id=id_ref[0], name=name)
             except Exception as exc:
-                logger.error("recurring_task_failed", task_id=task_id, error=str(exc))
+                logger.error("recurring_task_failed", task_id=id_ref[0], error=str(exc))
 
         self._scheduler.add_job(
             _wrapper,
@@ -164,10 +206,12 @@ class SchedulerService:
             id=task_id,
             name=name,
         )
-        self._tasks[task_id] = ScheduledTask(
+        meta = ScheduledTask(
             task_id=task_id, name=name, task_type="cron",
             schedule_info=cron_expression, func_name=func.__name__,
         )
+        meta._id_ref = id_ref
+        self._tasks[task_id] = meta
         logger.info("task_scheduled_recurring", task_id=task_id, name=name, cron=cron_expression)
         return task_id
 
@@ -187,17 +231,18 @@ class SchedulerService:
             run_immediately: If True, fire once right away then repeat at interval.
         """
         task_id = str(uuid4())
+        id_ref = [task_id]
 
         async def _wrapper():
             try:
                 await func(**(kwargs or {}))
-                meta = self._tasks.get(task_id)
+                meta = self._tasks.get(id_ref[0])
                 if meta:
                     meta.last_run = dt.datetime.now(dt.UTC)
                     meta.run_count += 1
-                logger.info("interval_task_executed", task_id=task_id, name=name)
+                logger.info("interval_task_executed", task_id=id_ref[0], name=name)
             except Exception as exc:
-                logger.error("interval_task_failed", task_id=task_id, error=str(exc))
+                logger.error("interval_task_failed", task_id=id_ref[0], error=str(exc))
 
         next_run = dt.datetime.now(dt.UTC) if run_immediately else None
         self._scheduler.add_job(
@@ -208,10 +253,12 @@ class SchedulerService:
             next_run_time=next_run,
         )
         interval_str = f"{hours}h{minutes}m{seconds}s"
-        self._tasks[task_id] = ScheduledTask(
+        meta = ScheduledTask(
             task_id=task_id, name=name, task_type="interval",
             schedule_info=interval_str, func_name=func.__name__,
         )
+        meta._id_ref = id_ref
+        self._tasks[task_id] = meta
         logger.info("task_scheduled_interval", task_id=task_id, name=name, interval=interval_str)
         return task_id
 
@@ -400,26 +447,36 @@ class SchedulerService:
 
         When we call schedule_recurring/interval/once, a new UUID is generated.
         We need to swap it with the original DB ID so cancel works correctly.
+
+        Uses APScheduler's modify_job to preserve next_run_time (remove+add
+        would recalculate it from scratch, breaking interval schedules).
         """
-        # Find the most recently added task (last in dict)
         if not self._tasks:
             return
         last_key = list(self._tasks.keys())[-1]
         last_task = self._tasks.pop(last_key)
 
-        # Remove the auto-generated APScheduler job and re-add with correct ID
+        # Update the mutable id_ref so the _wrapper closure uses the new ID
+        if hasattr(last_task, '_id_ref'):
+            last_task._id_ref[0] = rec.id
+
+        # Rename the APScheduler job ID while preserving trigger + next_run_time
         try:
             job = self._scheduler.get_job(last_key)
             if job:
+                # Save the next_run_time before removing
+                saved_next_run = job.next_run_time
+                saved_func = job.func
+                saved_trigger = job.trigger
                 self._scheduler.remove_job(last_key)
-                job.id = rec.id
                 self._scheduler.add_job(
-                    job.func, trigger=job.trigger, id=rec.id, name=rec.name,
+                    saved_func, trigger=saved_trigger,
+                    id=rec.id, name=rec.name,
+                    next_run_time=saved_next_run,
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("fix_task_id_failed", task_id=rec.id, error=str(exc))
 
-        # Store with the correct ID
         last_task.task_id = rec.id
         last_task.persisted = True
         last_task.run_count = rec.run_count
