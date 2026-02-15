@@ -1277,6 +1277,14 @@ async function cancelScheduledTask(id) {
         loadScheduler();
     } catch(e) { console.error('Cancel scheduled task failed', e); }
 }
+async function triggerScheduledTask(id, btn) {
+    try {
+        btn.disabled = true; btn.textContent = 'Running…';
+        const r = await fetch(`/api/scheduler/tasks/${id}/trigger`, { method: 'POST' });
+        if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || r.statusText); }
+        btn.textContent = '✓ Done'; setTimeout(() => loadScheduler(), 1200);
+    } catch(e) { btn.textContent = '✗ Failed'; console.error('Trigger failed', e); setTimeout(() => loadScheduler(), 2000); }
+}
 function schedTypeIcon(type) {
     if (type === 'cron') return '🔄';
     if (type === 'interval') return '⏱';
@@ -1322,6 +1330,7 @@ async function loadScheduler() {
                         <span style="font-size:14px">${icon}</span>
                         <span style="font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name || t.id)}</span>
                         <span class="tag ${typeCls}" style="font-size:8px;padding:0 5px">${esc(t.type)}</span>
+                        <button class="task-cancel" style="border-color:var(--accent);color:var(--accent)" onclick="triggerScheduledTask('${t.id}', this)">Run Now</button>
                         <button class="task-cancel" onclick="cancelScheduledTask('${t.id}')">Remove</button>
                     </div>
                     <div style="display:flex;gap:12px;font-size:10px;color:var(--tx-2);flex-wrap:wrap">

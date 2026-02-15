@@ -761,6 +761,19 @@ async def list_scheduled_tasks() -> list[dict[str, Any]]:
     return results
 
 
+@router.post("/scheduler/tasks/{task_id}/trigger")
+async def trigger_scheduled_task(task_id: str) -> dict[str, Any]:
+    """Manually trigger a scheduled task immediately (keeps its regular schedule)."""
+    orch = get_orchestrator()
+    try:
+        success = await orch.scheduler.run_now(task_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Task execution failed: {exc}")
+    if not success:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    return {"triggered": True, "task_id": task_id}
+
+
 @router.delete("/scheduler/tasks/{task_id}")
 async def cancel_scheduled_task(task_id: str) -> dict[str, Any]:
     """Cancel a scheduled task."""

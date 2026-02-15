@@ -228,6 +228,31 @@ class SchedulerService:
         logger.info("task_cancelled", task_id=task_id)
         return True
 
+    async def run_now(self, task_id: str) -> bool:
+        """Manually trigger a scheduled task immediately.
+
+        The task keeps its regular schedule — this is an extra one-off execution.
+        Returns True if the task was found and triggered.
+        """
+        task = self._tasks.get(task_id)
+        if task is None:
+            return False
+        job = self._scheduler.get_job(task_id)
+        if job is None:
+            return False
+        logger.info("task_manual_trigger", task_id=task_id, name=task.name)
+        try:
+            # Run the job's function directly
+            result = job.func()
+            # If it's a coroutine, await it
+            import asyncio
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception as exc:
+            logger.error("task_manual_trigger_failed", task_id=task_id, error=str(exc))
+            raise
+        return True
+
     def list_tasks(self) -> list[ScheduledTask]:
         """List all registered tasks."""
         return list(self._tasks.values())

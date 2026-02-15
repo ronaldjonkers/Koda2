@@ -142,12 +142,12 @@ class ProactiveService:
                 
                 # Find current and next meeting
                 for event in events:
-                    start = event.get("start", now)
-                    end = event.get("end", now)
+                    ev_start = event.start
+                    ev_end = event.end
                     
-                    if start <= now <= end:
+                    if ev_start <= now <= ev_end:
                         context.current_meeting = event
-                    elif start > now and not context.next_meeting:
+                    elif ev_start > now and not context.next_meeting:
                         context.next_meeting = event
                         
             except Exception as exc:
