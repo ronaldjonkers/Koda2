@@ -1,4 +1,7 @@
-"""Central orchestrator — the brain connecting all modules and processing user intent."""
+"""Central orchestrator — the brain connecting all modules and processing user intent.
+
+This module contains the Orchestrator class which coordinates all services.
+"""
 
 from __future__ import annotations
 

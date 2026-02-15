@@ -151,7 +151,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     set_orchestrator(_orchestrator)
 
     # Full startup: scheduler + restore persisted tasks + system tasks + proactive + task queue + plugins
-    await _orchestrator.startup()
+    if hasattr(_orchestrator, "startup"):
+        await _orchestrator.startup()
+    else:
+        logger.error("orchestrator_missing_startup_method — run: git fetch origin && git reset --hard origin/main")
 
     # Initialize WebSocket with orchestrator's task queue and metrics
     from koda2.dashboard.websocket import DashboardWebSocket
