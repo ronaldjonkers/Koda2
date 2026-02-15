@@ -56,6 +56,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Skipped koda2/modules/commands/registry.py: old_text not found
 
 
+### Auto-improvement (2026-02-15)
+- **Remove calendar conflict checking functionality from the codebase** (risk: low)
+  - Skipped koda2/modules/calendar/models.py: old_text not found
+  - Skipped koda2/modules/calendar/service.py: old_text not found
+  - Skipped tests/test_calendar.py: old_text not found
+  - Skipped tests/test_calendar_service.py: old_text not found
+
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
