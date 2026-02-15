@@ -10,6 +10,7 @@ import datetime as dt
 from typing import Any, Callable, Coroutine, Optional
 from uuid import uuid4
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_JOB_MISSED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -52,7 +53,13 @@ class SchedulerService:
     """Manages scheduled tasks, reminders, and recurring jobs."""
 
     def __init__(self) -> None:
-        self._scheduler = AsyncIOScheduler()
+        self._scheduler = AsyncIOScheduler(
+            job_defaults={
+                "misfire_grace_time": 300,  # 5 min grace (default 1s is way too strict)
+                "coalesce": True,           # merge missed runs into one
+                "max_instances": 1,
+            },
+        )
         self._tasks: dict[str, ScheduledTask] = {}
         self._event_handlers: dict[str, list[AsyncTask]] = {}
         self._executor: Optional[Any] = None  # Set by orchestrator for restoring tasks
@@ -65,8 +72,20 @@ class SchedulerService:
         """Start the scheduler (idempotent — safe to call multiple times)."""
         if self._scheduler.running:
             return
+        self._scheduler.add_listener(self._on_job_event, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR | EVENT_JOB_MISSED)
         self._scheduler.start()
         logger.info("scheduler_started")
+
+    @staticmethod
+    def _on_job_event(event) -> None:
+        """Log APScheduler job events for diagnostics."""
+        job_id = getattr(event, "job_id", "?")
+        if event.code == EVENT_JOB_EXECUTED:
+            logger.info("apscheduler_job_executed", job_id=job_id)
+        elif event.code == EVENT_JOB_ERROR:
+            logger.error("apscheduler_job_error", job_id=job_id, error=str(getattr(event, "exception", "")))
+        elif event.code == EVENT_JOB_MISSED:
+            logger.warning("apscheduler_job_missed", job_id=job_id)
 
     async def stop(self) -> None:
         """Shut down the scheduler gracefully."""
@@ -160,8 +179,13 @@ class SchedulerService:
         hours: int = 0,
         seconds: int = 0,
         kwargs: Optional[dict[str, Any]] = None,
+        run_immediately: bool = False,
     ) -> str:
-        """Schedule a task at a fixed interval."""
+        """Schedule a task at a fixed interval.
+
+        Args:
+            run_immediately: If True, fire once right away then repeat at interval.
+        """
         task_id = str(uuid4())
 
         async def _wrapper():
@@ -175,11 +199,13 @@ class SchedulerService:
             except Exception as exc:
                 logger.error("interval_task_failed", task_id=task_id, error=str(exc))
 
+        next_run = dt.datetime.now(dt.UTC) if run_immediately else None
         self._scheduler.add_job(
             _wrapper,
             trigger=IntervalTrigger(hours=hours, minutes=minutes, seconds=seconds),
             id=task_id,
             name=name,
+            next_run_time=next_run,
         )
         interval_str = f"{hours}h{minutes}m{seconds}s"
         self._tasks[task_id] = ScheduledTask(

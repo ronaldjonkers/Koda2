@@ -1634,6 +1634,7 @@ class Orchestrator:
                 name="Contact Sync",
                 func=_sync_contacts,
                 hours=6,
+                run_immediately=True,
             )
 
         # ── Email check — every 15 minutes ──
@@ -1651,6 +1652,7 @@ class Orchestrator:
                 name="Email Check (unread)",
                 func=_check_email,
                 minutes=15,
+                run_immediately=True,
             )
 
         # ── Calendar sync — every 30 minutes ──
@@ -1668,6 +1670,7 @@ class Orchestrator:
                 name="Calendar Sync",
                 func=_sync_calendar,
                 minutes=30,
+                run_immediately=True,
             )
 
         # ── Daily morning summary — every day at 07:00 ──
@@ -1724,6 +1727,7 @@ class Orchestrator:
                 name="Proactive Alerts Check",
                 func=_proactive_check,
                 minutes=10,
+                run_immediately=True,
             )
 
         logger.info("scheduled_tasks_registered", count=len(self.scheduler.list_tasks()))

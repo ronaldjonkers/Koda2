@@ -81,6 +81,33 @@ class TestSchedulerService:
         await scheduler.stop()
 
     @pytest.mark.asyncio
+    async def test_schedule_interval_run_immediately(self, scheduler: SchedulerService) -> None:
+        """Interval task with run_immediately fires within seconds."""
+        await scheduler.start()
+
+        fired = asyncio.Event()
+
+        async def callback(**kwargs):
+            fired.set()
+
+        scheduler.schedule_interval(
+            "immediate_check", callback, minutes=60, run_immediately=True,
+        )
+
+        # Should fire almost immediately (within 3 seconds)
+        try:
+            await asyncio.wait_for(fired.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            pytest.fail("run_immediately task did not fire within 3 seconds")
+
+        await scheduler.stop()
+
+    def test_misfire_grace_time_configured(self, scheduler: SchedulerService) -> None:
+        """Scheduler has a generous misfire_grace_time (not the 1s default)."""
+        grace = scheduler._scheduler._job_defaults.get("misfire_grace_time", 1)
+        assert grace >= 60, f"misfire_grace_time too low: {grace}s (jobs get silently skipped)"
+
+    @pytest.mark.asyncio
     async def test_cancel_task(self, scheduler: SchedulerService) -> None:
         """Cancelling a task removes it."""
         await scheduler.start()
