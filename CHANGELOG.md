@@ -70,6 +70,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Skipped tests/test_messaging.py: old_text not found
 
 
+### Auto-improvement (2026-02-15)
+- **Fix timezone handling in calendar event creation by ensuring consistent Europe/Amsterdam timezone usage** (risk: low)
+  - Skipped koda2/modules/calendar/service.py: old_text not found
+  - Skipped koda2/modules/calendar/service.py: old_text not found
+
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
