@@ -46,7 +46,7 @@ MODEL_TIERS: dict[TaskComplexity, list[str]] = {
         "openai/gpt-4o-mini",                   # affordable
     ],
     TaskComplexity.HEAVY: [
-        "anthropic/claude-sonnet-4-20250514",   # best for code
+        "anthropic/claude-3.5-sonnet-20241022", # best for code
         "anthropic/claude-3.5-sonnet",          # fallback
         "openai/gpt-4o",                        # fallback
     ],

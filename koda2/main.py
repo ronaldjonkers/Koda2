@@ -29,6 +29,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
+# Cleanup stale package directories that shadow module files
+# (e.g. routes/ directory leftover from a refactor that shadows routes.py)
+_api_dir = Path(__file__).parent / "api"
+_stale_routes_dir = _api_dir / "routes"
+if _stale_routes_dir.is_dir() and (_api_dir / "routes.py").exists():
+    import shutil
+    shutil.rmtree(_stale_routes_dir, ignore_errors=True)
+
 from koda2 import __version__
 from koda2.api.routes import router, set_orchestrator
 from koda2.config import get_settings
