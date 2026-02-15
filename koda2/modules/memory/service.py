@@ -214,6 +214,65 @@ class MemoryService:
             result = await session.execute(stmt)
             return list(result.scalars().all())
 
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: str | None = None,
+        category: str | None = None,
+        importance: float | None = None,
+    ) -> MemoryEntry | None:
+        """Update a memory entry's content, category, or importance."""
+        async with get_session() as session:
+            result = await session.execute(
+                select(MemoryEntry).where(MemoryEntry.id == memory_id)
+            )
+            entry = result.scalar_one_or_none()
+            if not entry:
+                return None
+            if content is not None:
+                entry.content = content
+            if category is not None:
+                entry.category = category
+            if importance is not None:
+                entry.importance = importance
+            entry.updated_at = dt.datetime.now(dt.UTC)
+            await session.flush()
+
+            # Re-index in vector store with updated content
+            if content is not None:
+                try:
+                    self.vector.add(
+                        doc_id=memory_id,
+                        text=entry.content,
+                        metadata={
+                            "user_id": entry.user_id,
+                            "category": entry.category,
+                            "importance": entry.importance,
+                        },
+                    )
+                except Exception:
+                    pass
+            logger.info("memory_updated", memory_id=memory_id)
+            return entry
+
+    async def list_all_memories(
+        self,
+        category: str | None = None,
+        limit: int = 100,
+    ) -> list[MemoryEntry]:
+        """List all active memory entries across all users (for dashboard)."""
+        async with get_session() as session:
+            stmt = (
+                select(MemoryEntry)
+                .where(MemoryEntry.active == True)  # noqa: E712
+                .order_by(MemoryEntry.updated_at.desc())
+                .limit(limit)
+            )
+            if category:
+                stmt = stmt.where(MemoryEntry.category == category)
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory entry by ID (soft-delete: sets active=False)."""
         async with get_session() as session:

@@ -243,6 +243,58 @@ class Orchestrator:
         except Exception:
             pass  # typing indicators are best-effort
 
+    async def _auto_learn(self, user_id: str, user_msg: str, assistant_msg: str) -> None:
+        """Extract learnable facts/preferences from a conversation turn.
+
+        Runs as a background task after each response. Uses a cheap/fast LLM
+        call to identify facts worth remembering long-term.
+        """
+        # Skip very short or system messages
+        if len(user_msg) < 15 or not assistant_msg:
+            return
+        try:
+            extract_prompt = (
+                "Analyze this conversation snippet and extract any personal facts, preferences, "
+                "habits, or important information the user revealed about themselves. "
+                "Return a JSON array of objects with 'category' (one of: preference, fact, "
+                "contact_info, habit, important) and 'content' (concise statement). "
+                "Return an EMPTY array [] if nothing worth remembering. "
+                "Only extract EXPLICIT information, never infer.\n\n"
+                f"User: {user_msg[:500]}\nAssistant: {assistant_msg[:500]}"
+            )
+            resp = await self.llm.complete(LLMRequest(
+                messages=[ChatMessage(role="user", content=extract_prompt)],
+                system_prompt="You are a memory extraction engine. Return ONLY valid JSON.",
+                temperature=0.0,
+                max_tokens=512,
+            ))
+            raw = (resp.content or "").strip()
+            # Parse JSON from response (handle markdown fences)
+            if "```" in raw:
+                raw = raw.split("```")[1]
+                if raw.startswith("json"):
+                    raw = raw[4:]
+                raw = raw.strip()
+            items = json.loads(raw) if raw.startswith("[") else []
+            if not isinstance(items, list):
+                items = []
+
+            for item in items[:3]:  # max 3 facts per message
+                cat = item.get("category", "fact")
+                content = item.get("content", "").strip()
+                if not content or len(content) < 5:
+                    continue
+                # Dedup: skip if we already have a very similar memory
+                existing = self.memory.recall(content, user_id=user_id, n=1, max_distance=0.15)
+                if existing:
+                    continue
+                await self.memory.store_memory(
+                    user_id, cat, content, importance=0.6, source="auto-learn",
+                )
+                logger.info("auto_learn_stored", user_id=user_id, category=cat, content=content[:80])
+        except Exception as exc:
+            logger.debug("auto_learn_failed", error=str(exc))
+
     def _get_tool_definitions(self) -> list[dict[str, Any]]:
         """Get OpenAI-format tool definitions from the command registry."""
         return self.commands.to_openai_tools()
@@ -270,12 +322,26 @@ class Orchestrator:
         await self._send_typing(user_id, channel)
 
         # Build context with token-aware pruning (inspired by OpenClaw context-window-guard)
-        context = self.memory.recall(message, user_id=user_id, n=3, max_distance=0.4)
-        context_str = "\n".join(f"- {c['content']}" for c in context) if context else ""
+        # 1) Semantic recall — find memories relevant to this specific message
+        context = self.memory.recall(message, user_id=user_id, n=5, max_distance=0.45)
+        recall_str = "\n".join(f"- {c['content']}" for c in context) if context else ""
+
+        # 2) Structured memories — load user preferences, facts, and habits
+        structured_parts: list[str] = []
+        try:
+            for cat in ("preference", "fact", "contact_info", "habit", "important"):
+                entries = await self.memory.list_memories(user_id, category=cat, limit=10)
+                for e in entries:
+                    structured_parts.append(f"[{e.category}] {e.content}")
+        except Exception:
+            pass
+        structured_str = "\n".join(structured_parts) if structured_parts else ""
 
         system = self._get_system_prompt()
-        if context_str:
-            system += f"\n\nRelevant memory:\n{context_str}"
+        if structured_str:
+            system += f"\n\nUser knowledge (always consider this):\n{structured_str}"
+        if recall_str:
+            system += f"\n\nRelevant context from memory:\n{recall_str}"
 
         # Estimate system prompt tokens
         system_tokens = len(system) // CHARS_PER_TOKEN
@@ -453,6 +519,9 @@ class Orchestrator:
         await log_action(user_id, "message_processed", "orchestrator", {
             "tool_calls": len(action_log), "iterations": iteration, "tokens": total_tokens,
         })
+
+        # Auto-learn: extract facts/preferences in the background
+        asyncio.create_task(self._auto_learn(user_id, message, response_text))
 
         return {
             "response": response_text,

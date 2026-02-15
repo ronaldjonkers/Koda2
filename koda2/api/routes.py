@@ -505,19 +505,23 @@ async def search_memory(
 async def list_memories(
     user_id: str = "default",
     category: Optional[str] = None,
-    limit: int = Query(50),
+    limit: int = Query(100),
 ) -> list[dict[str, Any]]:
     """List all stored memories for a user."""
     orch = get_orchestrator()
     entries = await orch.memory.list_memories(user_id, category=category, limit=limit)
-    return [{
-        "id": e.id,
-        "category": e.category,
-        "content": e.content,
-        "importance": e.importance,
-        "source": e.source,
-        "created_at": e.created_at.isoformat() if e.created_at else None,
-    } for e in entries]
+    return [_memory_to_dict(e) for e in entries]
+
+
+@router.get("/memory/all")
+async def list_all_memories(
+    category: Optional[str] = None,
+    limit: int = Query(100),
+) -> list[dict[str, Any]]:
+    """List all memories across all users (for dashboard)."""
+    orch = get_orchestrator()
+    entries = await orch.memory.list_all_memories(category=category, limit=limit)
+    return [_memory_to_dict(e) for e in entries]
 
 
 @router.get("/memory/stats")
@@ -525,6 +529,28 @@ async def memory_stats(user_id: str = "default") -> dict[str, Any]:
     """Get memory statistics."""
     orch = get_orchestrator()
     return await orch.memory.get_memory_stats(user_id)
+
+
+class MemoryUpdateRequest(BaseModel):
+    """Memory update request."""
+    content: Optional[str] = None
+    category: Optional[str] = None
+    importance: Optional[float] = None
+
+
+@router.put("/memory/{memory_id}")
+async def update_memory(memory_id: str, request: MemoryUpdateRequest) -> dict[str, Any]:
+    """Update a memory entry."""
+    orch = get_orchestrator()
+    entry = await orch.memory.update_memory(
+        memory_id,
+        content=request.content,
+        category=request.category,
+        importance=request.importance,
+    )
+    if not entry:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return _memory_to_dict(entry)
 
 
 @router.delete("/memory/{memory_id}")
@@ -535,6 +561,20 @@ async def delete_memory(memory_id: str) -> dict[str, Any]:
     if not success:
         raise HTTPException(status_code=404, detail="Memory not found")
     return {"deleted": True, "id": memory_id}
+
+
+def _memory_to_dict(e) -> dict[str, Any]:
+    """Convert a MemoryEntry to a JSON-serializable dict."""
+    return {
+        "id": e.id,
+        "user_id": e.user_id,
+        "category": e.category,
+        "content": e.content,
+        "importance": e.importance,
+        "source": e.source,
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+        "updated_at": e.updated_at.isoformat() if e.updated_at else None,
+    }
 
 
 # ── Webhooks ──────────────────────────────────────────────────────────

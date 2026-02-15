@@ -170,6 +170,68 @@ class TestMemoryServiceMemoryEntries:
         assert "morning" in results[0]["content"]
 
 
+    @pytest.mark.asyncio
+    async def test_update_memory_content(self, memory_service, mock_vector) -> None:
+        """Updating memory content updates DB and re-indexes vector."""
+        entry = await memory_service.store_memory("u1", "fact", "Old content", importance=0.5)
+        updated = await memory_service.update_memory(entry.id, content="New content")
+        assert updated is not None
+        assert updated.content == "New content"
+        # Vector store should have been called again for re-index
+        assert mock_vector.add.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_update_memory_category(self, memory_service, mock_vector) -> None:
+        """Updating memory category works."""
+        entry = await memory_service.store_memory("u1", "fact", "Some info")
+        updated = await memory_service.update_memory(entry.id, category="preference")
+        assert updated.category == "preference"
+
+    @pytest.mark.asyncio
+    async def test_update_memory_importance(self, memory_service, mock_vector) -> None:
+        """Updating memory importance works."""
+        entry = await memory_service.store_memory("u1", "fact", "Info", importance=0.3)
+        updated = await memory_service.update_memory(entry.id, importance=0.9)
+        assert updated.importance == 0.9
+
+    @pytest.mark.asyncio
+    async def test_update_memory_not_found(self, memory_service) -> None:
+        """Updating non-existent memory returns None."""
+        result = await memory_service.update_memory("nonexistent-id", content="x")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_list_all_memories(self, memory_service, mock_vector) -> None:
+        """list_all_memories returns entries across all users."""
+        await memory_service.store_memory("user_a", "fact", "Fact A")
+        await memory_service.store_memory("user_b", "preference", "Pref B")
+        all_mems = await memory_service.list_all_memories()
+        assert len(all_mems) == 2
+
+    @pytest.mark.asyncio
+    async def test_list_all_memories_category_filter(self, memory_service, mock_vector) -> None:
+        """list_all_memories can filter by category."""
+        await memory_service.store_memory("u1", "fact", "A fact")
+        await memory_service.store_memory("u1", "preference", "A preference")
+        facts = await memory_service.list_all_memories(category="fact")
+        assert len(facts) == 1
+        assert facts[0].category == "fact"
+
+    @pytest.mark.asyncio
+    async def test_delete_memory(self, memory_service, mock_vector) -> None:
+        """Deleting a memory soft-deletes it."""
+        entry = await memory_service.store_memory("u1", "fact", "To delete")
+        assert await memory_service.delete_memory(entry.id) is True
+        # Should not appear in list anymore
+        remaining = await memory_service.list_memories("u1")
+        assert len(remaining) == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_memory_not_found(self, memory_service) -> None:
+        """Deleting non-existent memory returns False."""
+        assert await memory_service.delete_memory("ghost-id") is False
+
+
 class TestMemoryServiceContacts:
     """Tests for contact management."""
 

@@ -393,12 +393,13 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
   <div id="mem-form" style="display:none;padding:12px 16px;background:var(--bg-2);border-radius:8px;margin-bottom:12px">
     <div style="display:flex;gap:8px;margin-bottom:8px">
       <select id="mem-cat" style="padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--tx-1);font-size:12px;min-width:120px">
-        <option value="note">Note</option>
         <option value="fact">Fact</option>
         <option value="preference">Preference</option>
-        <option value="project">Project</option>
-        <option value="contact">Contact</option>
         <option value="habit">Habit</option>
+        <option value="contact_info">Contact Info</option>
+        <option value="important">Important</option>
+        <option value="note">Note</option>
+        <option value="project">Project</option>
       </select>
       <input id="mem-content" class="search-input" placeholder="What should I remember?" style="flex:1">
       <button class="btn btn-primary btn-sm" onclick="addMemory()">Save</button>
@@ -408,15 +409,59 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
   <!-- Stats bar -->
   <div style="font-size:10px;color:var(--tx-3);padding:0 4px 6px" id="mem-stats"></div>
 
+  <!-- Category filter tabs -->
+  <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px" id="mem-filters">
+    <button class="task-filter active" data-cat="" onclick="filterMemory(this,'')">All</button>
+    <button class="task-filter" data-cat="fact" onclick="filterMemory(this,'fact')">Fact</button>
+    <button class="task-filter" data-cat="preference" onclick="filterMemory(this,'preference')">Preference</button>
+    <button class="task-filter" data-cat="habit" onclick="filterMemory(this,'habit')">Habit</button>
+    <button class="task-filter" data-cat="contact_info" onclick="filterMemory(this,'contact_info')">Contact</button>
+    <button class="task-filter" data-cat="important" onclick="filterMemory(this,'important')">Important</button>
+    <button class="task-filter" data-cat="note" onclick="filterMemory(this,'note')">Note</button>
+    <button class="task-filter" data-cat="project" onclick="filterMemory(this,'project')">Project</button>
+  </div>
+
   <!-- Search -->
   <div class="search-bar">
-    <input class="search-input" id="mem-q" placeholder="Search memories...">
+    <input class="search-input" id="mem-q" placeholder="Search memories (semantic)...">
     <button class="btn btn-primary btn-sm" onclick="searchMemory()">Search</button>
   </div>
 
   <!-- Memory list -->
   <div class="panel"><div class="panel-body tall" id="mem-results"><div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Loading memories...</div></div></div></div>
 </section>
+
+<!-- ── Memory edit modal ───────────────────────────────── -->
+<div id="mem-modal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.6);display:none;place-items:center" onclick="if(event.target===this)closeMemModal()">
+  <div style="background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px 24px;width:480px;max-width:90vw;animation:fadeIn .15s ease">
+    <h3 style="font-size:15px;font-weight:600;margin-bottom:14px">Edit Memory</h3>
+    <input type="hidden" id="edit-mem-id">
+    <div style="margin-bottom:10px">
+      <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Category</label>
+      <select id="edit-mem-cat" style="width:100%;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--tx-0);font-size:12px">
+        <option value="fact">Fact</option>
+        <option value="preference">Preference</option>
+        <option value="habit">Habit</option>
+        <option value="contact_info">Contact Info</option>
+        <option value="important">Important</option>
+        <option value="note">Note</option>
+        <option value="project">Project</option>
+      </select>
+    </div>
+    <div style="margin-bottom:10px">
+      <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Content</label>
+      <textarea id="edit-mem-content" style="width:100%;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--tx-0);font-size:12px;resize:vertical;min-height:60px;outline:none" rows="3"></textarea>
+    </div>
+    <div style="margin-bottom:14px">
+      <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Importance: <span id="edit-mem-imp-val">0.5</span></label>
+      <input type="range" id="edit-mem-imp" min="0" max="1" step="0.1" value="0.5" style="width:100%" oninput="$('edit-mem-imp-val').textContent=this.value">
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:6px">
+      <button class="btn btn-ghost btn-sm" onclick="closeMemModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveMemEdit()">Save</button>
+    </div>
+  </div>
+</div>
 
 <!-- ═══ INTEGRATIONS ════════════════════════════════════ -->
 <section class="section" id="section-integrations">
@@ -940,6 +985,7 @@ async function syncContacts() {
 }
 
 /* ── Memory ─────────────────────────────────────────────── */
+let _memCatFilter = '';
 $('mem-q').addEventListener('keydown', e => { if (e.key === 'Enter') searchMemory(); });
 
 function toggleMemoryForm() {
@@ -965,6 +1011,7 @@ async function addMemory() {
 }
 
 async function deleteMemory(id) {
+    if (!confirm('Delete this memory?')) return;
     try {
         await fetch(`/api/memory/${id}`, { method: 'DELETE' });
         loadMemory();
@@ -972,40 +1019,85 @@ async function deleteMemory(id) {
 }
 
 function memCatCls(cat) {
-    const m = { preference:'tag-purple', fact:'tag-blue', note:'tag-green', project:'tag-amber', contact:'tag-red', habit:'tag-blue' };
-    return m[cat] || 'tag-blue';
+    const m = { preference:'tag-amber', fact:'tag-blue', note:'tag-green', project:'tag-amber', contact_info:'tag-red', habit:'tag-blue', important:'tag-red', webhook:'tag-gray' };
+    return m[cat] || 'tag-gray';
+}
+
+function filterMemory(btn, cat) {
+    _memCatFilter = cat;
+    document.querySelectorAll('#mem-filters .task-filter').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadMemory();
+}
+
+function openMemEdit(m) {
+    $('edit-mem-id').value = m.id;
+    $('edit-mem-cat').value = m.category;
+    $('edit-mem-content').value = m.content;
+    $('edit-mem-imp').value = m.importance || 0.5;
+    $('edit-mem-imp-val').textContent = m.importance || 0.5;
+    const modal = $('mem-modal');
+    modal.style.display = 'grid';
+}
+function closeMemModal() { $('mem-modal').style.display = 'none'; }
+
+async function saveMemEdit() {
+    const id = $('edit-mem-id').value;
+    const payload = {
+        content: $('edit-mem-content').value.trim(),
+        category: $('edit-mem-cat').value,
+        importance: parseFloat($('edit-mem-imp').value),
+    };
+    if (!payload.content) return;
+    try {
+        await fetch(`/api/memory/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        closeMemModal();
+        loadMemory();
+    } catch(e) { console.error('Update memory failed', e); }
+}
+
+function renderMemoryRow(m) {
+    const catCls = memCatCls(m.category);
+    const date = m.updated_at ? timeAgo(m.updated_at) : (m.created_at ? timeAgo(m.created_at) : '');
+    const src = m.source ? `<span style="font-size:9px;color:var(--tx-3)">via ${esc(m.source)}</span>` : '';
+    const uid = m.user_id && m.user_id !== 'default' ? `<span style="font-size:9px;color:var(--tx-3)">${esc(m.user_id)}</span>` : '';
+    const imp = m.importance || 0;
+    const impColor = imp >= 0.8 ? 'var(--red)' : imp >= 0.5 ? 'var(--amber)' : 'var(--tx-3)';
+    const impBar = `<div style="width:30px;height:3px;background:var(--bg-4);border-radius:2px;flex-shrink:0" title="Importance: ${imp}"><div style="width:${imp*100}%;height:100%;background:${impColor};border-radius:2px"></div></div>`;
+    const mJson = JSON.stringify(m).replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+    return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
+        <div style="display:flex;gap:6px;width:100%;align-items:center;flex-wrap:wrap">
+            <span class="tag ${catCls}" style="font-size:9px;padding:1px 6px">${esc(m.category)}</span>
+            ${impBar} ${src} ${uid}
+            <span style="font-size:9px;color:var(--tx-3);margin-left:auto">${date}</span>
+            <button class="task-cancel" onclick='openMemEdit(${mJson})' style="border-color:var(--accent);color:var(--accent)">Edit</button>
+            <button class="task-cancel" onclick="deleteMemory('${m.id}')">Delete</button>
+        </div>
+        <div style="font-size:12px;line-height:1.5;color:var(--tx-1);word-break:break-word">${esc(m.content)}</div>
+    </div>`;
 }
 
 async function loadMemory() {
     try {
+        const catQ = _memCatFilter ? `&category=${_memCatFilter}` : '';
         const [listR, statsR] = await Promise.all([
-            fetch('/api/memory/list?limit=50'),
+            fetch(`/api/memory/all?limit=100${catQ}`),
             fetch('/api/memory/stats'),
         ]);
         const memories = await listR.json();
         const stats = await statsR.json();
 
-        // Stats
-        const cats = Object.entries(stats.categories || {}).map(([k,v]) => `${v} ${k}`).join(' · ');
-        $('mem-stats').textContent = `${stats.total || 0} memories · ${stats.vector_count || 0} vectors${cats ? ' · ' + cats : ''}`;
+        const cats = Object.entries(stats.categories || {}).map(([k,v]) => `${v} ${k}`).join(' \u00b7 ');
+        $('mem-stats').textContent = `${stats.total || 0} memories \u00b7 ${stats.vector_count || 0} vectors${cats ? ' \u00b7 ' + cats : ''}`;
 
         if (memories.length === 0) {
-            $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">No memories stored yet</div><p>Click "+ Add Memory" or tell the assistant to remember something</p></div>';
+            $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">No memories stored yet</div><p>The assistant auto-learns from conversations, or click "+ Add Memory"</p></div>';
         } else {
-            $('mem-results').innerHTML = memories.map(m => {
-                const catCls = memCatCls(m.category);
-                const date = m.created_at ? timeAgo(m.created_at) : '';
-                const src = m.source ? `<span style="font-size:9px;color:var(--tx-3)">via ${esc(m.source)}</span>` : '';
-                return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
-                    <div style="display:flex;gap:6px;width:100%;align-items:center">
-                        <span class="tag ${catCls}" style="font-size:9px;padding:0 5px">${esc(m.category)}</span>
-                        ${src}
-                        <span style="font-size:9px;color:var(--tx-3);margin-left:auto">${date}</span>
-                        <button class="task-cancel" onclick="deleteMemory('${m.id}')">Delete</button>
-                    </div>
-                    <div style="font-size:12px;line-height:1.5;color:var(--tx-1);word-break:break-word">${esc(m.content)}</div>
-                </div>`;
-            }).join('');
+            $('mem-results').innerHTML = memories.map(renderMemoryRow).join('');
         }
     } catch(e) {
         $('mem-results').innerHTML = '<div class="empty"><div class="empty-icon">🧠</div><div class="empty-title">Could not load memories</div></div>';
@@ -1027,7 +1119,7 @@ async function searchMemory() {
                 const cat = (m.metadata && m.metadata.category) || 'general';
                 return `<div class="data-row" style="flex-direction:column;align-items:flex-start;gap:4px;padding:10px 16px">
                     <div style="display:flex;gap:6px;width:100%;align-items:center">
-                        <span class="tag ${memCatCls(cat)}" style="font-size:9px;padding:0 5px">${esc(cat)}</span>
+                        <span class="tag ${memCatCls(cat)}" style="font-size:9px;padding:1px 6px">${esc(cat)}</span>
                         ${dist}
                     </div>
                     <div style="font-size:12px;line-height:1.5;color:var(--tx-1);word-break:break-word">${esc(m.content || '')}</div>
