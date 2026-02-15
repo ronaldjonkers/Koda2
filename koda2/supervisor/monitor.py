@@ -73,6 +73,17 @@ class ProcessMonitor:
             self._safety.audit("restart_blocked", {"reason": "rate_limit"})
             return False
 
+        # Ensure clean working tree before start — the evolution engine can
+        # leave broken files after failed patches even after git rollback.
+        try:
+            subprocess.run(
+                ["git", "checkout", "."],
+                cwd=str(self._root),
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass  # best-effort
+
         try:
             python = str(self._root / ".venv" / "bin" / "python")
             if not Path(python).exists():
@@ -150,6 +161,30 @@ class ProcessMonitor:
         except Exception:
             return False
 
+    def _pip_install_editable(self) -> None:
+        """Re-install the Python package in editable mode after git pull.
+
+        Ensures that any new/changed modules, entry points, or dependencies
+        from the pulled commits are properly installed.
+        """
+        python = str(self._root / ".venv" / "bin" / "python")
+        if not Path(python).exists():
+            python = sys.executable
+        try:
+            result = subprocess.run(
+                [python, "-m", "pip", "install", "-e", ".", "--quiet"],
+                cwd=str(self._root),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                logger.info("pip_install_editable_success")
+            else:
+                logger.warning("pip_install_editable_failed", error=result.stderr[:200])
+        except Exception as exc:
+            logger.warning("pip_install_editable_error", error=str(exc))
+
     def _rebuild_npm_packages(self) -> None:
         """Run npm install for all package.json files in the project.
 
@@ -209,6 +244,8 @@ class ProcessMonitor:
         success, output = self._safety.git_pull()
         if success:
             logger.info("auto_pull_complete", output=output[:200])
+            # Re-install Python package so updated modules are picked up
+            self._pip_install_editable()
             # Rebuild npm packages after pull (WhatsApp bridge etc.)
             self._rebuild_npm_packages()
             self._safety.request_restart(f"auto-pull: {commit_count} new commit(s)")
