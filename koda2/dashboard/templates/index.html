@@ -507,6 +507,7 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
         <div style="display:flex;gap:4px;align-items:center">
           <span id="queue-worker-status" style="font-size:10px;color:var(--tx-3)"></span>
           <button class="btn btn-ghost btn-sm" onclick="toggleQueueWorker()" id="queue-toggle-btn" style="font-size:10px">Start Worker</button>
+          <button class="btn btn-ghost btn-sm" onclick="purgeQueue()" style="font-size:10px;color:var(--red)">Purge Old</button>
           <button class="btn btn-ghost btn-sm" onclick="loadQueue()" style="font-size:10px">Refresh</button>
         </div>
       </div>
@@ -1613,6 +1614,16 @@ async function cancelQueueItem(itemId) {
     } catch(e) {
         console.error('Cancel failed', e);
     }
+}
+
+async function purgeQueue() {
+    if (!confirm('Remove all completed, failed, and skipped items from the queue?')) return;
+    try {
+        const r = await fetch('/api/supervisor/queue/purge', { method: 'POST' });
+        const d = await r.json();
+        alert(`Purged ${d.purged} items. ${d.remaining} remaining.`);
+        loadQueue();
+    } catch(e) { console.error('Purge failed', e); }
 }
 
 async function toggleQueueWorker() {

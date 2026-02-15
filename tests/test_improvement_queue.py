@@ -192,7 +192,7 @@ class TestImprovementQueue:
 
     def test_default_max_workers(self, tmp_path: Path) -> None:
         queue = self._make_queue(tmp_path)
-        assert queue.max_workers == 3
+        assert queue.max_workers == 1
 
     def test_custom_max_workers(self, tmp_path: Path) -> None:
         with patch("koda2.supervisor.improvement_queue.QUEUE_DIR", tmp_path), \
@@ -218,7 +218,7 @@ class TestImprovementQueue:
         stats = queue.stats()
         assert "max_workers" in stats
         assert "active_workers" in stats
-        assert stats["max_workers"] == 3
+        assert stats["max_workers"] == 1
         assert stats["active_workers"] == 0
 
     def test_stats_includes_planning(self, tmp_path: Path) -> None:

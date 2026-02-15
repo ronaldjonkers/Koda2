@@ -24,10 +24,11 @@ from koda2.supervisor.safety import SafetyGuard, AUDIT_LOG_FILE
 logger = get_logger(__name__)
 
 # ── Configuration ─────────────────────────────────────────────────────
-LEARNING_INTERVAL_SECONDS = 3600      # analyze every hour
+LEARNING_INTERVAL_SECONDS = 14400     # analyze every 4 hours
 CONVERSATION_LOOKBACK = 200           # last N conversation turns to analyze
 MIN_COMPLAINT_OCCURRENCES = 2         # minimum times a pattern must appear
-MAX_AUTO_IMPROVEMENTS_PER_CYCLE = 2   # don't go crazy in one cycle
+MAX_AUTO_IMPROVEMENTS_PER_CYCLE = 1   # conservative: 1 at a time
+MAX_PENDING_QUEUE_ITEMS = 3           # don't queue more if this many are pending
 CHANGELOG_PATH = "CHANGELOG.md"
 README_PATH = "README.md"
 PYPROJECT_PATH = "pyproject.toml"
@@ -76,7 +77,7 @@ class ContinuousLearner:
         self._running = False
         self._cycle_count = 0
         self._improvements_applied: list[dict[str, Any]] = []
-        self._failed_ideas: set[str] = set()  # avoid repeating failures
+        self._failed_ideas: set[str] = set()  # fingerprints of failed request texts
         self._state_file = self._root / "data" / "supervisor" / "learner_state.json"
         self._load_state()
 
@@ -100,6 +101,22 @@ class ContinuousLearner:
             "improvements_applied": self._improvements_applied[-50:],
             "updated_at": dt.datetime.now().isoformat(),
         }, indent=2))
+
+    @staticmethod
+    def _request_fingerprint(request: str) -> str:
+        """Create a short fingerprint from a request for dedup.
+
+        Normalises the text (lowercase, sorted key words) so semantically
+        identical requests that differ only in wording still match.
+        """
+        import hashlib
+        # Extract meaningful words, ignore stop words / filler
+        words = sorted(set(
+            w for w in re.sub(r"[^a-z0-9 ]", "", request.lower()).split()
+            if len(w) > 3
+        ))
+        key = " ".join(words[:30])  # cap to avoid huge hashes
+        return hashlib.sha256(key.encode()).hexdigest()[:16]
 
     # ── Signal Gathering ──────────────────────────────────────────────
 
@@ -322,7 +339,8 @@ Analyze these signals and propose concrete improvements. Return JSON only."""
         description = proposal.get("description", "")
         request = proposal.get("implementation_request", description)
 
-        if proposal_id in self._failed_ideas:
+        fingerprint = self._request_fingerprint(request)
+        if fingerprint in self._failed_ideas:
             return False, f"Skipped — previously failed: {proposal_id}"
 
         if proposal.get("risk") == "high":
@@ -350,9 +368,10 @@ Analyze these signals and propose concrete improvements. Return JSON only."""
                 "message": message[:200],
             })
         else:
-            self._failed_ideas.add(proposal_id)
+            self._failed_ideas.add(fingerprint)
             self._safety.audit("learner_improvement_failed", {
                 "proposal_id": proposal_id,
+                "fingerprint": fingerprint,
                 "message": message[:200],
             })
 
@@ -634,13 +653,23 @@ Any organizational issues? Return JSON only."""
             from koda2.supervisor.improvement_queue import get_improvement_queue
             queue = get_improvement_queue()
 
+            # Don't flood the queue if items are already pending
+            if queue.pending_count() >= MAX_PENDING_QUEUE_ITEMS:
+                logger.info("learner_queue_full", pending=queue.pending_count())
+                self._safety.audit("learner_queue_full", {"pending": queue.pending_count()})
+                self._save_state()
+                return summary
+
             queued_count = 0
             for proposal in proposals[:MAX_AUTO_IMPROVEMENTS_PER_CYCLE]:
                 proposal_id = proposal.get("id", "unknown")
                 description = proposal.get("description", "")
                 request = proposal.get("implementation_request", description)
 
-                if proposal_id in self._failed_ideas:
+                # Dedup by request text fingerprint (not LLM-generated ID)
+                fingerprint = self._request_fingerprint(request)
+                if fingerprint in self._failed_ideas:
+                    logger.debug("learner_skip_already_failed", fingerprint=fingerprint[:40])
                     continue
                 if proposal.get("risk") == "high":
                     self._safety.audit("learner_skip_high_risk", {"proposal": proposal_id})
@@ -655,6 +684,7 @@ Any organizational issues? Return JSON only."""
                         "type": proposal.get("type"),
                         "description": description[:200],
                         "cycle": self._cycle_count,
+                        "fingerprint": fingerprint,
                     },
                 )
                 queued_count += 1

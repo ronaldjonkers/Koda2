@@ -284,6 +284,16 @@ async def supervisor_queue_stop() -> dict[str, Any]:
     return {"status": "stopped"}
 
 
+@router.post("/supervisor/queue/purge")
+async def supervisor_queue_purge() -> dict[str, Any]:
+    """Remove all completed, failed, and skipped items from the queue."""
+    from koda2.supervisor.improvement_queue import get_improvement_queue
+
+    queue = get_improvement_queue()
+    removed = queue.purge_finished()
+    return {"purged": removed, "remaining": len(queue.list_items())}
+
+
 @router.post("/supervisor/learn")
 async def supervisor_learn() -> dict[str, Any]:
     """Trigger one learning cycle: analyze logs + conversations and auto-improve."""

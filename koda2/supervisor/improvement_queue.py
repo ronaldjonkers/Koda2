@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 QUEUE_DIR = Path("data/supervisor")
 QUEUE_FILE = QUEUE_DIR / "improvement_queue.json"
-DEFAULT_MAX_WORKERS = 3
+DEFAULT_MAX_WORKERS = 1
 
 
 class QueueItemStatus(StrEnum):
@@ -158,6 +158,26 @@ class ImprovementQueue:
                 self._save()
                 return True
         return False
+
+    def purge_finished(self) -> int:
+        """Remove all completed, failed, and skipped items from the queue.
+
+        Returns the number of items removed.
+        """
+        before = len(self._items)
+        self._items = [
+            i for i in self._items
+            if i.get("status") not in (
+                QueueItemStatus.COMPLETED,
+                QueueItemStatus.FAILED,
+                QueueItemStatus.SKIPPED,
+            )
+        ]
+        removed = before - len(self._items)
+        if removed:
+            self._save()
+            logger.info("queue_purged", removed=removed, remaining=len(self._items))
+        return removed
 
     def pending_count(self) -> int:
         """Number of items waiting to be processed."""

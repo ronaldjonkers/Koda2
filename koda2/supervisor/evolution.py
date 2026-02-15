@@ -58,6 +58,32 @@ class EvolutionEngine:
             lines.append(f"  {rel} ({size} bytes)")
         return "\n".join(lines[:100])  # cap at 100 files
 
+    def _get_test_summary(self) -> str:
+        """Get a summary of the existing test suite for context.
+
+        Returns function signatures and class names from test files so the LLM
+        knows what's being tested and can avoid breaking existing tests.
+        """
+        lines = []
+        tests_dir = self._root / "tests"
+        if not tests_dir.exists():
+            return "No tests directory found."
+        for test_file in sorted(tests_dir.glob("test_*.py")):
+            try:
+                rel = test_file.relative_to(self._root)
+                content = test_file.read_text()
+                # Extract class and function names
+                sigs = []
+                for line in content.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("class ") or stripped.startswith("def test_") or stripped.startswith("async def test_"):
+                        sigs.append(stripped.split("(")[0].replace("async ", ""))
+                if sigs:
+                    lines.append(f"{rel}: {', '.join(sigs[:15])}")
+            except Exception:
+                continue
+        return "\n".join(lines[:30]) or "No test files found."
+
     def _read_file_safe(self, relative_path: str) -> str:
         """Read a project file safely."""
         path = self._root / relative_path
@@ -85,7 +111,12 @@ RULES:
 3. Always include proper imports, error handling, and logging.
 4. If creating new files, include full content.
 5. If modifying existing files, specify exact old_text → new_text replacements.
-6. Include test suggestions.
+6. **CRITICAL**: Your changes MUST NOT break existing tests. The test suite
+   listed below will be run after your changes. If your modifications change
+   any function signatures, return types, or class interfaces that are tested,
+   you MUST include the corresponding test file modifications in your changes.
+7. Keep changes small — 1-2 files max. Large refactors almost always fail.
+8. Never split a module into multiple files — that breaks all imports and tests.
 
 RESPONSE FORMAT (JSON):
 {
@@ -104,11 +135,18 @@ RESPONSE FORMAT (JSON):
     "risk": "low|medium|high"
 }"""
 
+        test_context = self._get_test_summary()
+
         user_prompt = f"""Improvement request: {request}
 
 ## Project Structure
 ```
 {structure}
+```
+
+## Existing Tests (these MUST still pass after your changes)
+```
+{test_context}
 ```
 
 Plan the minimal changes needed. Return JSON only."""
@@ -481,18 +519,57 @@ RESPONSE FORMAT (JSON):
         return success, f"[{category}] {message}"
 
     def _parse_json_response(self, response: str) -> dict[str, Any]:
-        """Parse JSON from LLM response."""
+        """Parse JSON from LLM response, handling common LLM formatting issues."""
         text = response.strip()
+        # Strip markdown code fences
         if text.startswith("```"):
             lines = text.splitlines()
             text = "\n".join(lines[1:])
             if text.rstrip().endswith("```"):
                 text = text.rstrip()[:-3]
+        text = text.strip()
 
+        # Attempt 1: direct parse
         try:
             return json.loads(text)
         except json.JSONDecodeError:
-            match = re.search(r'\{[\s\S]*\}', text)
-            if match:
+            pass
+
+        # Attempt 2: find the FIRST complete JSON object using brace matching
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if escape_next:
+                    escape_next = False
+                    continue
+                if ch == "\\":
+                    escape_next = True
+                    continue
+                if ch == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start:i + 1])
+                        except json.JSONDecodeError:
+                            break
+
+        # Attempt 3: greedy regex (last resort)
+        match = re.search(r'\{[\s\S]*\}', text)
+        if match:
+            try:
                 return json.loads(match.group())
-            raise ValueError("Could not parse LLM response as JSON")
+            except json.JSONDecodeError:
+                pass
+
+        raise ValueError("Could not parse LLM response as JSON")
