@@ -291,4 +291,4 @@ class MemoryService:
                 .where(Contact.profile_id == profile.id)
                 .where(Contact.name.ilike(f"%{name}%"))
             )
-            return result.scalar_one_or_none()
+            return result.scalars().first()

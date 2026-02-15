@@ -401,7 +401,8 @@ class ProactiveService:
         
         # Suggest follow-up after meeting
         if context.current_meeting:
-            meeting_end = context.current_meeting.end
+            from koda2.config import ensure_local_tz
+            meeting_end = ensure_local_tz(context.current_meeting.end)
             if meeting_end:
                 minutes_since_end = (context.current_time - meeting_end).total_seconds() / 60
                 if 5 <= minutes_since_end <= 30:

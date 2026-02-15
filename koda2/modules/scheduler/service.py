@@ -349,7 +349,8 @@ class SchedulerService:
                         )
                         self._fix_task_id(rec)
                     elif rec.task_type == "once":
-                        run_at = dt.datetime.fromisoformat(rec.schedule_info)
+                        from koda2.config import ensure_local_tz
+                        run_at = ensure_local_tz(dt.datetime.fromisoformat(rec.schedule_info))
                         if run_at > dt.datetime.now(dt.UTC):
                             self.schedule_once(name=rec.name, func=func, run_at=run_at)
                             self._fix_task_id(rec)
