@@ -76,6 +76,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Skipped koda2/modules/calendar/service.py: old_text not found
 
 
+### Auto-improvement (2026-02-15)
+- **Create a formatting layer to convert JSON responses to human-readable text, focusing on the main user-facing outputs** (risk: low)
+  - Created koda2/formatting.py
+  - Skipped koda2/api/routes.py: old_text not found
+
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
