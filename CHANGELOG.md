@@ -115,6 +115,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Skipped koda2/modules/messaging/whatsapp_bot.py: old_text not found
 
 
+### Auto-improvement (2026-02-16)
+- **Add error handling and monitoring to scheduler task execution** (risk: low)
+  - Skipped koda2/modules/scheduler/service.py: old_text not found
+
+
 ## [0.5.2] - 2026-02-15
 
 ### Added
