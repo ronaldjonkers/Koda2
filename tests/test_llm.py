@@ -112,7 +112,7 @@ class TestAnthropicProvider:
             provider = AnthropicProvider()
             response = await provider.complete(
                 messages=[ChatMessage(content="Hello")],
-                model="claude-3-5-sonnet-20241022",
+                model="claude-sonnet-4-20250514",
             )
             assert isinstance(response, LLMResponse)
             assert response.provider == LLMProvider.ANTHROPIC

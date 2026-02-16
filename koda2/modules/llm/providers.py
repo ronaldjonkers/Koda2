@@ -165,7 +165,7 @@ class AnthropicProvider(BaseLLMProvider):
     async def complete(
         self,
         messages: list[ChatMessage],
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-4-20250514",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
@@ -256,7 +256,7 @@ class AnthropicProvider(BaseLLMProvider):
     async def stream(
         self,
         messages: list[ChatMessage],
-        model: str = "claude-3-5-sonnet-20241022",
+        model: str = "claude-sonnet-4-20250514",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,

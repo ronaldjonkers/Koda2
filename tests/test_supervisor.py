@@ -568,6 +568,7 @@ class TestModelRouter:
         with patch("koda2.supervisor.model_router.get_settings") as mock:
             mock.return_value = MagicMock(
                 openrouter_api_key="sk-or-test123",
+                anthropic_api_key="",
                 openai_api_key="",
             )
             url, model, complexity = select_model("signal_analysis")
@@ -578,11 +579,30 @@ class TestModelRouter:
             assert complexity == TaskComplexity.HEAVY
             assert "claude" in model or "anthropic" in model
 
+    def test_select_model_anthropic_direct(self) -> None:
+        from koda2.supervisor.model_router import select_model, TaskComplexity, BACKEND_ANTHROPIC
+        with patch("koda2.supervisor.model_router.get_settings") as mock:
+            mock.return_value = MagicMock(
+                openrouter_api_key="",
+                anthropic_api_key="sk-ant-test123",
+                openai_api_key="",
+            )
+            backend, model, complexity = select_model("code_generation")
+            assert backend == BACKEND_ANTHROPIC
+            assert "claude-sonnet-4" in model
+            assert complexity == TaskComplexity.HEAVY
+
+            backend, model, complexity = select_model("signal_analysis")
+            assert backend == BACKEND_ANTHROPIC
+            assert "haiku" in model
+            assert complexity == TaskComplexity.LIGHT
+
     def test_select_model_openai_fallback(self) -> None:
         from koda2.supervisor.model_router import select_model, TaskComplexity
         with patch("koda2.supervisor.model_router.get_settings") as mock:
             mock.return_value = MagicMock(
                 openrouter_api_key="",
+                anthropic_api_key="",
                 openai_api_key="sk-test123",
             )
             url, model, complexity = select_model("code_generation")
@@ -593,6 +613,17 @@ class TestModelRouter:
             url, model, complexity = select_model("signal_analysis")
             assert model == "gpt-4o-mini"
             assert complexity == TaskComplexity.LIGHT
+
+    def test_select_model_no_keys_raises(self) -> None:
+        from koda2.supervisor.model_router import select_model
+        with patch("koda2.supervisor.model_router.get_settings") as mock:
+            mock.return_value = MagicMock(
+                openrouter_api_key="",
+                anthropic_api_key="",
+                openai_api_key="",
+            )
+            with pytest.raises(RuntimeError, match="No API key configured"):
+                select_model("code_generation")
 
     def test_model_tiers_all_have_entries(self) -> None:
         from koda2.supervisor.model_router import MODEL_TIERS, TaskComplexity
