@@ -279,7 +279,7 @@ class AnthropicProvider(BaseLLMProvider):
 
 
 class GoogleProvider(BaseLLMProvider):
-    """Google Gemini models provider."""
+    """Google Gemini models provider — uses the new google-genai SDK."""
 
     provider = LLMProvider.GOOGLE
 
@@ -289,134 +289,135 @@ class GoogleProvider(BaseLLMProvider):
     def is_available(self) -> bool:
         return bool(self._settings.google_ai_api_key)
 
+    def _get_client(self):
+        """Create a google-genai Client."""
+        from google import genai
+        return genai.Client(api_key=self._settings.google_ai_api_key)
+
+    @staticmethod
+    def _convert_tools(tools: list[dict[str, Any]]) -> list:
+        """Convert OpenAI-format tool definitions to google-genai format."""
+        from google.genai import types
+        declarations = []
+        for tool in tools:
+            func = tool.get("function", {})
+            declarations.append({
+                "name": func.get("name", ""),
+                "description": func.get("description", ""),
+                "parameters": func.get("parameters", {"type": "object", "properties": {}}),
+            })
+        return [types.Tool(function_declarations=declarations)]
+
+    def _build_contents(
+        self, messages: list[ChatMessage],
+    ) -> list:
+        """Convert ChatMessage list to google-genai Content objects."""
+        import json as _json
+        from google.genai import types
+
+        contents = []
+        for msg in messages:
+            if msg.role == "assistant" and msg.tool_calls:
+                parts = []
+                if msg.content:
+                    parts.append(types.Part.from_text(text=msg.content))
+                for tc in msg.tool_calls:
+                    args = tc["function"]["arguments"]
+                    args_dict = _json.loads(args) if isinstance(args, str) else args
+                    parts.append(types.Part.from_function_call(
+                        name=tc["function"]["name"],
+                        args=args_dict,
+                    ))
+                contents.append(types.Content(role="model", parts=parts))
+            elif msg.role == "tool":
+                try:
+                    result_data = _json.loads(msg.content)
+                except (ValueError, TypeError):
+                    result_data = {"result": msg.content}
+                # Recover the tool name from the preceding assistant message
+                tool_name = "tool_result"
+                for prev in reversed(contents):
+                    if prev.role == "model" and prev.parts:
+                        for p in prev.parts:
+                            if hasattr(p, "function_call") and p.function_call:
+                                tool_name = p.function_call.name
+                                break
+                        break
+                parts = [types.Part.from_function_response(
+                    name=tool_name,
+                    response=result_data,
+                )]
+                contents.append(types.Content(role="user", parts=parts))
+            elif msg.role == "user":
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=msg.content)],
+                ))
+            else:
+                # assistant text-only
+                contents.append(types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=msg.content)],
+                ))
+        return contents
+
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     async def complete(
         self,
         messages: list[ChatMessage],
-        model: str = "gemini-1.5-pro",
+        model: str = "gemini-2.0-flash",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
         tools: Optional[list[dict[str, Any]]] = None,
     ) -> LLMResponse:
-        import google.generativeai as genai
-        from google.protobuf.json_format import MessageToDict
+        import asyncio
+        from google.genai import types
 
-        genai.configure(api_key=self._settings.google_ai_api_key)
+        client = self._get_client()
+        contents = self._build_contents(messages)
 
-        # Convert OpenAI-format tools to Google function declarations
-        google_tools = None
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if system_prompt:
+            config_kwargs["system_instruction"] = system_prompt
         if tools:
-            func_declarations = []
-            for tool in tools:
-                func = tool.get("function", {})
-                params = func.get("parameters", {})
-                # Google uses a subset of OpenAPI schema
-                func_declarations.append(genai.protos.FunctionDeclaration(
-                    name=func.get("name", ""),
-                    description=func.get("description", ""),
-                    parameters=genai.protos.Schema(
-                        type=genai.protos.Type.OBJECT,
-                        properties={
-                            k: genai.protos.Schema(
-                                type=self._map_json_type_to_google(v.get("type", "string")),
-                                description=v.get("description", ""),
-                            )
-                            for k, v in params.get("properties", {}).items()
-                        },
-                        required=params.get("required", []),
-                    ),
-                ))
-            google_tools = [genai.protos.Tool(function_declarations=func_declarations)]
+            config_kwargs["tools"] = self._convert_tools(tools)
 
-        gen_model = genai.GenerativeModel(
-            model_name=model,
-            system_instruction=system_prompt,
-            tools=google_tools,
-        )
+        config = types.GenerateContentConfig(**config_kwargs)
 
-        # Build history with tool call support
-        history = []
-        for msg in messages[:-1]:
-            if msg.role == "assistant" and msg.tool_calls:
-                parts = []
-                if msg.content:
-                    parts.append(genai.protos.Part(text=msg.content))
-                for tc in msg.tool_calls:
-                    import json as _json
-                    args = tc["function"]["arguments"]
-                    args_dict = _json.loads(args) if isinstance(args, str) else args
-                    parts.append(genai.protos.Part(
-                        function_call=genai.protos.FunctionCall(
-                            name=tc["function"]["name"],
-                            args=args_dict,
-                        )
-                    ))
-                history.append({"role": "model", "parts": parts})
-            elif msg.role == "tool":
-                import json as _json
-                try:
-                    result_data = _json.loads(msg.content)
-                except (ValueError, TypeError):
-                    result_data = {"result": msg.content}
-                history.append({
-                    "role": "user",
-                    "parts": [genai.protos.Part(
-                        function_response=genai.protos.FunctionResponse(
-                            name="tool_result",
-                            response=result_data,
-                        )
-                    )],
-                })
-            else:
-                role = "user" if msg.role == "user" else "model"
-                history.append({"role": role, "parts": [msg.content]})
-
-        chat = gen_model.start_chat(history=history)
-
-        last_msg = messages[-1]
-        if last_msg.role == "tool":
-            import json as _json
-            try:
-                result_data = _json.loads(last_msg.content)
-            except (ValueError, TypeError):
-                result_data = {"result": last_msg.content}
-            send_parts = [genai.protos.Part(
-                function_response=genai.protos.FunctionResponse(
-                    name="tool_result",
-                    response=result_data,
-                )
-            )]
-        else:
-            send_parts = last_msg.content
-
-        response = await chat.send_message_async(
-            send_parts,
-            generation_config=genai.GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
+        # google-genai Client is sync — run in executor for async
+        response = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config,
             ),
         )
 
+        # Extract usage
         usage = getattr(response, "usage_metadata", None)
-        p_tokens = usage.prompt_token_count if usage else 0
-        c_tokens = usage.candidates_token_count if usage else 0
+        p_tokens = getattr(usage, "prompt_token_count", 0) or 0
+        c_tokens = getattr(usage, "candidates_token_count", 0) or 0
 
         # Parse response for text and function calls
         content = ""
         tool_calls = None
-        for candidate in response.candidates:
-            for part in candidate.content.parts:
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
                 if hasattr(part, "text") and part.text:
                     content += part.text
-                elif hasattr(part, "function_call") and part.function_call.name:
+                elif hasattr(part, "function_call") and part.function_call and part.function_call.name:
                     if tool_calls is None:
                         tool_calls = []
                     import json as _json
                     fc = part.function_call
                     args_dict = dict(fc.args) if fc.args else {}
                     tool_calls.append({
-                        "id": f"google_{fc.name}_{len(tool_calls)}",
+                        "id": f"gemini_{fc.name}_{len(tool_calls)}",
                         "type": "function",
                         "function": {
                             "name": fc.name,
@@ -435,41 +436,38 @@ class GoogleProvider(BaseLLMProvider):
             tool_calls=tool_calls,
         )
 
-    @staticmethod
-    def _map_json_type_to_google(json_type: str):
-        """Map JSON Schema type to Google protobuf Type enum."""
-        import google.generativeai as genai
-        mapping = {
-            "string": genai.protos.Type.STRING,
-            "integer": genai.protos.Type.INTEGER,
-            "number": genai.protos.Type.NUMBER,
-            "boolean": genai.protos.Type.BOOLEAN,
-            "array": genai.protos.Type.ARRAY,
-            "object": genai.protos.Type.OBJECT,
-        }
-        return mapping.get(json_type, genai.protos.Type.STRING)
-
     async def stream(
         self,
         messages: list[ChatMessage],
-        model: str = "gemini-1.5-pro",
+        model: str = "gemini-2.0-flash",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         system_prompt: Optional[str] = None,
     ) -> AsyncIterator[str]:
-        import google.generativeai as genai
+        import asyncio
+        from google.genai import types
 
-        genai.configure(api_key=self._settings.google_ai_api_key)
-        gen_model = genai.GenerativeModel(model_name=model, system_instruction=system_prompt)
+        client = self._get_client()
 
-        response = await gen_model.generate_content_async(
-            messages[-1].content,
-            generation_config=genai.GenerationConfig(
-                temperature=temperature, max_output_tokens=max_tokens,
-            ),
-            stream=True,
-        )
-        async for chunk in response:
+        config_kwargs: dict[str, Any] = {
+            "temperature": temperature,
+            "max_output_tokens": max_tokens,
+        }
+        if system_prompt:
+            config_kwargs["system_instruction"] = system_prompt
+        config = types.GenerateContentConfig(**config_kwargs)
+
+        # Stream via sync generator in executor
+        def _stream():
+            return client.models.generate_content_stream(
+                model=model,
+                contents=messages[-1].content,
+                config=config,
+            )
+
+        loop = asyncio.get_event_loop()
+        stream_iter = await loop.run_in_executor(None, _stream)
+        for chunk in stream_iter:
             if chunk.text:
                 yield chunk.text
 

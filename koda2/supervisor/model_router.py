@@ -1,9 +1,10 @@
 """Smart Model Router — picks the optimal LLM model per task complexity.
 
-Supports three backends (checked in order):
+Supports four backends (checked in order):
 1. **OpenRouter** — multi-model gateway with free/cheap tiers
 2. **Anthropic direct** — native Claude API (claude-sonnet-4, claude-3.5-haiku)
-3. **OpenAI direct** — GPT-4o / GPT-4o-mini fallback
+3. **Google Gemini direct** — native Gemini API (gemini-2.0-flash, gemini-1.5-pro)
+4. **OpenAI direct** — GPT-4o / GPT-4o-mini fallback
 
 Model selection per task type:
 - LIGHT (free/cheap): signal analysis, classification, documentation, simple fixes
@@ -69,9 +70,17 @@ OPENAI_FALLBACKS: dict[TaskComplexity, str] = {
     TaskComplexity.HEAVY: "gpt-4o",
 }
 
+# Google Gemini direct API model mapping (when using GOOGLE_AI_API_KEY)
+GOOGLE_MODELS: dict[TaskComplexity, str] = {
+    TaskComplexity.LIGHT: "gemini-2.0-flash",
+    TaskComplexity.MEDIUM: "gemini-2.0-flash",
+    TaskComplexity.HEAVY: "gemini-1.5-pro",
+}
+
 # Backend type returned by select_model
 BACKEND_OPENROUTER = "openrouter"
 BACKEND_ANTHROPIC = "anthropic"
+BACKEND_GOOGLE = "google"
 BACKEND_OPENAI = "openai"
 
 # Map task descriptions to complexity
@@ -106,12 +115,12 @@ def get_complexity(task_type: str) -> TaskComplexity:
 def select_model(task_type: str) -> tuple[str, str, TaskComplexity]:
     """Select the best model for a given task type.
 
-    Checks API keys in order: OpenRouter → Anthropic → OpenAI.
+    Checks API keys in order: OpenRouter → Anthropic → Google → OpenAI.
 
     Returns:
         (url_or_backend, model_id, complexity)
         For OpenRouter/OpenAI: url is the full API endpoint.
-        For Anthropic: url is the string ``BACKEND_ANTHROPIC`` (uses SDK).
+        For Anthropic/Google: url is the backend constant (uses SDK).
     """
     settings = get_settings()
     complexity = get_complexity(task_type)
@@ -127,13 +136,19 @@ def select_model(task_type: str) -> tuple[str, str, TaskComplexity]:
         model = ANTHROPIC_MODELS[complexity]
         return BACKEND_ANTHROPIC, model, complexity
 
-    # Priority 3: OpenAI direct
+    # Priority 3: Google Gemini direct API (native google-genai SDK)
+    if settings.google_ai_api_key:
+        model = GOOGLE_MODELS[complexity]
+        return BACKEND_GOOGLE, model, complexity
+
+    # Priority 4: OpenAI direct
     if settings.openai_api_key:
         model = OPENAI_FALLBACKS[complexity]
         return "https://api.openai.com/v1/chat/completions", model, complexity
 
     raise RuntimeError(
-        "No API key configured (need OPENROUTER_API_KEY, ANTHROPIC_API_KEY, or OPENAI_API_KEY)"
+        "No API key configured (need OPENROUTER_API_KEY, ANTHROPIC_API_KEY, "
+        "GOOGLE_AI_API_KEY, or OPENAI_API_KEY)"
     )
 
 
@@ -174,6 +189,55 @@ async def _call_anthropic_direct(
         backend="anthropic",
         prompt_tokens=response.usage.input_tokens,
         completion_tokens=response.usage.output_tokens,
+    )
+
+    return content
+
+
+async def _call_google_direct(
+    system: str,
+    user: str,
+    model: str,
+    *,
+    temperature: float = 0.3,
+    max_tokens: int = 16000,
+    timeout: int = 120,
+) -> str:
+    """Call the Google Gemini API directly using the google-genai SDK."""
+    import asyncio
+    from google import genai
+    from google.genai import types
+
+    settings = get_settings()
+    client = genai.Client(api_key=settings.google_ai_api_key)
+
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+
+    response = await asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: client.models.generate_content(
+            model=model,
+            contents=user,
+            config=config,
+        ),
+    )
+
+    content = response.text or ""
+
+    usage = getattr(response, "usage_metadata", None)
+    p_tokens = getattr(usage, "prompt_token_count", 0) or 0
+    c_tokens = getattr(usage, "candidates_token_count", 0) or 0
+
+    logger.info(
+        "supervisor_llm_usage",
+        model=model,
+        backend="google",
+        prompt_tokens=p_tokens,
+        completion_tokens=c_tokens,
     )
 
     return content
@@ -240,7 +304,7 @@ async def call_llm(
     """Call the LLM with smart model routing.
 
     Automatically selects the best backend and model based on task type
-    and available API keys (OpenRouter → Anthropic → OpenAI).
+    and available API keys (OpenRouter → Anthropic → Google → OpenAI).
 
     Args:
         system: System prompt
@@ -267,6 +331,12 @@ async def call_llm(
 
     if url_or_backend == BACKEND_ANTHROPIC:
         return await _call_anthropic_direct(
+            system, user, model,
+            temperature=temperature, max_tokens=max_tokens, timeout=timeout,
+        )
+
+    if url_or_backend == BACKEND_GOOGLE:
+        return await _call_google_direct(
             system, user, model,
             temperature=temperature, max_tokens=max_tokens, timeout=timeout,
         )

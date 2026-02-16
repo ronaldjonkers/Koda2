@@ -569,6 +569,7 @@ class TestModelRouter:
             mock.return_value = MagicMock(
                 openrouter_api_key="sk-or-test123",
                 anthropic_api_key="",
+                google_ai_api_key="",
                 openai_api_key="",
             )
             url, model, complexity = select_model("signal_analysis")
@@ -585,6 +586,7 @@ class TestModelRouter:
             mock.return_value = MagicMock(
                 openrouter_api_key="",
                 anthropic_api_key="sk-ant-test123",
+                google_ai_api_key="",
                 openai_api_key="",
             )
             backend, model, complexity = select_model("code_generation")
@@ -597,12 +599,32 @@ class TestModelRouter:
             assert "haiku" in model
             assert complexity == TaskComplexity.LIGHT
 
+    def test_select_model_google_direct(self) -> None:
+        from koda2.supervisor.model_router import select_model, TaskComplexity, BACKEND_GOOGLE
+        with patch("koda2.supervisor.model_router.get_settings") as mock:
+            mock.return_value = MagicMock(
+                openrouter_api_key="",
+                anthropic_api_key="",
+                google_ai_api_key="AIza-test123",
+                openai_api_key="",
+            )
+            backend, model, complexity = select_model("code_generation")
+            assert backend == BACKEND_GOOGLE
+            assert "gemini" in model
+            assert complexity == TaskComplexity.HEAVY
+
+            backend, model, complexity = select_model("signal_analysis")
+            assert backend == BACKEND_GOOGLE
+            assert "flash" in model
+            assert complexity == TaskComplexity.LIGHT
+
     def test_select_model_openai_fallback(self) -> None:
         from koda2.supervisor.model_router import select_model, TaskComplexity
         with patch("koda2.supervisor.model_router.get_settings") as mock:
             mock.return_value = MagicMock(
                 openrouter_api_key="",
                 anthropic_api_key="",
+                google_ai_api_key="",
                 openai_api_key="sk-test123",
             )
             url, model, complexity = select_model("code_generation")
@@ -620,6 +642,7 @@ class TestModelRouter:
             mock.return_value = MagicMock(
                 openrouter_api_key="",
                 anthropic_api_key="",
+                google_ai_api_key="",
                 openai_api_key="",
             )
             with pytest.raises(RuntimeError, match="No API key configured"):
