@@ -118,16 +118,19 @@ COMMANDS: dict[str, Command] = {
     "send_assistant_email": Command(
         name="send_assistant_email",
         category="messaging",
-        description="Send an email FROM the assistant's own email address (e.g. koda@domain.com). Use this when the AI itself needs to email someone, not on behalf of the user.",
+        description="Send an email FROM the assistant's own email address (e.g. koda@domain.com). Use this when the AI itself needs to email someone, not on behalf of the user. Supports attachments, CC, BCC.",
         parameters=[
             CommandParameter("to", "array", True, description="List of recipient email addresses"),
             CommandParameter("subject", "string", True, description="Email subject"),
             CommandParameter("body", "string", True, description="Plain text body"),
             CommandParameter("body_html", "string", False, None, "Optional HTML body"),
             CommandParameter("cc", "array", False, None, "CC recipients"),
+            CommandParameter("bcc", "array", False, None, "BCC recipients"),
+            CommandParameter("attachments", "array", False, None, "List of file paths to attach"),
         ],
         examples=[
             '{"action": "send_assistant_email", "params": {"to": ["ronald@example.com"], "subject": "Daily Summary", "body": "Here is your daily summary..."}}',
+            '{"action": "send_assistant_email", "params": {"to": ["jan@example.com"], "subject": "Report", "body": "See attached", "attachments": ["/tmp/report.pdf"], "cc": ["boss@example.com"]}}',
         ],
     ),
 

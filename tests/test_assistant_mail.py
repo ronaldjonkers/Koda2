@@ -272,6 +272,38 @@ class TestAssistantMailService:
         assert emails == []
 
     @pytest.mark.asyncio
+    async def test_send_email_with_attachments(self, smtp_service: AssistantMailService, tmp_path) -> None:
+        """Sending with attachments passes file paths through."""
+        # Create a test file
+        test_file = tmp_path / "report.pdf"
+        test_file.write_bytes(b"%PDF-1.4 fake content")
+        with patch("koda2.modules.email.assistant_mail.asyncio") as mock_asyncio:
+            mock_asyncio.to_thread = AsyncMock(return_value=None)
+            result = await smtp_service.send_email(
+                to=["user@example.com"],
+                subject="Report attached",
+                body_text="See attached report",
+                attachments=[str(test_file)],
+            )
+            assert result is True
+            # Verify to_thread was called (the _send function)
+            mock_asyncio.to_thread.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_send_email_with_cc_bcc(self, smtp_service: AssistantMailService) -> None:
+        """CC and BCC are supported."""
+        with patch("koda2.modules.email.assistant_mail.asyncio") as mock_asyncio:
+            mock_asyncio.to_thread = AsyncMock(return_value=None)
+            result = await smtp_service.send_email(
+                to=["user@example.com"],
+                subject="Team update",
+                body_text="Hello team",
+                cc=["manager@example.com"],
+                bcc=["hr@example.com"],
+            )
+            assert result is True
+
+    @pytest.mark.asyncio
     async def test_reply_email(self, smtp_service: AssistantMailService) -> None:
         original = AssistantInboxMessage(
             uid="123", subject="Hello", sender="user@test.com",

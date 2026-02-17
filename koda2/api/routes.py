@@ -603,6 +603,8 @@ class AssistantEmailSendRequest(BaseModel):
     body_text: str = ""
     body_html: str = ""
     cc: list[str] = Field(default_factory=list)
+    bcc: list[str] = Field(default_factory=list)
+    attachments: list[str] = Field(default_factory=list)
 
 
 @router.get("/assistant-email/config")
@@ -737,7 +739,8 @@ async def send_assistant_email(request: AssistantEmailSendRequest) -> dict[str, 
     ok = await orch.assistant_mail.send_email(
         to=request.to, subject=request.subject,
         body_text=request.body_text, body_html=request.body_html,
-        cc=request.cc or None,
+        cc=request.cc or None, bcc=request.bcc or None,
+        attachments=request.attachments or None,
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to send email. Check assistant email config.")

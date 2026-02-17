@@ -497,18 +497,26 @@ class AssistantMailService:
         body_html: str = "",
         cc: Optional[list[str]] = None,
         bcc: Optional[list[str]] = None,
+        attachments: Optional[list[str]] = None,
         in_reply_to: str = "",
         references: str = "",
     ) -> bool:
-        """Send an email from the assistant's own address."""
+        """Send an email from the assistant's own address.
+
+        Args:
+            attachments: List of file paths to attach.
+        """
         cfg = await self.get_config()
         if not cfg.smtp_configured:
             logger.error("assistant_smtp_not_configured")
             return False
 
         try:
+            import mimetypes
+            from pathlib import Path
+
             def _send():
-                msg = email.mime.multipart.MIMEMultipart("alternative")
+                msg = email.mime.multipart.MIMEMultipart("mixed")
                 from_header = (
                     f"{cfg.display_name} <{cfg.email_address}>"
                     if cfg.display_name else cfg.email_address
@@ -522,10 +530,28 @@ class AssistantMailService:
                     msg["In-Reply-To"] = in_reply_to
                     msg["References"] = references or in_reply_to
 
+                body_part = email.mime.multipart.MIMEMultipart("alternative")
                 if body_text:
-                    msg.attach(email.mime.text.MIMEText(body_text, "plain"))
+                    body_part.attach(email.mime.text.MIMEText(body_text, "plain"))
                 if body_html:
-                    msg.attach(email.mime.text.MIMEText(body_html, "html"))
+                    body_part.attach(email.mime.text.MIMEText(body_html, "html"))
+                msg.attach(body_part)
+
+                for filepath in (attachments or []):
+                    p = Path(filepath)
+                    if not p.exists():
+                        logger.warning("assistant_email_attachment_missing", path=filepath)
+                        continue
+                    ctype, _ = mimetypes.guess_type(str(p))
+                    if ctype is None:
+                        ctype = "application/octet-stream"
+                    maintype, subtype = ctype.split("/", 1)
+                    with open(p, "rb") as f:
+                        part = email.mime.base.MIMEBase(maintype, subtype)
+                        part.set_payload(f.read())
+                    email.encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", "attachment", filename=p.name)
+                    msg.attach(part)
 
                 all_recipients = list(to) + (cc or []) + (bcc or [])
 
@@ -536,7 +562,8 @@ class AssistantMailService:
                     server.quit()
 
             await asyncio.to_thread(_send)
-            logger.info("assistant_email_sent", to=to, subject=subject)
+            logger.info("assistant_email_sent", to=to, subject=subject,
+                        attachments=[Path(a).name for a in (attachments or [])])
             return True
         except Exception as exc:
             logger.error("assistant_email_send_failed", to=to, subject=subject, error=str(exc))

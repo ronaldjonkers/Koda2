@@ -789,6 +789,8 @@ class Orchestrator:
                 body_text=params.get("body", ""),
                 body_html=params.get("body_html", ""),
                 cc=params.get("cc"),
+                bcc=params.get("bcc"),
+                attachments=params.get("attachments"),
             )
             return {"sent": ok}
 
