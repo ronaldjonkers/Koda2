@@ -476,29 +476,18 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
   <!-- Assistant Email Settings -->
   <div class="panel" style="margin-bottom:14px">
     <div class="panel-head"><h3>📧 Assistant Email (AI's own mailbox)</h3>
-      <span id="amail-status-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--tx-3)">loading...</span>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span id="amail-imap-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--tx-3)">IMAP: —</span>
+        <span id="amail-smtp-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--tx-3)">SMTP: —</span>
+      </div>
     </div>
     <div class="panel-body pad" style="max-height:none">
-      <p style="font-size:11px;color:var(--tx-3);margin:0 0 12px">Configure an SMTP email address so the AI assistant can send emails from its own address.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <p style="font-size:11px;color:var(--tx-3);margin:0 0 12px">Configure IMAP + SMTP so the AI assistant can read and send emails from its own address.</p>
+
+      <!-- Identity row -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
         <div>
-          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">SMTP Server</label>
-          <input id="amail-server" class="search-input" style="width:100%" placeholder="smtp.gmail.com">
-        </div>
-        <div>
-          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Port</label>
-          <input id="amail-port" class="search-input" style="width:100%" type="number" value="587" placeholder="587">
-        </div>
-        <div>
-          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Username</label>
-          <input id="amail-username" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
-        </div>
-        <div>
-          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Password</label>
-          <input id="amail-password" class="search-input" style="width:100%" type="password" placeholder="••••••••">
-        </div>
-        <div>
-          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">From Address</label>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Email Address</label>
           <input id="amail-address" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
         </div>
         <div>
@@ -506,12 +495,85 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
           <input id="amail-display" class="search-input" style="width:100%" placeholder="Koda2 Assistant">
         </div>
       </div>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
-        <label style="font-size:11px;color:var(--tx-2);display:flex;align-items:center;gap:5px"><input type="checkbox" id="amail-tls" checked> Use TLS</label>
+
+      <!-- IMAP section -->
+      <div style="border:1px solid var(--bg-3);border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;color:var(--tx-1);margin-bottom:8px">📥 IMAP (Incoming)</div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Server</label>
+            <input id="amail-imap-server" class="search-input" style="width:100%" placeholder="imap.gmail.com">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Encryption</label>
+            <select id="amail-imap-enc" class="search-input" style="width:100%" onchange="amailAutoPort('imap')">
+              <option value="ssl" selected>SSL</option>
+              <option value="starttls">STARTTLS</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Port</label>
+            <input id="amail-imap-port" class="search-input" style="width:100%" type="number" value="993">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Username</label>
+            <input id="amail-imap-user" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Password</label>
+            <input id="amail-imap-pass" class="search-input" style="width:100%" type="password" placeholder="••••••••">
+          </div>
+        </div>
+        <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="testAssistantImap()">Test IMAP</button> <span id="amail-imap-msg" style="font-size:11px;color:var(--tx-2)"></span></div>
       </div>
-      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+
+      <!-- SMTP section -->
+      <div style="border:1px solid var(--bg-3);border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-size:11px;font-weight:600;color:var(--tx-1);margin-bottom:8px">📤 SMTP (Outgoing)</div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px">
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Server</label>
+            <input id="amail-smtp-server" class="search-input" style="width:100%" placeholder="smtp.gmail.com">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Encryption</label>
+            <select id="amail-smtp-enc" class="search-input" style="width:100%" onchange="amailAutoPort('smtp')">
+              <option value="starttls" selected>STARTTLS</option>
+              <option value="ssl">SSL</option>
+              <option value="none">None</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Port</label>
+            <input id="amail-smtp-port" class="search-input" style="width:100%" type="number" value="587">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Username</label>
+            <input id="amail-smtp-user" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
+          </div>
+          <div>
+            <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Password</label>
+            <input id="amail-smtp-pass" class="search-input" style="width:100%" type="password" placeholder="••••••••">
+          </div>
+        </div>
+        <div style="margin-top:8px"><button class="btn btn-ghost btn-sm" onclick="testAssistantSmtp()">Test SMTP</button> <span id="amail-smtp-msg" style="font-size:11px;color:var(--tx-2)"></span></div>
+      </div>
+
+      <!-- Check interval + actions -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+        <label style="font-size:10px;color:var(--tx-2);display:flex;align-items:center;gap:5px">Check inbox every
+          <input id="amail-interval" class="search-input" style="width:55px;text-align:center" type="number" value="10" min="0" max="60"> min
+        </label>
+        <span style="font-size:10px;color:var(--tx-3)">(0 = disabled)</span>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-primary btn-sm" onclick="saveAssistantEmail()">Save</button>
-        <button class="btn btn-ghost btn-sm" onclick="testAssistantEmail()">Test Connection</button>
+        <button class="btn btn-ghost btn-sm" onclick="testAssistantAll()">Test All</button>
         <span id="amail-msg" style="font-size:11px;color:var(--tx-2)"></span>
       </div>
     </div>
@@ -1176,61 +1238,82 @@ async function searchMemory() {
 }
 
 /* ── Assistant Email ────────────────────────────────────── */
+const AMAIL_AUTO_PORTS = { imap: { ssl: 993, starttls: 143, none: 143 }, smtp: { ssl: 465, starttls: 587, none: 25 } };
+
+function amailAutoPort(proto) {
+    const enc = $(`amail-${proto}-enc`).value;
+    $(`amail-${proto}-port`).value = AMAIL_AUTO_PORTS[proto][enc] || '';
+}
+
+function _amailSetBadge(id, configured, label) {
+    const b = $(id);
+    b.textContent = `${label}: ${configured ? 'OK' : '—'}`;
+    b.style.background = configured ? 'var(--green)' : 'var(--bg-3)';
+    b.style.color = configured ? '#fff' : 'var(--tx-3)';
+}
+
+function _amailSetPwPlaceholder(el, hasSaved) {
+    el.value = '';
+    el.placeholder = hasSaved ? '(saved — leave blank to keep)' : '••••••••';
+}
+
 async function loadAssistantEmail() {
     try {
         const r = await fetch('/api/assistant-email/config');
-        const cfg = await r.json();
-        $('amail-server').value = cfg.smtp_server || '';
-        $('amail-port').value = cfg.smtp_port || 587;
-        $('amail-username').value = cfg.smtp_username || '';
-        $('amail-address').value = cfg.email_address || '';
-        $('amail-display').value = cfg.display_name || '';
-        $('amail-tls').checked = cfg.smtp_use_tls !== false;
-        // Don't overwrite password field with masked value
-        if (!cfg.smtp_password || cfg.smtp_password === '••••••••') {
-            $('amail-password').value = '';
-            $('amail-password').placeholder = cfg.is_configured ? '(saved — leave blank to keep)' : '••••••••';
-        }
-        const badge = $('amail-status-badge');
-        if (cfg.is_configured) {
-            badge.textContent = 'Configured';
-            badge.style.background = 'var(--green)'; badge.style.color = '#fff';
-        } else {
-            badge.textContent = 'Not configured';
-            badge.style.background = 'var(--bg-3)'; badge.style.color = 'var(--tx-3)';
-        }
+        const c = await r.json();
+        // Identity
+        $('amail-address').value = c.email_address || '';
+        $('amail-display').value = c.display_name || '';
+        // IMAP
+        $('amail-imap-server').value = c.imap_server || '';
+        $('amail-imap-enc').value = c.imap_encryption || 'ssl';
+        $('amail-imap-port').value = c.imap_port || 993;
+        $('amail-imap-user').value = c.imap_username || '';
+        _amailSetPwPlaceholder($('amail-imap-pass'), c.imap_configured);
+        // SMTP
+        $('amail-smtp-server').value = c.smtp_server || '';
+        $('amail-smtp-enc').value = c.smtp_encryption || 'starttls';
+        $('amail-smtp-port').value = c.smtp_port || 587;
+        $('amail-smtp-user').value = c.smtp_username || '';
+        _amailSetPwPlaceholder($('amail-smtp-pass'), c.smtp_configured);
+        // Interval
+        $('amail-interval').value = c.check_interval ?? 10;
+        // Badges
+        _amailSetBadge('amail-imap-badge', c.imap_configured, 'IMAP');
+        _amailSetBadge('amail-smtp-badge', c.smtp_configured, 'SMTP');
     } catch(e) {
-        $('amail-status-badge').textContent = 'Error';
+        _amailSetBadge('amail-imap-badge', false, 'IMAP');
+        _amailSetBadge('amail-smtp-badge', false, 'SMTP');
     }
 }
 
-async function saveAssistantEmail() {
-    const pw = $('amail-password').value;
-    if (!$('amail-server').value || !$('amail-username').value || !$('amail-address').value) {
-        $('amail-msg').textContent = 'Fill in all required fields.'; $('amail-msg').style.color = 'var(--red)';
-        return;
-    }
-    if (!pw && $('amail-password').placeholder === '••••••••') {
-        $('amail-msg').textContent = 'Password is required.'; $('amail-msg').style.color = 'var(--red)';
-        return;
-    }
-    $('amail-msg').textContent = 'Saving...'; $('amail-msg').style.color = 'var(--tx-2)';
-    const payload = {
-        smtp_server: $('amail-server').value,
-        smtp_port: parseInt($('amail-port').value) || 587,
-        smtp_username: $('amail-username').value,
-        smtp_password: pw || '__KEEP__',
-        smtp_use_tls: $('amail-tls').checked,
+function _amailPayload() {
+    return {
+        imap_server: $('amail-imap-server').value,
+        imap_port: parseInt($('amail-imap-port').value) || 993,
+        imap_username: $('amail-imap-user').value,
+        imap_password: $('amail-imap-pass').value || '__KEEP__',
+        imap_encryption: $('amail-imap-enc').value,
+        smtp_server: $('amail-smtp-server').value,
+        smtp_port: parseInt($('amail-smtp-port').value) || 587,
+        smtp_username: $('amail-smtp-user').value,
+        smtp_password: $('amail-smtp-pass').value || '__KEEP__',
+        smtp_encryption: $('amail-smtp-enc').value,
         email_address: $('amail-address').value,
         display_name: $('amail-display').value,
+        check_interval: parseInt($('amail-interval').value) || 10,
     };
-    // If password is blank and was previously saved, we need to fetch the real one
-    // The backend should handle __KEEP__ sentinel or we send the real password
+}
+
+async function saveAssistantEmail() {
+    if (!$('amail-address').value) {
+        $('amail-msg').textContent = 'Email address is required.'; $('amail-msg').style.color = 'var(--red)'; return;
+    }
+    $('amail-msg').textContent = 'Saving...'; $('amail-msg').style.color = 'var(--tx-2)';
     try {
         const r = await fetch('/api/assistant-email/config', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(_amailPayload()),
         });
         if (r.ok) {
             $('amail-msg').textContent = 'Saved!'; $('amail-msg').style.color = 'var(--green)';
@@ -1239,28 +1322,34 @@ async function saveAssistantEmail() {
             const e = await r.json();
             $('amail-msg').textContent = e.detail || 'Save failed'; $('amail-msg').style.color = 'var(--red)';
         }
-    } catch(e) {
-        $('amail-msg').textContent = 'Network error'; $('amail-msg').style.color = 'var(--red)';
-    }
+    } catch(e) { $('amail-msg').textContent = 'Network error'; $('amail-msg').style.color = 'var(--red)'; }
 }
 
-async function testAssistantEmail() {
-    $('amail-msg').textContent = 'Testing connection...'; $('amail-msg').style.color = 'var(--tx-2)';
+async function _amailTest(endpoint, msgEl) {
+    $(msgEl).textContent = 'Testing...'; $(msgEl).style.color = 'var(--tx-2)';
     try {
-        const r = await fetch('/api/assistant-email/test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        const r = await fetch(`/api/assistant-email/${endpoint}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({}),
         });
         const res = await r.json();
-        if (res.success) {
-            $('amail-msg').textContent = 'Connection successful!'; $('amail-msg').style.color = 'var(--green)';
-        } else {
-            $('amail-msg').textContent = res.message || 'Test failed'; $('amail-msg').style.color = 'var(--red)';
-        }
-    } catch(e) {
-        $('amail-msg').textContent = 'Test error'; $('amail-msg').style.color = 'var(--red)';
-    }
+        $(msgEl).textContent = res.message || (res.success ? 'OK' : 'Failed');
+        $(msgEl).style.color = res.success ? 'var(--green)' : 'var(--red)';
+    } catch(e) { $(msgEl).textContent = 'Error'; $(msgEl).style.color = 'var(--red)'; }
+}
+function testAssistantImap() { _amailTest('test-imap', 'amail-imap-msg'); }
+function testAssistantSmtp() { _amailTest('test-smtp', 'amail-smtp-msg'); }
+async function testAssistantAll() {
+    $('amail-msg').textContent = 'Testing all...'; $('amail-msg').style.color = 'var(--tx-2)';
+    try {
+        const r = await fetch('/api/assistant-email/test', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const res = await r.json();
+        $('amail-msg').textContent = res.message || (res.success ? 'All OK' : 'Failed');
+        $('amail-msg').style.color = res.success ? 'var(--green)' : 'var(--red)';
+    } catch(e) { $('amail-msg').textContent = 'Error'; $('amail-msg').style.color = 'var(--red)'; }
 }
 
 /* ── Accounts ───────────────────────────────────────────── */

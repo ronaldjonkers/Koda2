@@ -81,14 +81,23 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     smtp_use_tls: bool = True
 
-    # ── Assistant Email (AI's own outgoing mailbox) ─────────────────
+    # ── Assistant Email (AI's own full mailbox) ──────────────────────
+    # IMAP (incoming)
+    assistant_imap_server: str = ""
+    assistant_imap_port: int = 993
+    assistant_imap_username: str = ""
+    assistant_imap_password: str = ""
+    assistant_imap_use_ssl: bool = True
+    # SMTP (outgoing)
     assistant_smtp_server: str = ""
     assistant_smtp_port: int = 587
     assistant_smtp_username: str = ""
     assistant_smtp_password: str = ""
     assistant_smtp_use_tls: bool = True
+    # Identity + scheduling
     assistant_email_address: str = ""
     assistant_email_display_name: str = ""
+    assistant_email_check_interval: int = 10
 
     # ── Messaging ────────────────────────────────────────────────────
     telegram_bot_token: str = ""

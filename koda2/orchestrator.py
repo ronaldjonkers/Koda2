@@ -792,6 +792,16 @@ class Orchestrator:
             )
             return {"sent": ok}
 
+        elif action_name == "read_assistant_inbox":
+            emails = await self.assistant_mail.fetch_emails(
+                unread_only=params.get("unread_only", False),
+                limit=params.get("limit", 10),
+            )
+            return {
+                "count": len(emails),
+                "emails": [e.to_dict() for e in emails],
+            }
+
         elif action_name == "reply_email":
             original_id = params.get("email_id", "")
             reply_body = params.get("body", "")
@@ -1743,6 +1753,26 @@ class Orchestrator:
                 func=_check_email,
                 minutes=15,
                 run_immediately=True,
+            )
+
+        # ── Assistant email inbox check ──
+        async def _check_assistant_inbox():
+            try:
+                cfg = await self.assistant_mail.get_config()
+                if not cfg.imap_configured or cfg.check_interval <= 0:
+                    return
+                emails = await self.assistant_mail.check_inbox()
+                if emails:
+                    logger.info("assistant_inbox_unread", count=len(emails))
+            except Exception as exc:
+                logger.error("assistant_inbox_check_failed", error=str(exc))
+
+        if not _already_exists("Assistant Inbox Check"):
+            self.scheduler.schedule_interval(
+                name="Assistant Inbox Check",
+                func=_check_assistant_inbox,
+                minutes=10,
+                run_immediately=False,
             )
 
         # ── Calendar sync — every 30 minutes ──

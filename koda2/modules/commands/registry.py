@@ -131,6 +131,20 @@ COMMANDS: dict[str, Command] = {
         ],
     ),
 
+    "read_assistant_inbox": Command(
+        name="read_assistant_inbox",
+        category="messaging",
+        description="Read the assistant's own email inbox. Returns recent or unread emails sent TO the assistant.",
+        parameters=[
+            CommandParameter("unread_only", "boolean", False, False, "Only return unread messages"),
+            CommandParameter("limit", "integer", False, 10, "Max number of emails to return"),
+        ],
+        examples=[
+            '{"action": "read_assistant_inbox", "params": {"unread_only": true}}',
+            '{"action": "read_assistant_inbox", "params": {"limit": 5}}',
+        ],
+    ),
+
     "send_email_with_attachments": Command(
         name="send_email_with_attachments",
         category="messaging",

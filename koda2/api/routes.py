@@ -580,14 +580,20 @@ def _memory_to_dict(e) -> dict[str, Any]:
 # ── Assistant Email ───────────────────────────────────────────────────
 
 class AssistantEmailConfigRequest(BaseModel):
-    """Request body for updating assistant email config."""
-    smtp_server: str
+    """Full assistant email config (IMAP + SMTP)."""
+    imap_server: str = ""
+    imap_port: int = 993
+    imap_username: str = ""
+    imap_password: str = ""
+    imap_encryption: str = "ssl"          # ssl | starttls | none
+    smtp_server: str = ""
     smtp_port: int = 587
-    smtp_username: str
-    smtp_password: str
-    smtp_use_tls: bool = True
-    email_address: str
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_encryption: str = "starttls"     # ssl | starttls | none
+    email_address: str = ""
     display_name: str = ""
+    check_interval: int = 10
 
 
 class AssistantEmailSendRequest(BaseModel):
@@ -601,7 +607,7 @@ class AssistantEmailSendRequest(BaseModel):
 
 @router.get("/assistant-email/config")
 async def get_assistant_email_config() -> dict[str, Any]:
-    """Get the current assistant email configuration (password masked)."""
+    """Get the current assistant email configuration (passwords masked)."""
     orch = get_orchestrator()
     cfg = await orch.assistant_mail.get_config()
     return cfg.to_dict(hide_password=True)
@@ -612,42 +618,116 @@ async def update_assistant_email_config(request: AssistantEmailConfigRequest) ->
     """Save assistant email configuration."""
     orch = get_orchestrator()
     from koda2.modules.email.assistant_mail import AssistantEmailConfig
-    password = request.smtp_password
-    # Preserve existing password if sentinel is sent (dashboard leaves password blank)
-    if password == "__KEEP__":
-        existing = await orch.assistant_mail.get_config()
-        password = existing.smtp_password
+    # Preserve existing passwords if __KEEP__ sentinel is sent
+    existing = await orch.assistant_mail.get_config()
+    imap_pw = request.imap_password if request.imap_password != "__KEEP__" else existing.imap_password
+    smtp_pw = request.smtp_password if request.smtp_password != "__KEEP__" else existing.smtp_password
     cfg = AssistantEmailConfig(
+        imap_server=request.imap_server,
+        imap_port=request.imap_port,
+        imap_username=request.imap_username,
+        imap_password=imap_pw,
+        imap_encryption=request.imap_encryption,
         smtp_server=request.smtp_server,
         smtp_port=request.smtp_port,
         smtp_username=request.smtp_username,
-        smtp_password=password,
-        smtp_use_tls=request.smtp_use_tls,
+        smtp_password=smtp_pw,
+        smtp_encryption=request.smtp_encryption,
         email_address=request.email_address,
         display_name=request.display_name or orch._settings.assistant_name,
+        check_interval=request.check_interval,
     )
     await orch.assistant_mail.save_config(cfg)
-    return {"status": "saved", "is_configured": cfg.is_configured}
+    return {
+        "status": "saved",
+        "imap_configured": cfg.imap_configured,
+        "smtp_configured": cfg.smtp_configured,
+        "fully_configured": cfg.fully_configured,
+    }
 
 
 @router.post("/assistant-email/test")
 async def test_assistant_email(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
-    """Test the assistant email SMTP connection."""
+    """Test both IMAP and SMTP connections."""
     orch = get_orchestrator()
     cfg = None
-    if request:
+    if request and (request.smtp_server or request.imap_server):
+        from koda2.modules.email.assistant_mail import AssistantEmailConfig
+        cfg = AssistantEmailConfig(
+            imap_server=request.imap_server,
+            imap_port=request.imap_port,
+            imap_username=request.imap_username,
+            imap_password=request.imap_password,
+            imap_encryption=request.imap_encryption,
+            smtp_server=request.smtp_server,
+            smtp_port=request.smtp_port,
+            smtp_username=request.smtp_username,
+            smtp_password=request.smtp_password,
+            smtp_encryption=request.smtp_encryption,
+            email_address=request.email_address,
+            display_name=request.display_name,
+        )
+    ok, msg = await orch.assistant_mail.test_connection(cfg)
+    return {"success": ok, "message": msg}
+
+
+@router.post("/assistant-email/test-imap")
+async def test_assistant_imap(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+    """Test IMAP connection only."""
+    orch = get_orchestrator()
+    cfg = None
+    if request and request.imap_server:
+        from koda2.modules.email.assistant_mail import AssistantEmailConfig
+        cfg = AssistantEmailConfig(
+            imap_server=request.imap_server,
+            imap_port=request.imap_port,
+            imap_username=request.imap_username,
+            imap_password=request.imap_password,
+            imap_encryption=request.imap_encryption,
+            email_address=request.email_address or request.imap_username,
+        )
+    ok, msg = await orch.assistant_mail.test_imap(cfg)
+    return {"success": ok, "message": msg}
+
+
+@router.post("/assistant-email/test-smtp")
+async def test_assistant_smtp(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+    """Test SMTP connection only."""
+    orch = get_orchestrator()
+    cfg = None
+    if request and request.smtp_server:
         from koda2.modules.email.assistant_mail import AssistantEmailConfig
         cfg = AssistantEmailConfig(
             smtp_server=request.smtp_server,
             smtp_port=request.smtp_port,
             smtp_username=request.smtp_username,
             smtp_password=request.smtp_password,
-            smtp_use_tls=request.smtp_use_tls,
-            email_address=request.email_address,
-            display_name=request.display_name,
+            smtp_encryption=request.smtp_encryption,
+            email_address=request.email_address or request.smtp_username,
         )
-    ok, msg = await orch.assistant_mail.test_connection(cfg)
+    ok, msg = await orch.assistant_mail.test_smtp(cfg)
     return {"success": ok, "message": msg}
+
+
+@router.get("/assistant-email/inbox")
+async def get_assistant_inbox(
+    unread_only: bool = Query(False),
+    limit: int = Query(20),
+) -> dict[str, Any]:
+    """Fetch the assistant's inbox."""
+    orch = get_orchestrator()
+    emails = await orch.assistant_mail.fetch_emails(unread_only=unread_only, limit=limit)
+    return {"count": len(emails), "emails": [e.to_dict() for e in emails]}
+
+
+@router.get("/assistant-email/auto-port")
+async def assistant_email_auto_port(
+    protocol: str = Query(..., pattern="^(imap|smtp)$"),
+    encryption: str = Query(..., pattern="^(ssl|starttls|none)$"),
+) -> dict[str, int]:
+    """Return the default port for a protocol + encryption combo."""
+    from koda2.modules.email.assistant_mail import auto_port
+    return {"port": auto_port(protocol, encryption)}
 
 
 @router.post("/assistant-email/send")
