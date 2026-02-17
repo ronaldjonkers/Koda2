@@ -647,11 +647,11 @@ async def update_assistant_email_config(request: AssistantEmailConfigRequest) ->
 
 
 @router.post("/assistant-email/test")
-async def test_assistant_email(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+async def test_assistant_email(request: AssistantEmailConfigRequest) -> dict[str, Any]:
     """Test both IMAP and SMTP connections."""
     orch = get_orchestrator()
     cfg = None
-    if request and (request.smtp_server or request.imap_server):
+    if request.smtp_server or request.imap_server:
         from koda2.modules.email.assistant_mail import AssistantEmailConfig
         cfg = AssistantEmailConfig(
             imap_server=request.imap_server,
@@ -672,11 +672,11 @@ async def test_assistant_email(request: Optional[AssistantEmailConfigRequest] = 
 
 
 @router.post("/assistant-email/test-imap")
-async def test_assistant_imap(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+async def test_assistant_imap(request: AssistantEmailConfigRequest) -> dict[str, Any]:
     """Test IMAP connection only."""
     orch = get_orchestrator()
     cfg = None
-    if request and request.imap_server:
+    if request.imap_server:
         from koda2.modules.email.assistant_mail import AssistantEmailConfig
         cfg = AssistantEmailConfig(
             imap_server=request.imap_server,
@@ -691,11 +691,11 @@ async def test_assistant_imap(request: Optional[AssistantEmailConfigRequest] = N
 
 
 @router.post("/assistant-email/test-smtp")
-async def test_assistant_smtp(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+async def test_assistant_smtp(request: AssistantEmailConfigRequest) -> dict[str, Any]:
     """Test SMTP connection only."""
     orch = get_orchestrator()
     cfg = None
-    if request and request.smtp_server:
+    if request.smtp_server:
         from koda2.modules.email.assistant_mail import AssistantEmailConfig
         cfg = AssistantEmailConfig(
             smtp_server=request.smtp_server,
