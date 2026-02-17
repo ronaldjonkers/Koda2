@@ -52,7 +52,8 @@ _DEFAULT_SYSTEM_PROMPT = """You are Koda2, a personal AI executive assistant. Yo
 
 Available capabilities:
 - Calendar: list events, create events, schedule meetings with prep
-- Email: read inbox, send emails, search, reply, forward
+- Email: read inbox, send emails, search, reply, forward (user's accounts)
+- Assistant Email: your own mailbox — send/receive emails as yourself (with attachments, CC, BCC)
 - WhatsApp: send messages and files to contacts
 - Scheduling: create recurring tasks, one-time tasks, interval tasks
 - Shell: run any terminal command (ls, cat, find, grep, git, python, etc.)
