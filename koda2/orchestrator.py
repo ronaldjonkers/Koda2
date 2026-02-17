@@ -21,6 +21,7 @@ from koda2.modules.contacts import ContactSyncService
 from koda2.modules.document_analyzer import DocumentAnalyzerService
 from koda2.modules.documents import DocumentService
 from koda2.modules.email import EmailMessage, EmailService
+from koda2.modules.email.assistant_mail import AssistantMailService
 from koda2.modules.images import ImageService
 from koda2.modules.llm import LLMRouter
 from koda2.modules.llm.models import ChatMessage, LLMRequest
@@ -113,6 +114,7 @@ class Orchestrator:
         self.account_service = AccountService()
         self.calendar = CalendarService(self.account_service)
         self.email = EmailService(self.account_service)
+        self.assistant_mail = AssistantMailService(self.account_service)
         self.telegram = TelegramBot(self.account_service)
         self.whatsapp = WhatsAppBot()
         self.images = ImageService()
@@ -779,6 +781,16 @@ class Orchestrator:
             else:
                 success = await self.email.send_email(msg)
             return {"sent": success}
+
+        elif action_name == "send_assistant_email":
+            ok = await self.assistant_mail.send_email(
+                to=params.get("to", []),
+                subject=params.get("subject", ""),
+                body_text=params.get("body", ""),
+                body_html=params.get("body_html", ""),
+                cc=params.get("cc"),
+            )
+            return {"sent": ok}
 
         elif action_name == "reply_email":
             original_id = params.get("email_id", "")

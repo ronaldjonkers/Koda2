@@ -472,6 +472,50 @@ code{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg-3
 <!-- ═══ ACCOUNTS ════════════════════════════════════════ -->
 <section class="section" id="section-accounts">
   <div class="page-head"><h2>Accounts</h2><div style="display:flex;gap:6px"><button class="btn btn-primary btn-sm" onclick="showAddAccount()">+ Add Account</button><button class="btn btn-ghost btn-sm" onclick="loadAccounts()">Refresh</button></div></div>
+
+  <!-- Assistant Email Settings -->
+  <div class="panel" style="margin-bottom:14px">
+    <div class="panel-head"><h3>📧 Assistant Email (AI's own mailbox)</h3>
+      <span id="amail-status-badge" style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--tx-3)">loading...</span>
+    </div>
+    <div class="panel-body pad" style="max-height:none">
+      <p style="font-size:11px;color:var(--tx-3);margin:0 0 12px">Configure an SMTP email address so the AI assistant can send emails from its own address.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">SMTP Server</label>
+          <input id="amail-server" class="search-input" style="width:100%" placeholder="smtp.gmail.com">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Port</label>
+          <input id="amail-port" class="search-input" style="width:100%" type="number" value="587" placeholder="587">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Username</label>
+          <input id="amail-username" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Password</label>
+          <input id="amail-password" class="search-input" style="width:100%" type="password" placeholder="••••••••">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">From Address</label>
+          <input id="amail-address" class="search-input" style="width:100%" placeholder="koda@yourdomain.com">
+        </div>
+        <div>
+          <label style="font-size:10px;color:var(--tx-2);display:block;margin-bottom:3px">Display Name</label>
+          <input id="amail-display" class="search-input" style="width:100%" placeholder="Koda2 Assistant">
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+        <label style="font-size:11px;color:var(--tx-2);display:flex;align-items:center;gap:5px"><input type="checkbox" id="amail-tls" checked> Use TLS</label>
+      </div>
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center">
+        <button class="btn btn-primary btn-sm" onclick="saveAssistantEmail()">Save</button>
+        <button class="btn btn-ghost btn-sm" onclick="testAssistantEmail()">Test Connection</button>
+        <span id="amail-msg" style="font-size:11px;color:var(--tx-2)"></span>
+      </div>
+    </div>
+  </div>
   <!-- Add account form (hidden by default) -->
   <div class="panel" id="acc-form-panel" style="display:none;margin-bottom:14px">
     <div class="panel-head"><h3>Add Account</h3><button class="btn btn-ghost btn-sm" onclick="hideAddAccount()">Cancel</button></div>
@@ -652,7 +696,7 @@ function onSection(s) {
     else if (s === 'email') loadEmail();
     else if (s === 'contacts') loadContacts();
     else if (s === 'tasks') loadTasks();
-    else if (s === 'accounts') loadAccounts();
+    else if (s === 'accounts') { loadAccounts(); loadAssistantEmail(); }
     else if (s === 'scheduler') loadScheduler();
     else if (s === 'memory') loadMemory();
     else if (s === 'supervisor') loadSupervisor();
@@ -1131,6 +1175,94 @@ async function searchMemory() {
     }
 }
 
+/* ── Assistant Email ────────────────────────────────────── */
+async function loadAssistantEmail() {
+    try {
+        const r = await fetch('/api/assistant-email/config');
+        const cfg = await r.json();
+        $('amail-server').value = cfg.smtp_server || '';
+        $('amail-port').value = cfg.smtp_port || 587;
+        $('amail-username').value = cfg.smtp_username || '';
+        $('amail-address').value = cfg.email_address || '';
+        $('amail-display').value = cfg.display_name || '';
+        $('amail-tls').checked = cfg.smtp_use_tls !== false;
+        // Don't overwrite password field with masked value
+        if (!cfg.smtp_password || cfg.smtp_password === '••••••••') {
+            $('amail-password').value = '';
+            $('amail-password').placeholder = cfg.is_configured ? '(saved — leave blank to keep)' : '••••••••';
+        }
+        const badge = $('amail-status-badge');
+        if (cfg.is_configured) {
+            badge.textContent = 'Configured';
+            badge.style.background = 'var(--green)'; badge.style.color = '#fff';
+        } else {
+            badge.textContent = 'Not configured';
+            badge.style.background = 'var(--bg-3)'; badge.style.color = 'var(--tx-3)';
+        }
+    } catch(e) {
+        $('amail-status-badge').textContent = 'Error';
+    }
+}
+
+async function saveAssistantEmail() {
+    const pw = $('amail-password').value;
+    if (!$('amail-server').value || !$('amail-username').value || !$('amail-address').value) {
+        $('amail-msg').textContent = 'Fill in all required fields.'; $('amail-msg').style.color = 'var(--red)';
+        return;
+    }
+    if (!pw && $('amail-password').placeholder === '••••••••') {
+        $('amail-msg').textContent = 'Password is required.'; $('amail-msg').style.color = 'var(--red)';
+        return;
+    }
+    $('amail-msg').textContent = 'Saving...'; $('amail-msg').style.color = 'var(--tx-2)';
+    const payload = {
+        smtp_server: $('amail-server').value,
+        smtp_port: parseInt($('amail-port').value) || 587,
+        smtp_username: $('amail-username').value,
+        smtp_password: pw || '__KEEP__',
+        smtp_use_tls: $('amail-tls').checked,
+        email_address: $('amail-address').value,
+        display_name: $('amail-display').value,
+    };
+    // If password is blank and was previously saved, we need to fetch the real one
+    // The backend should handle __KEEP__ sentinel or we send the real password
+    try {
+        const r = await fetch('/api/assistant-email/config', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (r.ok) {
+            $('amail-msg').textContent = 'Saved!'; $('amail-msg').style.color = 'var(--green)';
+            loadAssistantEmail();
+        } else {
+            const e = await r.json();
+            $('amail-msg').textContent = e.detail || 'Save failed'; $('amail-msg').style.color = 'var(--red)';
+        }
+    } catch(e) {
+        $('amail-msg').textContent = 'Network error'; $('amail-msg').style.color = 'var(--red)';
+    }
+}
+
+async function testAssistantEmail() {
+    $('amail-msg').textContent = 'Testing connection...'; $('amail-msg').style.color = 'var(--tx-2)';
+    try {
+        const r = await fetch('/api/assistant-email/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+        });
+        const res = await r.json();
+        if (res.success) {
+            $('amail-msg').textContent = 'Connection successful!'; $('amail-msg').style.color = 'var(--green)';
+        } else {
+            $('amail-msg').textContent = res.message || 'Test failed'; $('amail-msg').style.color = 'var(--red)';
+        }
+    } catch(e) {
+        $('amail-msg').textContent = 'Test error'; $('amail-msg').style.color = 'var(--red)';
+    }
+}
+
 /* ── Accounts ───────────────────────────────────────────── */
 const PROVIDER_FIELDS = {
     ews: [
@@ -1360,7 +1492,7 @@ if (new URLSearchParams(window.location.search).get('google') === 'connected') {
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     document.querySelector('[data-section="accounts"]')?.classList.add('active');
     $('section-accounts')?.classList.add('active');
-    loadAccounts();
+    loadAccounts(); loadAssistantEmail();
 }
 
 /* ── Scheduler ──────────────────────────────────────────── */

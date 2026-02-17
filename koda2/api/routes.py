@@ -577,6 +577,93 @@ def _memory_to_dict(e) -> dict[str, Any]:
     }
 
 
+# ── Assistant Email ───────────────────────────────────────────────────
+
+class AssistantEmailConfigRequest(BaseModel):
+    """Request body for updating assistant email config."""
+    smtp_server: str
+    smtp_port: int = 587
+    smtp_username: str
+    smtp_password: str
+    smtp_use_tls: bool = True
+    email_address: str
+    display_name: str = ""
+
+
+class AssistantEmailSendRequest(BaseModel):
+    """Request body for sending an email from the assistant."""
+    to: list[str]
+    subject: str
+    body_text: str = ""
+    body_html: str = ""
+    cc: list[str] = Field(default_factory=list)
+
+
+@router.get("/assistant-email/config")
+async def get_assistant_email_config() -> dict[str, Any]:
+    """Get the current assistant email configuration (password masked)."""
+    orch = get_orchestrator()
+    cfg = await orch.assistant_mail.get_config()
+    return cfg.to_dict(hide_password=True)
+
+
+@router.put("/assistant-email/config")
+async def update_assistant_email_config(request: AssistantEmailConfigRequest) -> dict[str, Any]:
+    """Save assistant email configuration."""
+    orch = get_orchestrator()
+    from koda2.modules.email.assistant_mail import AssistantEmailConfig
+    password = request.smtp_password
+    # Preserve existing password if sentinel is sent (dashboard leaves password blank)
+    if password == "__KEEP__":
+        existing = await orch.assistant_mail.get_config()
+        password = existing.smtp_password
+    cfg = AssistantEmailConfig(
+        smtp_server=request.smtp_server,
+        smtp_port=request.smtp_port,
+        smtp_username=request.smtp_username,
+        smtp_password=password,
+        smtp_use_tls=request.smtp_use_tls,
+        email_address=request.email_address,
+        display_name=request.display_name or orch._settings.assistant_name,
+    )
+    await orch.assistant_mail.save_config(cfg)
+    return {"status": "saved", "is_configured": cfg.is_configured}
+
+
+@router.post("/assistant-email/test")
+async def test_assistant_email(request: Optional[AssistantEmailConfigRequest] = None) -> dict[str, Any]:
+    """Test the assistant email SMTP connection."""
+    orch = get_orchestrator()
+    cfg = None
+    if request:
+        from koda2.modules.email.assistant_mail import AssistantEmailConfig
+        cfg = AssistantEmailConfig(
+            smtp_server=request.smtp_server,
+            smtp_port=request.smtp_port,
+            smtp_username=request.smtp_username,
+            smtp_password=request.smtp_password,
+            smtp_use_tls=request.smtp_use_tls,
+            email_address=request.email_address,
+            display_name=request.display_name,
+        )
+    ok, msg = await orch.assistant_mail.test_connection(cfg)
+    return {"success": ok, "message": msg}
+
+
+@router.post("/assistant-email/send")
+async def send_assistant_email(request: AssistantEmailSendRequest) -> dict[str, Any]:
+    """Send an email from the assistant's own address."""
+    orch = get_orchestrator()
+    ok = await orch.assistant_mail.send_email(
+        to=request.to, subject=request.subject,
+        body_text=request.body_text, body_html=request.body_html,
+        cc=request.cc or None,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to send email. Check assistant email config.")
+    return {"sent": True, "to": request.to, "subject": request.subject}
+
+
 # ── Webhooks ──────────────────────────────────────────────────────────
 
 class WebhookPayload(BaseModel):
