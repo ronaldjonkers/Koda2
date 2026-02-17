@@ -160,8 +160,20 @@ class AssistantMailService:
         """Get the current config (DB first, env fallback)."""
         db_cfg = await self._load_db_config()
         if db_cfg and (db_cfg.imap_configured or db_cfg.smtp_configured):
+            logger.info("assistant_email_config_source", source="db",
+                        imap_server=db_cfg.imap_server, imap_port=db_cfg.imap_port,
+                        imap_enc=db_cfg.imap_encryption, imap_user=db_cfg.imap_username,
+                        imap_configured=db_cfg.imap_configured,
+                        smtp_server=db_cfg.smtp_server, smtp_port=db_cfg.smtp_port,
+                        smtp_enc=db_cfg.smtp_encryption, smtp_user=db_cfg.smtp_username,
+                        smtp_configured=db_cfg.smtp_configured,
+                        email=db_cfg.email_address)
             return db_cfg
-        return self._load_env_config()
+        env_cfg = self._load_env_config()
+        logger.info("assistant_email_config_source", source="env",
+                    imap_server=env_cfg.imap_server, smtp_server=env_cfg.smtp_server,
+                    imap_configured=env_cfg.imap_configured, smtp_configured=env_cfg.smtp_configured)
+        return env_cfg
 
     def _load_env_config(self) -> AssistantEmailConfig:
         s = self._settings
@@ -186,6 +198,7 @@ class AssistantMailService:
 
     async def _load_db_config(self) -> Optional[AssistantEmailConfig]:
         if not self._account_service:
+            logger.debug("assistant_email_db_skip", reason="no_account_service")
             return None
         try:
             async with get_session() as session:
@@ -197,8 +210,12 @@ class AssistantMailService:
                 )
                 account = result.scalar_one_or_none()
                 if not account:
+                    logger.debug("assistant_email_db_skip", reason="no_account_in_db")
                     return None
                 c = self._account_service.decrypt_credentials(account)
+                logger.debug("assistant_email_db_loaded", keys=list(c.keys()),
+                             imap_server=c.get("imap_server", ""),
+                             smtp_server=c.get("smtp_server", ""))
                 return AssistantEmailConfig(
                     imap_server=c.get("imap_server", ""),
                     imap_port=c.get("imap_port", 993),
@@ -263,6 +280,8 @@ class AssistantMailService:
 
     def _connect_imap(self, cfg: AssistantEmailConfig) -> imaplib.IMAP4:
         """Create an IMAP connection respecting the encryption setting."""
+        logger.info("imap_connecting", server=cfg.imap_server, port=cfg.imap_port,
+                    encryption=cfg.imap_encryption, username=cfg.imap_username)
         if cfg.imap_encryption == "ssl":
             conn = imaplib.IMAP4_SSL(cfg.imap_server, cfg.imap_port, timeout=20)
         else:
@@ -270,12 +289,15 @@ class AssistantMailService:
             if cfg.imap_encryption == "starttls":
                 conn.starttls()
         conn.login(cfg.imap_username, cfg.imap_password)
+        logger.info("imap_connected", server=cfg.imap_server)
         return conn
 
     # ── SMTP helpers ──────────────────────────────────────────────────
 
     def _connect_smtp(self, cfg: AssistantEmailConfig) -> smtplib.SMTP:
         """Create an SMTP connection respecting the encryption setting."""
+        logger.info("smtp_connecting", server=cfg.smtp_server, port=cfg.smtp_port,
+                    encryption=cfg.smtp_encryption, username=cfg.smtp_username)
         if cfg.smtp_encryption == "ssl":
             server = smtplib.SMTP_SSL(cfg.smtp_server, cfg.smtp_port, timeout=20)
         else:
@@ -285,14 +307,19 @@ class AssistantMailService:
                 server.starttls()
                 server.ehlo()
         server.login(cfg.smtp_username, cfg.smtp_password)
+        logger.info("smtp_connected", server=cfg.smtp_server)
         return server
 
     # ── Connection tests ──────────────────────────────────────────────
 
     async def test_imap(self, cfg: Optional[AssistantEmailConfig] = None) -> tuple[bool, str]:
         """Test the IMAP connection."""
+        logger.info("test_imap_start", cfg_provided=cfg is not None)
         if cfg is None:
             cfg = await self.get_config()
+        logger.info("test_imap_config", server=cfg.imap_server, port=cfg.imap_port,
+                    encryption=cfg.imap_encryption, user=cfg.imap_username,
+                    has_password=bool(cfg.imap_password), configured=cfg.imap_configured)
         if not cfg.imap_configured:
             return False, "IMAP not configured."
         try:
@@ -301,18 +328,27 @@ class AssistantMailService:
                 conn.select("INBOX")
                 conn.logout()
             await asyncio.wait_for(asyncio.to_thread(_test), timeout=20)
+            logger.info("test_imap_success", server=cfg.imap_server)
             return True, "IMAP connection successful."
         except asyncio.TimeoutError:
+            logger.error("test_imap_timeout", server=cfg.imap_server, port=cfg.imap_port)
             return False, "IMAP connection timed out."
         except imaplib.IMAP4.error as exc:
+            logger.error("test_imap_auth_failed", server=cfg.imap_server, error=str(exc))
             return False, f"IMAP auth failed: {exc}"
         except Exception as exc:
+            logger.error("test_imap_error", server=cfg.imap_server, port=cfg.imap_port,
+                         encryption=cfg.imap_encryption, error=str(exc), error_type=type(exc).__name__)
             return False, f"IMAP error: {exc}"
 
     async def test_smtp(self, cfg: Optional[AssistantEmailConfig] = None) -> tuple[bool, str]:
         """Test the SMTP connection."""
+        logger.info("test_smtp_start", cfg_provided=cfg is not None)
         if cfg is None:
             cfg = await self.get_config()
+        logger.info("test_smtp_config", server=cfg.smtp_server, port=cfg.smtp_port,
+                    encryption=cfg.smtp_encryption, user=cfg.smtp_username,
+                    has_password=bool(cfg.smtp_password), configured=cfg.smtp_configured)
         if not cfg.smtp_configured:
             return False, "SMTP not configured."
         try:
@@ -320,12 +356,17 @@ class AssistantMailService:
                 server = self._connect_smtp(cfg)
                 server.quit()
             await asyncio.wait_for(asyncio.to_thread(_test), timeout=20)
+            logger.info("test_smtp_success", server=cfg.smtp_server)
             return True, "SMTP connection successful."
         except asyncio.TimeoutError:
+            logger.error("test_smtp_timeout", server=cfg.smtp_server, port=cfg.smtp_port)
             return False, "SMTP connection timed out."
-        except smtplib.SMTPAuthenticationError:
+        except smtplib.SMTPAuthenticationError as exc:
+            logger.error("test_smtp_auth_failed", server=cfg.smtp_server, error=str(exc))
             return False, "SMTP auth failed. Check username and password."
         except Exception as exc:
+            logger.error("test_smtp_error", server=cfg.smtp_server, port=cfg.smtp_port,
+                         encryption=cfg.smtp_encryption, error=str(exc), error_type=type(exc).__name__)
             return False, f"SMTP error: {exc}"
 
     async def test_connection(self, cfg: Optional[AssistantEmailConfig] = None) -> tuple[bool, str]:
